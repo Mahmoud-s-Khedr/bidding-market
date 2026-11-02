@@ -1,12 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import {
+  attachmentSchema,
+  categoryCreateSchema,
+  categoryTreeNodeSchema,
+  categoryUpdateSchema,
   listingCreateSchema,
+  listingDetailSchema,
   listingQuerySchema,
+  listingUpdateSchema,
   loginSchema,
   messageCreateSchema,
   passwordSchema,
   presignUploadSchema,
   registerSchema,
+  uploadPresignResponseSchema,
 } from './index.js';
 describe('shared schemas', () => {
   it('enforces password strength', () => {
@@ -25,6 +32,130 @@ describe('shared schemas', () => {
         priceMaxCents: 10,
       }).success,
     ).toBe(false);
+  });
+  it('validates FIXED price rules', () => {
+    const base = {
+      kind: 'REQUEST',
+      title: 'A valid title',
+      description: 'A sufficiently detailed listing description',
+      categoryId: 'c',
+      priceType: 'FIXED',
+    };
+    expect(listingCreateSchema.safeParse(base).success).toBe(false);
+    expect(listingCreateSchema.safeParse({ ...base, priceMinCents: 1000 }).success).toBe(true);
+    expect(
+      listingCreateSchema.safeParse({ ...base, priceMinCents: 1000, priceMaxCents: 2000 }).success,
+    ).toBe(false);
+  });
+  it('validates NEGOTIABLE price rules', () => {
+    const base = {
+      kind: 'OFFER',
+      title: 'A valid title',
+      description: 'A sufficiently detailed listing description',
+      categoryId: 'c',
+      priceType: 'NEGOTIABLE',
+    };
+    expect(listingCreateSchema.safeParse(base).success).toBe(true);
+    expect(listingCreateSchema.safeParse({ ...base, priceMinCents: 100 }).success).toBe(false);
+    expect(listingCreateSchema.safeParse({ ...base, priceMaxCents: 100 }).success).toBe(false);
+  });
+  it('validates listingUpdateSchema', () => {
+    expect(listingUpdateSchema.safeParse({ title: 'New title' }).success).toBe(true);
+    expect(listingUpdateSchema.safeParse({ priceMinCents: 20, priceMaxCents: 10 }).success).toBe(
+      false,
+    );
+    expect(listingUpdateSchema.safeParse({ priceMinCents: 10, priceMaxCents: 20 }).success).toBe(
+      true,
+    );
+  });
+  it('validates category schemas', () => {
+    expect(categoryCreateSchema.safeParse({ name: 'Tech', slug: 'tech' }).success).toBe(true);
+    expect(categoryCreateSchema.safeParse({ name: '', slug: 'tech' }).success).toBe(false);
+    expect(categoryCreateSchema.safeParse({ name: 'Tech', slug: 'Tech Invalid' }).success).toBe(
+      false,
+    );
+    expect(categoryUpdateSchema.safeParse({ name: 'New Tech' }).success).toBe(true);
+    const tree = {
+      id: 'c1',
+      name: 'Tech',
+      slug: 'tech',
+      parentId: null,
+      description: 'Tech desc',
+      listingCount: 3,
+      children: [
+        {
+          id: 'c2',
+          name: 'Web Dev',
+          slug: 'web-dev',
+          parentId: 'c1',
+          description: null,
+          listingCount: 2,
+          children: [],
+        },
+      ],
+    };
+    expect(categoryTreeNodeSchema.safeParse(tree).success).toBe(true);
+  });
+  it('validates attachment and presign response schemas', () => {
+    const attachment = {
+      id: 'a1',
+      key: 'k1',
+      fileName: 'doc.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: 100,
+    };
+    expect(attachmentSchema.safeParse(attachment).success).toBe(true);
+    expect(attachmentSchema.safeParse({ ...attachment, url: 'https://example.com' }).success).toBe(
+      true,
+    );
+    expect(
+      uploadPresignResponseSchema.safeParse({
+        uploadId: 'u1',
+        url: 'https://put-url',
+        headers: { 'content-type': 'application/pdf' },
+        key: 'k1',
+        expiresAt: new Date().toISOString(),
+      }).success,
+    ).toBe(true);
+  });
+  it('validates listingDetailSchema with category and myBid', () => {
+    const detail = {
+      id: 'l1',
+      owner: {
+        id: 'u1',
+        displayName: 'Alice',
+        avatarUrl: null,
+        bio: null,
+        location: null,
+        isBusiness: false,
+        companyName: null,
+        ratingAvg: 0,
+        ratingCount: 0,
+        completedCount: 0,
+        createdAt: new Date(),
+      },
+      categoryId: 'c1',
+      kind: 'REQUEST',
+      status: 'OPEN',
+      title: 'Valid title',
+      priceType: 'FIXED',
+      priceMinCents: 100,
+      priceMaxCents: null,
+      currency: 'USD',
+      location: null,
+      expiresAt: null,
+      bidCount: 0,
+      createdAt: new Date(),
+      description: 'A valid description that is sufficiently detailed',
+      deliveryDays: 5,
+      tags: ['tag1'],
+      images: [],
+      attachments: [],
+      updatedAt: new Date(),
+      category: { id: 'c1', name: 'Tech', slug: 'tech', parentId: null },
+      myBid: null,
+    };
+    expect(listingDetailSchema.safeParse(detail).success).toBe(true);
   });
 });
 describe('schema refinements', () => {
