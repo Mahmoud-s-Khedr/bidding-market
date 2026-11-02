@@ -30,6 +30,17 @@ jobs:
       - run: pnpm format:check
       - run: pnpm lint
 
+  actionlint:
+    name: Lint workflows
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: actionlint
+        run: |
+          bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12
+          ./actionlint -color
+
   typecheck:
     name: Typecheck
     runs-on: ubuntu-latest
@@ -94,7 +105,7 @@ jobs:
       - name: Start S3 (SeaweedFS)
         run: |
           docker run -d --name s3 -p 8333:8333 chrislusf/seaweedfs:4.52 server -s3 -dir=/data
-          for i in $(seq 1 45); do curl -s -o /dev/null http://localhost:8333/ && break; sleep 2; done
+          for _ in $(seq 1 45); do curl -s -o /dev/null http://localhost:8333/ && break; sleep 2; done
       - uses: ./.github/actions/setup
       - name: Create shadow database
         run: PGPASSWORD=market psql -h localhost -U market -d market -c 'CREATE DATABASE market_shadow;'
@@ -122,7 +133,6 @@ jobs:
     name: E2E (Playwright, full stack)
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    if: ${{ hashFiles('apps/web/playwright.config.ts') != '' }}
     services:
       postgres:
         image: postgres:17-alpine
@@ -155,18 +165,29 @@ jobs:
       NEXT_PUBLIC_WS_URL: http://localhost:4000
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Detect Playwright suite
+        id: detect
+        run: |
+          if [ -f apps/web/playwright.config.ts ]; then echo "enabled=true" >> "$GITHUB_OUTPUT"; else echo "enabled=false" >> "$GITHUB_OUTPUT"; echo "No Playwright config yet - skipping e2e"; fi
       - name: Start S3 (SeaweedFS)
+        if: steps.detect.outputs.enabled == 'true'
         run: |
           docker run -d --name s3 -p 8333:8333 chrislusf/seaweedfs:4.52 server -s3 -dir=/data
-          for i in $(seq 1 45); do curl -s -o /dev/null http://localhost:8333/ && break; sleep 2; done
+          for _ in $(seq 1 45); do curl -s -o /dev/null http://localhost:8333/ && break; sleep 2; done
       - uses: ./.github/actions/setup
+        if: steps.detect.outputs.enabled == 'true'
       - run: pnpm --filter api run db:migrate:deploy
+        if: steps.detect.outputs.enabled == 'true'
       - run: pnpm --filter api run db:seed
+        if: steps.detect.outputs.enabled == 'true'
       - run: pnpm build
+        if: steps.detect.outputs.enabled == 'true'
       - run: pnpm --filter web exec playwright install --with-deps chromium
+        if: steps.detect.outputs.enabled == 'true'
       - run: pnpm test:e2e
+        if: steps.detect.outputs.enabled == 'true'
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: failure()
+        if: failure() && steps.detect.outputs.enabled == 'true'
         with:
           name: playwright-report
           path: apps/web/playwright-report
@@ -217,7 +238,19 @@ jobs:
   ci-ok:
     name: CI OK
     if: always()
-    needs: [lint, typecheck, unit, integration, build, e2e, security, dependency-review, pr-title]
+    needs:
+      [
+        lint,
+        actionlint,
+        typecheck,
+        unit,
+        integration,
+        build,
+        e2e,
+        security,
+        dependency-review,
+        pr-title,
+      ]
     runs-on: ubuntu-latest
     steps:
       - name: Verify all jobs succeeded (skipped is allowed)
