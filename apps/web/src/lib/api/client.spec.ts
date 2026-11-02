@@ -550,4 +550,16 @@ describe('API Client', () => {
     await api.delete('/item/1');
     expect(fetchMock.mock.calls[2]?.[1]?.method).toBe('DELETE');
   });
+
+  it('maps TypeError: Failed to fetch and network errors to friendly ApiError', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
+
+    await expect(api.get('/items')).rejects.toThrow(ApiError);
+    await expect(api.get('/items')).rejects.toMatchObject({
+      status: 0,
+      code: 'INTERNAL',
+      message:
+        'Network error: unable to reach the server. Please check your connection and try again.',
+    });
+  });
 });

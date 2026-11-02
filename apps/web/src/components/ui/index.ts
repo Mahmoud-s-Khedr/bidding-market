@@ -16,3 +16,4 @@ export * from './spinner';
 export * from './empty-state';
 export * from './error-state';
 export * from './pagination';
+export * from './file-dropzone';

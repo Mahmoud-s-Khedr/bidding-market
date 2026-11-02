@@ -1,17 +1,272 @@
-import type { Metadata } from 'next';
+'use client';
+
+import * as React from 'react';
 import Link from 'next/link';
-import { PackageSearch, PlusCircle } from 'lucide-react';
-import { EmptyState } from '@/components/ui/empty-state';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import {
+  Filter,
+  PackageSearch,
+  PlusCircle,
+  RotateCcw,
+  Search,
+  SlidersHorizontal,
+  X,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Skeleton } from '@/components/ui/skeleton';
+import { EmptyState } from '@/components/ui/empty-state';
+import { ErrorState } from '@/components/ui/error-state';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { ListingCard } from '@/components/shared/listing-card';
+import { CategorySelect } from '@/components/shared/category-select';
+import { useListings } from '@/lib/api/listings';
+import type { ListingFilters, ListingKind, ListingSort } from '@/lib/api/types';
 
-export const metadata: Metadata = {
-  title: 'Browse Listings — BidMarket',
-  description: 'Explore active product and service requests and offers.',
-};
+interface ListingsViewProps {
+  initialCategorySlug?: string;
+}
 
-export default function ListingsPage() {
+export function ListingsContent({ initialCategorySlug }: ListingsViewProps) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  // Mobile drawer state
+  const [mobileFilterOpen, setMobileFilterOpen] = React.useState(false);
+
+  // Read current filters from URL search params
+  const qParam = searchParams.get('q') || '';
+  const kindParam = (searchParams.get('kind') as ListingKind | 'all') || 'all';
+  const categorySlugParam = initialCategorySlug || searchParams.get('categorySlug') || '';
+  const minPriceParam = searchParams.get('minPrice') || '';
+  const maxPriceParam = searchParams.get('maxPrice') || '';
+  const locationParam = searchParams.get('location') || '';
+  const sortParam = (searchParams.get('sort') as ListingSort) || 'newest';
+
+  // Local draft search query
+  const [searchInput, setSearchInput] = React.useState(qParam);
+
+  React.useEffect(() => {
+    setSearchInput(qParam);
+  }, [qParam]);
+
+  // Construct API filter object
+  const activeFilters = React.useMemo<ListingFilters>(() => {
+    const filters: ListingFilters = {
+      sort: sortParam,
+      status: 'OPEN',
+    };
+    if (qParam.trim()) filters.q = qParam.trim();
+    if (kindParam && kindParam !== 'all') filters.kind = kindParam;
+    if (categorySlugParam) filters.categorySlug = categorySlugParam;
+    if (minPriceParam && !Number.isNaN(Number(minPriceParam))) {
+      filters.minPrice = Math.round(Number(minPriceParam) * 100);
+    }
+    if (maxPriceParam && !Number.isNaN(Number(maxPriceParam))) {
+      filters.maxPrice = Math.round(Number(maxPriceParam) * 100);
+    }
+    if (locationParam.trim()) filters.location = locationParam.trim();
+    return filters;
+  }, [
+    qParam,
+    kindParam,
+    categorySlugParam,
+    minPriceParam,
+    maxPriceParam,
+    locationParam,
+    sortParam,
+  ]);
+
+  const {
+    data,
+    isLoading,
+    isError,
+    error,
+    refetch,
+    hasNextPage,
+    isFetchingNextPage,
+    fetchNextPage,
+  } = useListings(activeFilters);
+
+  const listings = React.useMemo(() => data?.pages.flatMap((page) => page.items) ?? [], [data]);
+
+  // Count active non-default filters
+  const activeFilterCount = React.useMemo(() => {
+    let count = 0;
+    if (qParam) count++;
+    if (kindParam !== 'all') count++;
+    if (categorySlugParam && !initialCategorySlug) count++;
+    if (minPriceParam) count++;
+    if (maxPriceParam) count++;
+    if (locationParam) count++;
+    if (sortParam !== 'newest') count++;
+    return count;
+  }, [
+    qParam,
+    kindParam,
+    categorySlugParam,
+    initialCategorySlug,
+    minPriceParam,
+    maxPriceParam,
+    locationParam,
+    sortParam,
+  ]);
+
+  // URL updating helper
+  const updateUrl = (updates: Record<string, string | null>) => {
+    const params = new URLSearchParams(searchParams.toString());
+    for (const [key, value] of Object.entries(updates)) {
+      if (value === null || value === '' || value === undefined) {
+        params.delete(key);
+      } else {
+        params.set(key, value);
+      }
+    }
+    const qs = params.toString();
+    router.push(qs ? `${pathname}?${qs}` : pathname);
+  };
+
+  const handleClearFilters = () => {
+    setSearchInput('');
+    const params = new URLSearchParams();
+    if (initialCategorySlug) {
+      params.set('categorySlug', initialCategorySlug);
+    }
+    const qs = params.toString();
+    router.push(qs ? `${pathname}?${qs}` : pathname);
+  };
+
+  // IntersectionObserver for infinite scrolling
+  const sentinelRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (!sentinelRef.current || !hasNextPage || isFetchingNextPage) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting && hasNextPage && !isFetchingNextPage) {
+          void fetchNextPage();
+        }
+      },
+      { threshold: 0.1 },
+    );
+
+    observer.observe(sentinelRef.current);
+    return () => observer.disconnect();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+  // Filter UI component (rendered in sidebar and mobile dialog)
+  const renderFilterControls = () => (
+    <div className="space-y-6">
+      {/* Kind filter */}
+      <div className="space-y-2">
+        <span className="text-xs font-semibold text-foreground uppercase tracking-wider block">
+          Kind
+        </span>
+        <Tabs
+          value={kindParam}
+          onValueChange={(val) => updateUrl({ kind: val === 'all' ? null : val })}
+          className="w-full"
+        >
+          <TabsList className="grid w-full grid-cols-3">
+            <TabsTrigger value="all">All</TabsTrigger>
+            <TabsTrigger value="REQUEST">Requests</TabsTrigger>
+            <TabsTrigger value="OFFER">Offers</TabsTrigger>
+          </TabsList>
+        </Tabs>
+      </div>
+
+      {/* Category tree filter (unless fixed by initialCategorySlug) */}
+      {!initialCategorySlug && (
+        <div className="space-y-2">
+          <span className="text-xs font-semibold text-foreground uppercase tracking-wider block">
+            Category
+          </span>
+          <CategorySelect
+            value={categorySlugParam}
+            valueType="slug"
+            placeholder="All Categories"
+            onValueChange={(val) => updateUrl({ categorySlug: val || null })}
+          />
+          {categorySlugParam && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => updateUrl({ categorySlug: null })}
+              className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-3 w-3 mr-1" />
+              Clear category
+            </Button>
+          )}
+        </div>
+      )}
+
+      {/* Price Range */}
+      <div className="space-y-2">
+        <span className="text-xs font-semibold text-foreground uppercase tracking-wider block">
+          Budget / Price ($)
+        </span>
+        <div className="grid grid-cols-2 gap-2">
+          <Input
+            type="number"
+            placeholder="Min"
+            value={minPriceParam}
+            onChange={(e) => updateUrl({ minPrice: e.target.value || null })}
+            className="h-9 text-sm"
+          />
+          <Input
+            type="number"
+            placeholder="Max"
+            value={maxPriceParam}
+            onChange={(e) => updateUrl({ maxPrice: e.target.value || null })}
+            className="h-9 text-sm"
+          />
+        </div>
+      </div>
+
+      {/* Location */}
+      <div className="space-y-2">
+        <span className="text-xs font-semibold text-foreground uppercase tracking-wider block">
+          Location
+        </span>
+        <Input
+          type="text"
+          placeholder="City, region, or remote"
+          value={locationParam}
+          onChange={(e) => updateUrl({ location: e.target.value || null })}
+          className="h-9 text-sm"
+        />
+      </div>
+
+      {activeFilterCount > 0 && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={handleClearFilters}
+          className="w-full text-xs"
+        >
+          <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
+          Reset all filters
+        </Button>
+      )}
+    </div>
+  );
+
   return (
     <div className="container mx-auto px-4 py-8 sm:px-6">
+      {/* Top Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-8">
         <div>
           <h1 className="text-3xl font-bold tracking-tight text-foreground">
@@ -30,16 +285,184 @@ export default function ListingsPage() {
         </Button>
       </div>
 
-      <EmptyState
-        icon={PackageSearch}
-        title="No listings yet"
-        description="The marketplace search and filter views will be available in WEB-02. Be the first to create an offer or request!"
-        action={
-          <Button variant="outline" asChild>
-            <Link href="/listings/new">Create Listing</Link>
+      {/* Search and Sort Toolbar */}
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 mb-6 pb-6 border-b border-border">
+        {/* Search Input */}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            updateUrl({ q: searchInput.trim() || null });
+          }}
+          className="relative flex-1 max-w-md"
+        >
+          <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
+          <Input
+            type="search"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="Search keywords, titles, skills..."
+            className="pl-9 h-10"
+            aria-label="Search listings"
+          />
+        </form>
+
+        <div className="flex items-center gap-3">
+          {/* Mobile Filter Trigger */}
+          <Button
+            type="button"
+            variant="outline"
+            className="md:hidden flex items-center gap-2"
+            onClick={() => setMobileFilterOpen(true)}
+          >
+            <SlidersHorizontal className="h-4 w-4" />
+            <span>Filters</span>
+            {activeFilterCount > 0 && (
+              <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground">
+                {activeFilterCount}
+              </span>
+            )}
           </Button>
-        }
-      />
+
+          {/* Sort Select */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground hidden sm:inline whitespace-nowrap">
+              Sort by:
+            </span>
+            <Select value={sortParam} onValueChange={(val) => updateUrl({ sort: val })}>
+              <SelectTrigger className="w-[160px] h-10 text-sm">
+                <SelectValue placeholder="Sort by" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="newest">Newest First</SelectItem>
+                <SelectItem value="price_asc">Price: Low to High</SelectItem>
+                <SelectItem value="price_desc">Price: High to Low</SelectItem>
+                <SelectItem value="ending_soon">Ending Soon</SelectItem>
+                <SelectItem value="most_bids">Most Bids</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      </div>
+
+      {/* Layout Grid: Sidebar Filters + Main Results */}
+      <div className="flex gap-8 items-start">
+        {/* Desktop Sidebar */}
+        <aside className="w-64 shrink-0 hidden md:block rounded-lg border border-border bg-card p-5">
+          <div className="flex items-center gap-2 pb-4 mb-4 border-b border-border">
+            <Filter className="h-4 w-4 text-primary" />
+            <span className="text-sm font-semibold text-foreground">Filters</span>
+            {activeFilterCount > 0 && (
+              <span className="ml-auto text-xs text-muted-foreground">
+                ({activeFilterCount} active)
+              </span>
+            )}
+          </div>
+          {renderFilterControls()}
+        </aside>
+
+        {/* Mobile Filter Drawer / Dialog */}
+        <Dialog open={mobileFilterOpen} onOpenChange={setMobileFilterOpen}>
+          <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Filter className="h-4 w-4 text-primary" />
+                <span>Filter Listings</span>
+              </DialogTitle>
+            </DialogHeader>
+            <div className="pt-2">{renderFilterControls()}</div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Results Area */}
+        <div className="flex-1 min-w-0">
+          {isLoading ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+              {Array.from({ length: 6 }).map((_, idx) => (
+                <div key={idx} className="space-y-3">
+                  <Skeleton className="aspect-video w-full rounded-lg" />
+                  <Skeleton className="h-5 w-3/4" />
+                  <Skeleton className="h-4 w-1/2" />
+                </div>
+              ))}
+            </div>
+          ) : isError ? (
+            <ErrorState
+              title="Unable to load listings"
+              message={
+                error instanceof Error
+                  ? error.message
+                  : 'An error occurred while fetching listings from the server.'
+              }
+              onRetry={() => void refetch()}
+            />
+          ) : listings.length === 0 ? (
+            <EmptyState
+              icon={PackageSearch}
+              title="No listings found"
+              description="No requests or offers matched your filter criteria. Try adjusting or clearing your filters."
+              action={
+                activeFilterCount > 0 ? (
+                  <Button variant="outline" onClick={handleClearFilters}>
+                    Clear all filters
+                  </Button>
+                ) : (
+                  <Button asChild>
+                    <Link href="/listings/new">Post a Listing</Link>
+                  </Button>
+                )
+              }
+            />
+          ) : (
+            <div className="space-y-8">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                {listings.map((listing) => (
+                  <ListingCard key={listing.id} listing={listing} />
+                ))}
+              </div>
+
+              {/* Infinite scroll loader & sentinel */}
+              <div className="flex flex-col items-center justify-center pt-4">
+                {hasNextPage ? (
+                  <div className="space-y-4 text-center">
+                    <Button
+                      variant="outline"
+                      onClick={() => void fetchNextPage()}
+                      disabled={isFetchingNextPage}
+                      isLoading={isFetchingNextPage}
+                    >
+                      {isFetchingNextPage ? 'Loading more...' : 'Load more'}
+                    </Button>
+                    <div ref={sentinelRef} className="h-1 w-full" />
+                  </div>
+                ) : listings.length > 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    You have reached the end of the results.
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
+  );
+}
+
+export default function ListingsPage() {
+  return (
+    <React.Suspense
+      fallback={
+        <div className="container mx-auto px-4 py-8 sm:px-6 space-y-6">
+          <Skeleton className="h-10 w-48" />
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+            <Skeleton className="aspect-video w-full rounded-lg" />
+            <Skeleton className="aspect-video w-full rounded-lg" />
+            <Skeleton className="aspect-video w-full rounded-lg" />
+          </div>
+        </div>
+      }
+    >
+      <ListingsContent />
+    </React.Suspense>
   );
 }

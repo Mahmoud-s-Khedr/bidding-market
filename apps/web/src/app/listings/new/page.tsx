@@ -1,14 +1,46 @@
+'use client';
+
 import * as React from 'react';
-import type { Metadata } from 'next';
-import { PlusCircle } from 'lucide-react';
-import { EmptyState } from '@/components/ui/empty-state';
+import { useRouter } from 'next/navigation';
 import { RequireAuth } from '@/components/auth/require-auth';
 import { Spinner } from '@/components/ui/spinner';
+import { ListingForm } from '@/components/listings/listing-form';
+import { useCreateListing } from '@/lib/api/listings';
+import { useToast } from '@/components/ui/toast';
+import type { CreateListingRequest } from '@/lib/api/types';
 
-export const metadata: Metadata = {
-  title: 'Post a Listing — BidMarket',
-  description: 'Create a new request or offer on BidMarket.',
-};
+function NewListingContent() {
+  const router = useRouter();
+  const { toast } = useToast();
+  const createMutation = useCreateListing();
+
+  const handleSubmit = async (data: CreateListingRequest) => {
+    const created = await createMutation.mutateAsync(data);
+    toast({
+      title: data.status === 'DRAFT' ? 'Draft saved' : 'Listing published',
+      description:
+        data.status === 'DRAFT'
+          ? 'Your listing has been saved as a draft.'
+          : 'Your listing is now live on the marketplace!',
+    });
+    router.push(`/listings/${created.id}`);
+  };
+
+  return (
+    <div className="container mx-auto px-4 py-8 sm:px-6 max-w-3xl">
+      <div className="mb-8">
+        <h1 className="text-3xl font-bold tracking-tight text-foreground">Create a New Listing</h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          Publish a service/product request or an offer with delivery and pricing terms.
+        </p>
+      </div>
+
+      <div className="rounded-xl border border-border bg-card p-6 sm:p-8 shadow-xs">
+        <ListingForm onSubmit={handleSubmit} isLoading={createMutation.isPending} />
+      </div>
+    </div>
+  );
+}
 
 export default function NewListingPage() {
   return (
@@ -20,22 +52,7 @@ export default function NewListingPage() {
       }
     >
       <RequireAuth>
-        <div className="container mx-auto px-4 py-8 sm:px-6 max-w-4xl">
-          <div className="mb-8">
-            <h1 className="text-3xl font-bold tracking-tight text-foreground">
-              Create a New Listing
-            </h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              Publish a service/product request or an offer with delivery and pricing terms.
-            </p>
-          </div>
-
-          <EmptyState
-            icon={PlusCircle}
-            title="Listing Creation Form"
-            description="The complete listing creation form with category tree selection and media uploads will be provided in WEB-02."
-          />
-        </div>
+        <NewListingContent />
       </RequireAuth>
     </React.Suspense>
   );
