@@ -459,7 +459,13 @@ export class ListingsService {
           include: { upload: true },
         },
         _count: {
-          select: { bids: true },
+          select: {
+            bids: {
+              where: {
+                status: { in: ['PENDING', 'SHORTLISTED', 'COUNTERED', 'ACCEPTED'] },
+              },
+            },
+          },
         },
       },
     });
@@ -479,7 +485,11 @@ export class ListingsService {
     let myBid = null;
     if (user) {
       const bid = await this.prisma.bid.findFirst({
-        where: { listingId: id, bidderId: user.id },
+        where: {
+          listingId: id,
+          bidderId: user.id,
+          status: { in: ['PENDING', 'SHORTLISTED', 'COUNTERED'] },
+        },
         include: {
           bidder: {
             select: {
@@ -743,7 +753,8 @@ export class ListingsService {
       JOIN "User" u ON u.id = l."ownerId"
       JOIN "Category" c ON c.id = l."categoryId"
       LEFT JOIN LATERAL (
-        SELECT COUNT(*)::int AS "bidCount" FROM "Bid" b WHERE b."listingId" = l.id
+        SELECT COUNT(*)::int AS "bidCount" FROM "Bid" b
+        WHERE b."listingId" = l.id AND b."status" IN ('PENDING', 'SHORTLISTED', 'COUNTERED', 'ACCEPTED')
       ) bc ON true
       LEFT JOIN LATERAL (
         SELECT up.key AS "firstImageKey"
