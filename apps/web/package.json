@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "next build && prettier --write next-env.d.ts",
+    "build": "node ./scripts/run-next.mjs build && prettier --write next-env.d.ts",
     "dev": "node ./scripts/run-next.mjs dev",
     "start": "node ./scripts/run-next.mjs start",
     "lint": "eslint .",

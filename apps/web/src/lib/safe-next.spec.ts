@@ -23,6 +23,30 @@ describe('safeNext redirect helper', () => {
     expect(safeNext('///evil.com')).toBe('/dashboard');
   });
 
+  it('rejects normalized protocol-relative open redirect bypasses', () => {
+    // Normalization turning path into //evil.example
+    expect(safeNext('/foo/..//evil.example')).toBe('/dashboard');
+    expect(safeNext('/..//evil.example')).toBe('/dashboard');
+    expect(safeNext('/./..//evil.example')).toBe('/dashboard');
+  });
+
+  it('handles dot-slash space variants and encoded slashes without producing external redirects', () => {
+    // /./ /evil style variants normalize to relative internal path
+    const spaceRes = safeNext('/./ /evil');
+    expect(spaceRes).toBe('/%20/evil');
+    expect(spaceRes.startsWith('/')).toBe(true);
+    expect(spaceRes.startsWith('//')).toBe(false);
+
+    expect(safeNext('/./evil')).toBe('/evil');
+
+    // Encoded slashes must not produce an external redirect
+    const encodedRes = safeNext('/%2F%2Fevil.example');
+    expect(encodedRes.startsWith('/')).toBe(true);
+    expect(encodedRes.startsWith('//')).toBe(false);
+    expect(encodedRes.startsWith('/\\')).toBe(false);
+    expect(encodedRes).toBe('/%2F%2Fevil.example');
+  });
+
   it('rejects absolute external URLs', () => {
     expect(safeNext('https://evil.com')).toBe('/dashboard');
     expect(safeNext('http://evil.com/login')).toBe('/dashboard');

@@ -388,6 +388,69 @@ describe('AuthProvider & useAuth', () => {
     expect(getAccessToken()).toBeNull();
   });
 
+  it('keeps user logged in when pending silent refresh resolves with 401 after login completes', async () => {
+    const user = userEvent.setup();
+    let resolveInitialRefresh: (val: unknown) => void;
+    const initialRefreshPromise = new Promise((resolve) => {
+      resolveInitialRefresh = resolve;
+    });
+
+    const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      if (url.includes('/auth/refresh')) {
+        return initialRefreshPromise;
+      }
+      if (url.includes('/auth/login')) {
+        const body = JSON.parse(init?.body as string) as { email: string };
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () =>
+            Promise.resolve({
+              accessToken: 'fresh-login-token-123',
+              user: { ...mockUser, email: body.email },
+            }),
+        });
+      }
+      return Promise.reject(new Error('not found'));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <AuthProvider>
+        <TestConsumer />
+      </AuthProvider>,
+    );
+
+    // Initial silent refresh is in-flight.
+    // User logs in before refresh finishes:
+    await user.click(screen.getByText('Trigger Login'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('auth-state')).toHaveTextContent('authenticated');
+    });
+    expect(screen.getByTestId('user-email')).toHaveTextContent('login@market.test');
+    expect(screen.getByTestId('token')).toHaveTextContent('fresh-login-token-123');
+
+    // Initial refresh now resolves with 401 late:
+    resolveInitialRefresh!({
+      ok: false,
+      status: 401,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: () => Promise.resolve({ error: { code: 'UNAUTHORIZED' } }),
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('loading')).toHaveTextContent('ready');
+    });
+
+    // Freshly logged-in user and token MUST NOT be cleared by the late 401
+    expect(screen.getByTestId('auth-state')).toHaveTextContent('authenticated');
+    expect(screen.getByTestId('user-email')).toHaveTextContent('login@market.test');
+    expect(screen.getByTestId('token')).toHaveTextContent('fresh-login-token-123');
+    expect(getAccessToken()).toBe('fresh-login-token-123');
+  });
+
   it('detects admin role correctly', async () => {
     const fetchMock = vi.fn().mockImplementation((url: string) => {
       if (url.includes('/auth/refresh')) {

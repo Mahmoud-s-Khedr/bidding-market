@@ -459,6 +459,79 @@ describe('API Client', () => {
     expect(getAccessToken()).toBeNull();
   });
 
+  it('does not attempt refresh-on-401 for non-API external URLs', async () => {
+    let refreshFired = false;
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/auth/refresh')) {
+        refreshFired = true;
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({ accessToken: 'new-token' }),
+        });
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 401,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: () => Promise.resolve({ error: { message: 'External 401' } }),
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.get('https://external-service.example/data')).rejects.toThrow();
+    expect(refreshFired).toBe(false);
+  });
+
+  it('only clears refreshPromise in finally if it is still the same promise', async () => {
+    let resolveFirstRefresh: (val: unknown) => void;
+    const firstRefreshPromise = new Promise((resolve) => {
+      resolveFirstRefresh = resolve;
+    });
+
+    let refreshCalls = 0;
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/auth/refresh')) {
+        refreshCalls++;
+        if (refreshCalls === 1) {
+          return firstRefreshPromise;
+        }
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({ accessToken: 'token-2' }),
+        });
+      }
+      return Promise.reject(new Error('Unknown'));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    // Start first refresh
+    const p1 = executeRefresh();
+
+    // Session is cleared / bumped, resetting refreshPromise to null
+    clearAuthSession();
+
+    // Start second refresh before first finishes
+    const p2 = executeRefresh();
+    expect(p2).not.toBe(p1);
+
+    // Now first refresh finally completes
+    resolveFirstRefresh!({
+      ok: false,
+      status: 401,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: () => Promise.resolve({ error: { code: 'UNAUTHORIZED' } }),
+    });
+    await p1;
+
+    // The second refresh promise should still be preserved and resolved
+    const res2 = await p2;
+    expect(res2?.accessToken).toBe('token-2');
+  });
+
   it('supports put, patch, delete helpers', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

@@ -49,7 +49,18 @@ export function safeNext(raw: string | null | undefined, fallback = '/dashboard'
       return fallback;
     }
 
-    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+    const normalized = `${parsed.pathname}${parsed.search}${parsed.hash}`;
+
+    // Re-validate the normalized result: it must start with exactly one '/' and not '//' or '/\'
+    if (
+      !normalized.startsWith('/') ||
+      normalized.startsWith('//') ||
+      normalized.startsWith('/\\')
+    ) {
+      return fallback;
+    }
+
+    return normalized;
   } catch {
     return fallback;
   }

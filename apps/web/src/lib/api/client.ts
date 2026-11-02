@@ -35,12 +35,19 @@ export function getAuthGeneration(): number {
 }
 
 /**
+ * Increments auth generation counter to invalidate any in-flight refresh requests.
+ */
+export function bumpAuthGeneration(): number {
+  refreshPromise = null;
+  return ++authGeneration;
+}
+
+/**
  * Resets local auth state and cancels any pending refresh by incrementing the generation counter.
  */
 export function clearAuthSession(): void {
-  authGeneration++;
+  bumpAuthGeneration();
   setAccessToken(null);
-  refreshPromise = null;
 }
 
 export function subscribeAccessToken(listener: (token: string | null) => void): () => void {
@@ -160,6 +167,7 @@ export async function request<T>(endpoint: string, options: RequestOptions = {})
   if (
     response.status === 401 &&
     retryOn401 &&
+    isApi &&
     !isAuthRefresh &&
     !isAuthLogin &&
     !isAuthRegister &&
@@ -229,7 +237,8 @@ export async function executeRefresh(): Promise<AuthResponse | null> {
 
   const currentGen = authGeneration;
 
-  refreshPromise = (async () => {
+  let p: Promise<AuthResponse | null> | null = null;
+  p = (async () => {
     try {
       const res = await fetch(`${getApiBaseUrl()}/auth/refresh`, {
         method: 'POST',
@@ -259,10 +268,13 @@ export async function executeRefresh(): Promise<AuthResponse | null> {
       }
       return null;
     } finally {
-      refreshPromise = null;
+      if (refreshPromise === p) {
+        refreshPromise = null;
+      }
     }
   })();
 
+  refreshPromise = p;
   return refreshPromise;
 }
 

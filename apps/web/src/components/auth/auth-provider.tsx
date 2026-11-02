@@ -3,9 +3,11 @@
 import * as React from 'react';
 import {
   api,
+  bumpAuthGeneration,
   clearAuthSession,
   executeRefresh,
   getAccessToken,
+  getAuthGeneration,
   setAccessToken,
   subscribeAccessToken,
 } from '@/lib/api/client';
@@ -42,15 +44,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const refresh = React.useCallback(async () => {
+    const gen = getAuthGeneration();
     try {
       const res = await executeRefresh();
+      // Ignore stale refresh callback if auth generation changed (e.g. login/register/logout in flight)
+      if (gen !== getAuthGeneration()) {
+        return;
+      }
       if (res && res.accessToken) {
         setUser(res.user);
       } else {
         setUser(null);
       }
     } catch {
-      setUser(null);
+      if (gen === getAuthGeneration()) {
+        setUser(null);
+      }
     }
   }, []);
 
@@ -80,6 +89,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       skipAuth: true,
       retryOn401: false,
     });
+    bumpAuthGeneration();
     setAccessToken(res.accessToken);
     setUser(res.user);
   }, []);
@@ -89,6 +99,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       skipAuth: true,
       retryOn401: false,
     });
+    bumpAuthGeneration();
     setAccessToken(res.accessToken);
     setUser(res.user);
   }, []);

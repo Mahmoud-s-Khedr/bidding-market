@@ -1,19 +1,12 @@
 import { spawn } from 'node:child_process';
 import path from 'node:path';
-import fs from 'node:fs';
 import { createRequire } from 'node:module';
+import { loadRootEnv } from '../src/lib/load-env.ts';
 
-const repoRoot = path.resolve(import.meta.dirname, '../../..');
 const webRoot = path.resolve(import.meta.dirname, '..');
-const envPath = path.resolve(repoRoot, '.env');
 
-if (!process.env.WEB_PORT && fs.existsSync(envPath) && typeof process.loadEnvFile === 'function') {
-  try {
-    process.loadEnvFile(envPath);
-  } catch {
-    // Ignore if unreadable
-  }
-}
+// Load repo-root .env variables if not already present in process.env (CI takes precedence)
+loadRootEnv();
 
 const action = process.argv[2] ?? 'dev';
 const port = process.env.WEB_PORT || '3000';
@@ -21,13 +14,18 @@ const port = process.env.WEB_PORT || '3000';
 const require = createRequire(path.resolve(webRoot, 'package.json'));
 const nextBin = require.resolve('next/dist/bin/next');
 
-const child = spawn(process.execPath, [nextBin, action, '-p', port], {
+const nextArgs = [nextBin, action];
+if (action === 'dev' || action === 'start') {
+  nextArgs.push('-p', port);
+}
+nextArgs.push(...process.argv.slice(3));
+
+const child = spawn(process.execPath, nextArgs, {
   cwd: webRoot,
   stdio: 'inherit',
   env: {
     ...process.env,
-    PORT: port,
-    WEB_PORT: port,
+    ...(action === 'dev' || action === 'start' ? { PORT: port, WEB_PORT: port } : {}),
   },
 });
 
