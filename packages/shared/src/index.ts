@@ -198,7 +198,7 @@ export const listingQuerySchema = paginationSchema
     maxPrice: z.coerce.number().int().nonnegative().optional(),
     currency: z.string().length(3).optional(),
     location: z.string().max(120).optional(),
-    status: ListingStatus.default('OPEN'),
+    status: ListingStatus.optional(),
     ownerId: z.string().optional(),
     sort: z
       .enum(['newest', 'price_asc', 'price_desc', 'ending_soon', 'most_bids', 'relevance'])
@@ -394,8 +394,6 @@ export const uploadPresignResponseSchema = z.object({
   headers: z.record(z.string(), z.string()).default({}),
   key: z.string(),
   expiresAt: z.string(),
-  upload: uploadSchema.optional(),
-  uploadUrl: z.string().optional(),
 });
 export type UploadPresignResponse = z.infer<typeof uploadPresignResponseSchema>;
 export const categorySummarySchema = z.object({
