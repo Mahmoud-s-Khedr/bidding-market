@@ -170,6 +170,14 @@ export const messageCreateSchema = z
   .refine((v) => v.type !== 'TEXT' || !!v.body, {
     message: 'Text messages require body',
     path: ['body'],
+  })
+  .refine((v) => v.type === 'TEXT' || (v.attachmentIds?.length ?? 0) > 0, {
+    message: 'Attachments are required',
+    path: ['attachmentIds'],
+  })
+  .refine((v) => v.type !== 'VOICE' || v.voiceDurationSec !== undefined, {
+    message: 'Voice messages require duration',
+    path: ['voiceDurationSec'],
   });
 export const uploadPresignSchema = z.object({
   purpose: UploadPurpose,
@@ -219,6 +227,13 @@ export const uploadLimits = {
     maxSizeBytes: 10_000_000,
   },
 } as const;
+export const presignUploadSchema = uploadPresignSchema.superRefine((value, ctx) => {
+  const limits = uploadLimits[value.purpose];
+  if (!(limits.mimeTypes as readonly string[]).includes(value.mimeType))
+    ctx.addIssue({ code: 'custom', message: 'MIME type is not allowed', path: ['mimeType'] });
+  if (value.sizeBytes > limits.maxSizeBytes)
+    ctx.addIssue({ code: 'custom', message: 'File is too large', path: ['sizeBytes'] });
+});
 export const bidUpdateSchema = bidCreateSchema.partial();
 export const bidCounterSchema = z.object({
   amountCents: z.number().int().positive(),
@@ -260,6 +275,40 @@ export const conversationCreateSchema = z.object({
 });
 export const readSchema = z.object({ lastMessageId: z.string() });
 export const agreementCancelSchema = z.object({ reason: z.string().min(1).max(2000) });
+export const bidRejectSchema = z.object({ reason: z.string().max(2000).optional() });
+export const acceptCounterSchema = z.object({});
+export const milestoneUpdateSchema = milestoneSchema.partial();
+export const disputeSchema = agreementCancelSchema;
+export const adminListingActionSchema = z.object({ reason: z.string().min(1).max(2000) });
+export const adminListingsQuerySchema = paginationSchema.extend({
+  q: z.string().optional(),
+  status: ListingStatus.optional(),
+});
+export const paginated = <T extends z.ZodType>(item: T) =>
+  z.object({ items: z.array(item), nextCursor: z.string().nullable() });
+export const publicUserSchema = z.object({
+  id: z.string(),
+  displayName: z.string(),
+  avatarUrl: z.string().nullable(),
+  bio: z.string().nullable(),
+  location: z.string().nullable(),
+  isBusiness: z.boolean(),
+  companyName: z.string().nullable(),
+  ratingAvg: z.number(),
+  ratingCount: z.number(),
+  completedCount: z.number(),
+  createdAt: z.coerce.date(),
+});
+export const privateUserSchema = publicUserSchema.extend({ email: z.email(), role: Role });
+export type PublicUser = z.infer<typeof publicUserSchema>;
+export type PrivateUser = z.infer<typeof privateUserSchema>;
+export type ListingSummary = Record<string, unknown>;
+export type ListingDetail = Record<string, unknown>;
+export type Bid = Record<string, unknown>;
+export type Agreement = Record<string, unknown>;
+export type Message = Record<string, unknown>;
+export type Conversation = Record<string, unknown>;
+export type Notification = Record<string, unknown>;
 export const wsPayloadSchemas = {
   typing: z.object({ conversationId: z.string(), isTyping: z.boolean() }),
   conversationJoin: z.object({ conversationId: z.string() }),

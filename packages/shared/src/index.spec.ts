@@ -5,6 +5,7 @@ import {
   loginSchema,
   messageCreateSchema,
   passwordSchema,
+  presignUploadSchema,
   registerSchema,
 } from './index.js';
 describe('shared schemas', () => {
@@ -64,4 +65,30 @@ describe('schema refinements', () => {
     expect(messageCreateSchema.safeParse({ type: 'TEXT' }).success).toBe(false);
     expect(messageCreateSchema.safeParse({ type: 'TEXT', body: 'yes' }).success).toBe(true);
   });
+});
+it('enforces upload purpose limits', () => {
+  expect(
+    presignUploadSchema.safeParse({
+      purpose: 'AVATAR',
+      fileName: 'a',
+      mimeType: 'application/pdf',
+      sizeBytes: 1,
+    }).success,
+  ).toBe(false);
+  expect(
+    presignUploadSchema.safeParse({
+      purpose: 'AVATAR',
+      fileName: 'a',
+      mimeType: 'image/png',
+      sizeBytes: 10_000_001,
+    }).success,
+  ).toBe(false);
+  expect(
+    presignUploadSchema.safeParse({
+      purpose: 'AVATAR',
+      fileName: 'a',
+      mimeType: 'image/png',
+      sizeBytes: 1,
+    }).success,
+  ).toBe(true);
 });
