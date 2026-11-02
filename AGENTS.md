@@ -37,6 +37,7 @@ Every package: `build`, `lint` (`eslint .`), `typecheck` (`tsc --noEmit`), `test
 
 - [ ] `pnpm install && pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build` all pass locally from the repo root.
 - [ ] API: `pnpm --filter api test:integration` passes against local docker Postgres/Redis/S3.
+- [ ] `pnpm audit --audit-level high` and `pnpm audit --prod --audit-level moderate` exit 0.
 - [ ] Docs updated if behaviour/contract changed.
 - [ ] Committed on your branch with conventional commit messages. Then **stop** — the manager pushes and opens the PR.
 
