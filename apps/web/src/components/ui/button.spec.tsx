@@ -86,4 +86,42 @@ describe('Button component', () => {
     expect(link).toHaveAttribute('href', '/test');
     expect(link).toHaveClass('bg-primary');
   });
+
+  it('handles asChild combined with isLoading without crashing Slot or throwing React.Children.only', () => {
+    expect(() =>
+      render(
+        <Button asChild isLoading>
+          <a href="/dashboard">Loading Link</a>
+        </Button>,
+      ),
+    ).not.toThrow();
+
+    const link = screen.getByRole('link', { name: /loading link/i });
+    expect(link).toBeInTheDocument();
+    expect(link).toHaveAttribute('aria-busy', 'true');
+    expect(link).toHaveAttribute('aria-disabled', 'true');
+    expect(link).toHaveAttribute('tabindex', '-1');
+    expect(link).toHaveClass('pointer-events-none');
+    // Spinner should not be rendered as a second child into Slot
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  it('handles asChild disabled behavior with tabIndex and click guard', async () => {
+    const handleClick = vi.fn();
+    const user = userEvent.setup();
+
+    render(
+      <Button asChild disabled onClick={handleClick}>
+        <a href="/somewhere">Disabled Link</a>
+      </Button>,
+    );
+
+    const link = screen.getByRole('link', { name: /disabled link/i });
+    expect(link).toHaveAttribute('aria-disabled', 'true');
+    expect(link).toHaveAttribute('tabindex', '-1');
+    expect(link).not.toHaveAttribute('disabled'); // <a> does not support disabled attribute
+
+    await user.click(link);
+    expect(handleClick).not.toHaveBeenCalled();
+  });
 });

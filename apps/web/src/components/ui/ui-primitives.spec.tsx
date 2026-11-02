@@ -361,6 +361,56 @@ describe('UI Primitives and Design System', () => {
     expect(screen.getByText('External Custom')).toBeInTheDocument();
   });
 
+  it('supports duration: 0 as no auto-dismiss and applies WCAG AA contrast styling', async () => {
+    function PersistentToastTest() {
+      const { toast: hookToast } = useToast();
+      return (
+        <div>
+          <button
+            onClick={() =>
+              hookToast({
+                title: 'Persistent Error',
+                variant: 'error',
+                duration: 0,
+              })
+            }
+          >
+            Show Persistent
+          </button>
+          <button
+            onClick={() =>
+              hookToast({
+                title: 'Info Notice',
+                variant: 'info',
+              })
+            }
+          >
+            Show Contrast Info
+          </button>
+        </div>
+      );
+    }
+
+    const user = userEvent.setup();
+    render(
+      <ToastProvider>
+        <PersistentToastTest />
+      </ToastProvider>,
+    );
+
+    await user.click(screen.getByText('Show Persistent'));
+    const errorTitle = screen.getByText('Persistent Error');
+    expect(errorTitle).toBeInTheDocument();
+    const errorRoot = errorTitle.closest('[data-state]');
+    expect(errorRoot).toHaveClass('text-red-950');
+
+    await user.click(screen.getByText('Show Contrast Info'));
+    const infoTitle = screen.getByText('Info Notice');
+    expect(infoTitle).toBeInTheDocument();
+    const infoRoot = infoTitle.closest('[data-state]');
+    expect(infoRoot).toHaveClass('text-blue-950');
+  });
+
   it('createQueryClient initializes sensible query defaults', () => {
     const client = createQueryClient();
     const defaultOptions = client.getDefaultOptions();

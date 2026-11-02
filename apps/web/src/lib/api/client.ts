@@ -15,7 +15,8 @@ export class ApiError extends Error {
 }
 
 let inMemoryAccessToken: string | null = null;
-let refreshPromise: Promise<string | null> | null = null;
+let refreshPromise: Promise<AuthResponse | null> | null = null;
+let authGeneration = 0;
 const authListeners = new Set<(token: string | null) => void>();
 
 export function getAccessToken(): string | null {
@@ -29,6 +30,19 @@ export function setAccessToken(token: string | null): void {
   }
 }
 
+export function getAuthGeneration(): number {
+  return authGeneration;
+}
+
+/**
+ * Resets local auth state and cancels any pending refresh by incrementing the generation counter.
+ */
+export function clearAuthSession(): void {
+  authGeneration++;
+  setAccessToken(null);
+  refreshPromise = null;
+}
+
 export function subscribeAccessToken(listener: (token: string | null) => void): () => void {
   authListeners.add(listener);
   return () => {
@@ -39,6 +53,38 @@ export function subscribeAccessToken(listener: (token: string | null) => void): 
 export function getApiBaseUrl(): string {
   const url = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
   return `${url.replace(/\/+$/, '')}/api/v1`;
+}
+
+/**
+ * Checks whether a given URL belongs to the configured API origin.
+ */
+export function isApiUrl(urlStr: string): boolean {
+  try {
+    const baseOrigin = new URL(getApiBaseUrl()).origin;
+    const targetOrigin = new URL(urlStr, baseOrigin).origin;
+    return targetOrigin === baseOrigin;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Checks whether an endpoint or URL matches an exact API path (e.g., '/auth/refresh' or '/api/v1/auth/refresh').
+ */
+export function isExactApiPath(urlOrEndpoint: string, expectedPath: string): boolean {
+  try {
+    let pathname: string;
+    if (urlOrEndpoint.startsWith('http://') || urlOrEndpoint.startsWith('https://')) {
+      pathname = new URL(urlOrEndpoint).pathname;
+    } else {
+      const withoutHash = urlOrEndpoint.split('#')[0] ?? '';
+      pathname = withoutHash.split('?')[0] ?? '';
+    }
+    const normalized = pathname.startsWith('/') ? pathname : `/${pathname}`;
+    return normalized === expectedPath || normalized === `/api/v1${expectedPath}`;
+  } catch {
+    return false;
+  }
 }
 
 export interface RequestOptions extends Omit<RequestInit, 'body'> {
@@ -58,9 +104,10 @@ export async function request<T>(endpoint: string, options: RequestOptions = {})
     ...rest
   } = options;
 
-  let url = endpoint.startsWith('http')
-    ? endpoint
-    : `${getApiBaseUrl()}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
+  let url =
+    endpoint.startsWith('http://') || endpoint.startsWith('https://')
+      ? endpoint
+      : `${getApiBaseUrl()}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
 
   if (params) {
     const searchParams = new URLSearchParams();
@@ -75,13 +122,17 @@ export async function request<T>(endpoint: string, options: RequestOptions = {})
     }
   }
 
+  const isApi = isApiUrl(url);
+  const sentToken = inMemoryAccessToken;
+
   const headers: Record<string, string> = {
     Accept: 'application/json',
     ...(customHeaders as Record<string, string>),
   };
 
-  if (!skipAuth && inMemoryAccessToken) {
-    headers['Authorization'] = `Bearer ${inMemoryAccessToken}`;
+  // Security: only attach Bearer token to endpoints targeting the configured API base URL origin
+  if (!skipAuth && sentToken && isApi) {
+    headers['Authorization'] = `Bearer ${sentToken}`;
   }
 
   let finalBody: BodyInit | null | undefined = undefined;
@@ -95,20 +146,38 @@ export async function request<T>(endpoint: string, options: RequestOptions = {})
   }
 
   const response = await fetch(url, {
-    credentials: 'include',
+    credentials: isApi ? 'include' : 'same-origin',
     headers,
     body: finalBody,
     ...rest,
   });
 
+  const isAuthRefresh = isExactApiPath(endpoint, '/auth/refresh');
+  const isAuthLogin = isExactApiPath(endpoint, '/auth/login');
+  const isAuthRegister = isExactApiPath(endpoint, '/auth/register');
+  const isAuthLogout = isExactApiPath(endpoint, '/auth/logout');
+
   if (
     response.status === 401 &&
     retryOn401 &&
-    !endpoint.includes('/auth/refresh') &&
-    !endpoint.includes('/auth/login')
+    !isAuthRefresh &&
+    !isAuthLogin &&
+    !isAuthRegister &&
+    !isAuthLogout
   ) {
-    const newToken = await executeRefresh();
-    if (newToken) {
+    // Late-401 race condition check:
+    // If another request already refreshed the access token while this request was in flight,
+    // inMemoryAccessToken will differ from sentToken. We retry directly with the new token
+    // without triggering a second refresh that would reuse a rotated cookie.
+    if (inMemoryAccessToken && inMemoryAccessToken !== sentToken) {
+      return request<T>(endpoint, {
+        ...options,
+        retryOn401: false,
+      });
+    }
+
+    const authRes = await executeRefresh();
+    if (authRes?.accessToken) {
       return request<T>(endpoint, {
         ...options,
         retryOn401: false,
@@ -153,10 +222,12 @@ export async function request<T>(endpoint: string, options: RequestOptions = {})
   return (await response.text()) as unknown as T;
 }
 
-export async function executeRefresh(): Promise<string | null> {
+export async function executeRefresh(): Promise<AuthResponse | null> {
   if (refreshPromise) {
     return refreshPromise;
   }
+
+  const currentGen = authGeneration;
 
   refreshPromise = (async () => {
     try {
@@ -169,15 +240,23 @@ export async function executeRefresh(): Promise<string | null> {
       });
 
       if (!res.ok) {
-        setAccessToken(null);
+        if (authGeneration === currentGen) {
+          setAccessToken(null);
+        }
         return null;
       }
 
       const data = (await res.json()) as AuthResponse;
-      setAccessToken(data.accessToken);
-      return data.accessToken;
+      // Stale refresh check: discard if logout or auth reset occurred while in flight
+      if (authGeneration === currentGen) {
+        setAccessToken(data.accessToken);
+        return data;
+      }
+      return null;
     } catch {
-      setAccessToken(null);
+      if (authGeneration === currentGen) {
+        setAccessToken(null);
+      }
       return null;
     } finally {
       refreshPromise = null;

@@ -41,6 +41,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       asChild = false,
       children,
       type = 'button',
+      onClick,
       ...props
     },
     ref,
@@ -48,24 +49,40 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     const Comp = asChild ? Slot : 'button';
     const isDisabled = disabled || isLoading;
 
+    // For asChild, custom elements like <a> cannot be disabled natively;
+    // guard the onClick callback when disabled or loading.
+    const handleClick = onClick
+      ? (e: React.MouseEvent<HTMLButtonElement>) => {
+          if (isDisabled) {
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+          }
+          onClick(e);
+        }
+      : undefined;
+
     return (
       <Comp
         ref={ref}
         type={asChild ? undefined : type}
-        disabled={isDisabled}
+        disabled={asChild ? undefined : isDisabled}
         aria-busy={isLoading ? 'true' : undefined}
         aria-disabled={isDisabled ? 'true' : undefined}
+        tabIndex={asChild && isDisabled ? -1 : props.tabIndex}
+        onClick={handleClick}
         className={cn(
           'inline-flex items-center justify-center transition-colors select-none',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
           'disabled:pointer-events-none disabled:opacity-50',
+          asChild && isDisabled && 'pointer-events-none opacity-50',
           variantStyles[variant],
           sizeStyles[size],
           className,
         )}
         {...props}
       >
-        {isLoading ? (
+        {!asChild && isLoading ? (
           <>
             <Spinner
               size={size === 'sm' ? 'xs' : size === 'lg' ? 'md' : 'sm'}

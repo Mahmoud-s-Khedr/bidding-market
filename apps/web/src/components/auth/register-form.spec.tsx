@@ -125,4 +125,49 @@ describe('RegisterForm component', () => {
 
     expect(mockPush).not.toHaveBeenCalled();
   });
+
+  it('submits valid registration and redirects to benign next param', async () => {
+    const user = userEvent.setup();
+    mockRegister.mockResolvedValueOnce(undefined);
+    mockGetParam.mockReturnValue('/listings/new');
+
+    render(<RegisterForm />);
+
+    await user.type(screen.getByLabelText(/display name/i), 'New Seller');
+    await user.type(screen.getByLabelText(/email address/i), 'seller@market.test');
+    await user.type(screen.getByLabelText(/password/i), 'Password123!');
+    await user.click(screen.getByRole('button', { name: /create account/i }));
+
+    await waitFor(() => {
+      expect(mockRegister).toHaveBeenCalled();
+    });
+
+    await waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith('/listings/new');
+    });
+  });
+
+  it.each([['//evil.com'], ['https://evil.com'], ['/\\evil.com'], ['javascript:']])(
+    'sanitizes malicious next param %s and redirects safely to /dashboard',
+    async (maliciousNext) => {
+      const user = userEvent.setup();
+      mockRegister.mockResolvedValueOnce(undefined);
+      mockGetParam.mockReturnValue(maliciousNext);
+
+      render(<RegisterForm />);
+
+      await user.type(screen.getByLabelText(/display name/i), 'New Seller');
+      await user.type(screen.getByLabelText(/email address/i), 'seller@market.test');
+      await user.type(screen.getByLabelText(/password/i), 'Password123!');
+      await user.click(screen.getByRole('button', { name: /create account/i }));
+
+      await waitFor(() => {
+        expect(mockRegister).toHaveBeenCalled();
+      });
+
+      await waitFor(() => {
+        expect(mockPush).toHaveBeenCalledWith('/dashboard');
+      });
+    },
+  );
 });

@@ -1,8 +1,9 @@
+import * as React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AuthProvider, useAuth } from './auth-provider';
-import { api, getAccessToken } from '@/lib/api/client';
+import { clearAuthSession, getAccessToken } from '@/lib/api/client';
 import { type User } from '@/lib/api/types';
 
 const mockUser: User = {
@@ -15,7 +16,8 @@ const mockUser: User = {
 };
 
 function TestConsumer() {
-  const { user, token, isAuthenticated, isAdmin, isLoading, login, register, logout } = useAuth();
+  const { user, token, isAuthenticated, isAdmin, isLoading, login, register, logout, refresh } =
+    useAuth();
 
   return (
     <div>
@@ -53,6 +55,14 @@ function TestConsumer() {
       >
         Trigger Logout
       </button>
+
+      <button
+        onClick={() => {
+          void refresh();
+        }}
+      >
+        Trigger Refresh
+      </button>
     </div>
   );
 }
@@ -60,25 +70,32 @@ function TestConsumer() {
 describe('AuthProvider & useAuth', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    clearAuthSession();
   });
 
   it('throws error when useAuth is used outside AuthProvider', () => {
-    // Suppress console error for this test
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     expect(() => render(<TestConsumer />)).toThrow('useAuth must be used within an AuthProvider');
     consoleError.mockRestore();
   });
 
   it('performs silent refresh on mount and initializes user if refresh succeeds', async () => {
-    vi.spyOn(api, 'post').mockImplementation((path) => {
-      if (path === '/auth/refresh') {
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/auth/refresh')) {
         return Promise.resolve({
-          accessToken: 'fresh-token',
-          user: mockUser,
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () =>
+            Promise.resolve({
+              accessToken: 'fresh-token',
+              user: mockUser,
+            }),
         });
       }
       return Promise.reject(new Error('not found'));
     });
+    vi.stubGlobal('fetch', fetchMock);
 
     render(
       <AuthProvider>
@@ -99,12 +116,18 @@ describe('AuthProvider & useAuth', () => {
   });
 
   it('sets unauthenticated state if silent refresh fails', async () => {
-    vi.spyOn(api, 'post').mockImplementation((path) => {
-      if (path === '/auth/refresh') {
-        return Promise.reject(new Error('401 Unauthorized'));
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/auth/refresh')) {
+        return Promise.resolve({
+          ok: false,
+          status: 401,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({ error: { code: 'UNAUTHORIZED' } }),
+        });
       }
       return Promise.reject(new Error('not found'));
     });
+    vi.stubGlobal('fetch', fetchMock);
 
     render(
       <AuthProvider>
@@ -121,20 +144,77 @@ describe('AuthProvider & useAuth', () => {
     expect(screen.getByTestId('token')).toHaveTextContent('no-token');
   });
 
+  it('handles React StrictMode double-mount without sending duplicate refresh requests', async () => {
+    let refreshCount = 0;
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/auth/refresh')) {
+        refreshCount++;
+        return new Promise((resolve) =>
+          setTimeout(
+            () =>
+              resolve({
+                ok: true,
+                status: 200,
+                headers: new Headers({ 'content-type': 'application/json' }),
+                json: () =>
+                  Promise.resolve({
+                    accessToken: 'strict-mode-token',
+                    user: mockUser,
+                  }),
+              }),
+            15,
+          ),
+        );
+      }
+      return Promise.reject(new Error('not found'));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <React.StrictMode>
+        <AuthProvider>
+          <TestConsumer />
+        </AuthProvider>
+      </React.StrictMode>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('loading')).toHaveTextContent('ready');
+    });
+
+    expect(screen.getByTestId('auth-state')).toHaveTextContent('authenticated');
+    expect(screen.getByTestId('token')).toHaveTextContent('strict-mode-token');
+    // Crucial: exactly 1 network request fired despite StrictMode double-mounting
+    expect(refreshCount).toBe(1);
+  });
+
   it('handles login flow properly', async () => {
     const user = userEvent.setup();
-    vi.spyOn(api, 'post').mockImplementation((path, body) => {
-      if (path === '/auth/refresh') {
-        return Promise.reject(new Error('No session'));
-      }
-      if (path === '/auth/login') {
+    const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      if (url.includes('/auth/refresh')) {
         return Promise.resolve({
-          accessToken: 'login-token-xyz',
-          user: { ...mockUser, email: (body as { email: string }).email },
+          ok: false,
+          status: 401,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({ error: { code: 'UNAUTHORIZED' } }),
+        });
+      }
+      if (url.includes('/auth/login')) {
+        const body = JSON.parse(init?.body as string) as { email: string };
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () =>
+            Promise.resolve({
+              accessToken: 'login-token-xyz',
+              user: { ...mockUser, email: body.email },
+            }),
         });
       }
       return Promise.reject(new Error('not found'));
     });
+    vi.stubGlobal('fetch', fetchMock);
 
     render(
       <AuthProvider>
@@ -158,22 +238,35 @@ describe('AuthProvider & useAuth', () => {
 
   it('handles register flow properly', async () => {
     const user = userEvent.setup();
-    vi.spyOn(api, 'post').mockImplementation((path, body) => {
-      if (path === '/auth/refresh') {
-        return Promise.reject(new Error('No session'));
-      }
-      if (path === '/auth/register') {
+    const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      if (url.includes('/auth/refresh')) {
         return Promise.resolve({
-          accessToken: 'registered-token-xyz',
-          user: {
-            ...mockUser,
-            email: (body as { email: string }).email,
-            displayName: (body as { displayName: string }).displayName,
-          },
+          ok: false,
+          status: 401,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({ error: { code: 'UNAUTHORIZED' } }),
+        });
+      }
+      if (url.includes('/auth/register')) {
+        const body = JSON.parse(init?.body as string) as { email: string; displayName: string };
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () =>
+            Promise.resolve({
+              accessToken: 'registered-token-xyz',
+              user: {
+                ...mockUser,
+                email: body.email,
+                displayName: body.displayName,
+              },
+            }),
         });
       }
       return Promise.reject(new Error('not found'));
     });
+    vi.stubGlobal('fetch', fetchMock);
 
     render(
       <AuthProvider>
@@ -197,18 +290,29 @@ describe('AuthProvider & useAuth', () => {
 
   it('handles logout flow and clears token and user', async () => {
     const user = userEvent.setup();
-    vi.spyOn(api, 'post').mockImplementation((path) => {
-      if (path === '/auth/refresh') {
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/auth/refresh')) {
         return Promise.resolve({
-          accessToken: 'initial-token',
-          user: mockUser,
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () =>
+            Promise.resolve({
+              accessToken: 'initial-token',
+              user: mockUser,
+            }),
         });
       }
-      if (path === '/auth/logout') {
-        return Promise.resolve();
+      if (url.includes('/auth/logout')) {
+        return Promise.resolve({
+          ok: true,
+          status: 204,
+          headers: new Headers(),
+        });
       }
       return Promise.reject(new Error('not found'));
     });
+    vi.stubGlobal('fetch', fetchMock);
 
     render(
       <AuthProvider>
@@ -231,16 +335,76 @@ describe('AuthProvider & useAuth', () => {
     expect(getAccessToken()).toBeNull();
   });
 
-  it('detects admin role correctly', async () => {
-    vi.spyOn(api, 'post').mockImplementation((path) => {
-      if (path === '/auth/refresh') {
+  it('handles logout-during-refresh race condition by discarding stale refresh results', async () => {
+    const user = userEvent.setup();
+    let resolveInitialRefresh: (val: unknown) => void;
+    const initialRefreshPromise = new Promise((resolve) => {
+      resolveInitialRefresh = resolve;
+    });
+
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/auth/refresh')) {
+        return initialRefreshPromise;
+      }
+      if (url.includes('/auth/logout')) {
         return Promise.resolve({
-          accessToken: 'admin-token',
-          user: { ...mockUser, role: 'ADMIN' as const },
+          ok: true,
+          status: 204,
+          headers: new Headers(),
         });
       }
       return Promise.reject(new Error('not found'));
     });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <AuthProvider>
+        <TestConsumer />
+      </AuthProvider>,
+    );
+
+    // Initial refresh is pending. User triggers logout before refresh resolves.
+    await user.click(screen.getByText('Trigger Logout'));
+
+    // Now initial refresh completes afterwards
+    resolveInitialRefresh!({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: () =>
+        Promise.resolve({
+          accessToken: 'stale-race-token',
+          user: mockUser,
+        }),
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('loading')).toHaveTextContent('ready');
+    });
+
+    // Client must remain unauthenticated; the stale refresh result must be discarded
+    expect(screen.getByTestId('auth-state')).toHaveTextContent('unauthenticated');
+    expect(screen.getByTestId('token')).toHaveTextContent('no-token');
+    expect(getAccessToken()).toBeNull();
+  });
+
+  it('detects admin role correctly', async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/auth/refresh')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () =>
+            Promise.resolve({
+              accessToken: 'admin-token',
+              user: { ...mockUser, role: 'ADMIN' as const },
+            }),
+        });
+      }
+      return Promise.reject(new Error('not found'));
+    });
+    vi.stubGlobal('fetch', fetchMock);
 
     render(
       <AuthProvider>

@@ -160,4 +160,57 @@ describe('RequireAuth & RequireAdmin wrappers', () => {
 
     expect(screen.getByText('Admin Panel Secret')).toBeInTheDocument();
   });
+
+  it('RequireAdmin renders loading indicator while authorization is resolving', () => {
+    vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({
+      user: null,
+      token: null,
+      isLoading: true,
+      isAuthenticated: false,
+      isAdmin: false,
+      login: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+      refresh: vi.fn(),
+    });
+
+    render(
+      <RequireAdmin>
+        <div>Admin Content</div>
+      </RequireAdmin>,
+    );
+
+    expect(screen.getByRole('status')).toBeInTheDocument();
+    expect(screen.queryByText('Admin Content')).not.toBeInTheDocument();
+  });
+
+  it('RequireAdmin redirects unauthenticated user to /login?next=... without blank flash', () => {
+    mockPathname = '/admin';
+    mockSearchParams = new URLSearchParams('tab=users');
+
+    vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({
+      user: null,
+      token: null,
+      isLoading: false,
+      isAuthenticated: false,
+      isAdmin: false,
+      login: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+      refresh: vi.fn(),
+    });
+
+    render(
+      <RequireAdmin>
+        <div>Admin Content</div>
+      </RequireAdmin>,
+    );
+
+    expect(mockReplace).toHaveBeenCalledWith(
+      '/login?next=' + encodeURIComponent('/admin?tab=users'),
+    );
+    // Verifies no blank flash: renders redirecting spinner while redirect happens
+    expect(screen.getByRole('status')).toBeInTheDocument();
+    expect(screen.queryByText('Admin Content')).not.toBeInTheDocument();
+  });
 });

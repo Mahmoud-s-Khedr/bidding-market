@@ -1,7 +1,14 @@
 'use client';
 
 import * as React from 'react';
-import { api, getAccessToken, setAccessToken, subscribeAccessToken } from '@/lib/api/client';
+import {
+  api,
+  clearAuthSession,
+  executeRefresh,
+  getAccessToken,
+  setAccessToken,
+  subscribeAccessToken,
+} from '@/lib/api/client';
 import { type AuthResponse, type User } from '@/lib/api/types';
 import { type LoginInput, type RegisterInput } from '@/lib/validation/auth';
 
@@ -36,32 +43,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const refresh = React.useCallback(async () => {
     try {
-      const res = await api.post<AuthResponse>('/auth/refresh', undefined, { retryOn401: false });
+      const res = await executeRefresh();
       if (res && res.accessToken) {
-        setAccessToken(res.accessToken);
         setUser(res.user);
       } else {
-        setAccessToken(null);
         setUser(null);
       }
     } catch {
-      setAccessToken(null);
       setUser(null);
     }
   }, []);
 
-  // Silent refresh on load
+  // Silent refresh on load: single-flighted and guarded against StrictMode double-mount
+  const initPromiseRef = React.useRef<Promise<void> | null>(null);
+
   React.useEffect(() => {
     let mounted = true;
-    void (async () => {
-      try {
-        await refresh();
-      } finally {
-        if (mounted) {
-          setIsLoading(false);
-        }
+
+    if (!initPromiseRef.current) {
+      initPromiseRef.current = refresh();
+    }
+
+    void initPromiseRef.current.finally(() => {
+      if (mounted) {
+        setIsLoading(false);
       }
-    })();
+    });
 
     return () => {
       mounted = false;
@@ -87,13 +94,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const logout = React.useCallback(async () => {
+    // Bumps generation counter and clears in-memory token to discard in-flight refresh results
+    clearAuthSession();
+    setUser(null);
     try {
-      await api.post('/auth/logout', undefined, { retryOn401: false });
+      await api.post('/auth/logout', undefined, { skipAuth: true, retryOn401: false });
     } catch {
-      // Ignore errors on logout
-    } finally {
-      setAccessToken(null);
-      setUser(null);
+      // Local session is already cleared
     }
   }, []);
 

@@ -5,13 +5,15 @@ import {
   getAccessToken,
   setAccessToken,
   subscribeAccessToken,
+  clearAuthSession,
+  executeRefresh,
   request,
 } from './client';
 
 describe('API Client', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    setAccessToken(null);
+    clearAuthSession();
   });
 
   it('correctly constructs ApiError with status, code, and details', () => {
@@ -37,7 +39,7 @@ describe('API Client', () => {
     expect(listener).toHaveBeenCalledTimes(1);
   });
 
-  it('attaches Bearer token header to outgoing requests', async () => {
+  it('attaches Bearer token header to outgoing requests targeting API base URL', async () => {
     setAccessToken('mock-access-token');
 
     const fetchMock = vi.fn().mockResolvedValue({
@@ -57,6 +59,25 @@ describe('API Client', () => {
       'Bearer mock-access-token',
     );
     expect(result).toEqual({ success: true });
+  });
+
+  it('strips/does not attach Bearer token to external origins', async () => {
+    setAccessToken('mock-access-token');
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: () => Promise.resolve({ external: true }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.get('https://external-third-party.example/endpoint');
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect((options.headers as Record<string, string>)['Authorization']).toBeUndefined();
+    expect(options.credentials).toBe('same-origin');
   });
 
   it('serializes request body to JSON and adds query params', async () => {
@@ -266,6 +287,176 @@ describe('API Client', () => {
     // Only one refresh request should have fired
     expect(refreshCallCount).toBe(1);
     expect(getAccessToken()).toBe('shared-fresh-token');
+  });
+
+  it('handles late-401 case by retrying with rotated token without calling executeRefresh again', async () => {
+    setAccessToken('token-v1');
+    let refreshCount = 0;
+
+    let resolveRequestBInitial: (val: unknown) => void;
+    const requestBInitialPromise = new Promise((resolve) => {
+      resolveRequestBInitial = resolve;
+    });
+
+    const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      const headers = init?.headers as Record<string, string>;
+
+      if (url.includes('/auth/refresh')) {
+        refreshCount++;
+        setAccessToken('token-v2');
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () =>
+            Promise.resolve({
+              accessToken: 'token-v2',
+              user: { id: 'u1' },
+            }),
+        });
+      }
+
+      if (url.includes('/request-a')) {
+        if (headers['Authorization'] === 'Bearer token-v1') {
+          return Promise.resolve({
+            ok: false,
+            status: 401,
+            headers: new Headers({ 'content-type': 'application/json' }),
+            json: () => Promise.resolve({ error: { code: 'UNAUTHORIZED', message: 'Expired' } }),
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({ data: 'response-a' }),
+        });
+      }
+
+      if (url.includes('/request-b')) {
+        if (headers['Authorization'] === 'Bearer token-v1') {
+          // Simulate late response arriving after Request A's refresh completed
+          return requestBInitialPromise;
+        }
+        if (headers['Authorization'] === 'Bearer token-v2') {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            headers: new Headers({ 'content-type': 'application/json' }),
+            json: () => Promise.resolve({ data: 'response-b' }),
+          });
+        }
+      }
+
+      return Promise.reject(new Error(`Unexpected call to ${url}`));
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    // 1. Both request A and request B are dispatched with token-v1
+    const promiseA = api.get('/request-a');
+    const promiseB = api.get('/request-b');
+
+    // 2. Request A gets 401, completes refresh (updates to token-v2) and retries successfully
+    const resultA = await promiseA;
+    expect(resultA).toEqual({ data: 'response-a' });
+    expect(refreshCount).toBe(1);
+    expect(getAccessToken()).toBe('token-v2');
+
+    // 3. Now Request B's 401 finally arrives late (after refresh finished)
+    resolveRequestBInitial!({
+      ok: false,
+      status: 401,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: () => Promise.resolve({ error: { code: 'UNAUTHORIZED', message: 'Expired' } }),
+    });
+
+    const resultB = await promiseB;
+    expect(resultB).toEqual({ data: 'response-b' });
+
+    // Ensure refresh was NOT executed a second time (cookie rotation protection)
+    expect(refreshCount).toBe(1);
+  });
+
+  it('uses exact path matching for /auth/refresh', async () => {
+    setAccessToken('old-token');
+
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/auth/refresh') && !url.includes('query=')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({ accessToken: 'new-token' }),
+        });
+      }
+
+      if (url.includes('/search')) {
+        const isRetried = getAccessToken() === 'new-token';
+        if (!isRetried) {
+          return Promise.resolve({
+            ok: false,
+            status: 401,
+            headers: new Headers({ 'content-type': 'application/json' }),
+            json: () => Promise.resolve({ error: { code: 'UNAUTHORIZED' } }),
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({ searchResults: [] }),
+        });
+      }
+
+      return Promise.resolve({
+        ok: false,
+        status: 401,
+        headers: new Headers({ 'content-type': 'application/json' }),
+      });
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    // Endpoint containing '/auth/refresh' in query parameter should STILL refresh on 401
+    const res = await api.get('/search', { params: { query: '/auth/refresh' } });
+    expect(res).toEqual({ searchResults: [] });
+    expect(getAccessToken()).toBe('new-token');
+  });
+
+  it('discards stale refresh result if clearAuthSession is called during in-flight refresh', async () => {
+    let resolveRefresh: (val: unknown) => void;
+    const refreshPending = new Promise((resolve) => {
+      resolveRefresh = resolve;
+    });
+
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/auth/refresh')) {
+        return refreshPending;
+      }
+      return Promise.reject(new Error('Unexpected'));
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const refreshPromise = executeRefresh();
+
+    // User logs out while refresh is in flight
+    clearAuthSession();
+    expect(getAccessToken()).toBeNull();
+
+    // Refresh resolves after logout
+    resolveRefresh!({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: () => Promise.resolve({ accessToken: 'stale-token', user: { id: 'u1' } }),
+    });
+
+    const result = await refreshPromise;
+    expect(result).toBeNull();
+    // Stale token was discarded and not stored
+    expect(getAccessToken()).toBeNull();
   });
 
   it('supports put, patch, delete helpers', async () => {

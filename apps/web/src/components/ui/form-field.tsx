@@ -5,7 +5,7 @@ import { Label } from './label';
 export interface FormFieldRenderProps {
   id: string;
   'aria-describedby'?: string;
-  'aria-invalid'?: boolean | 'true' | 'false';
+  'aria-invalid'?: 'true';
   error?: boolean;
 }
 
@@ -55,7 +55,16 @@ export function FormField({
       {typeof children === 'function'
         ? children(fieldProps)
         : React.isValidElement(children)
-          ? React.cloneElement(children, fieldProps)
+          ? React.cloneElement(
+              children,
+              typeof children.type === 'string'
+                ? {
+                    id,
+                    'aria-describedby': describedBy,
+                    'aria-invalid': error ? ('true' as const) : undefined,
+                  }
+                : fieldProps,
+            )
           : children}
 
       {hint && (

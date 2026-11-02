@@ -5,7 +5,8 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { registerSchema, type RegisterInput } from '@/lib/validation/auth';
+import { safeNext } from '@/lib/utils';
+import { registerSchema, type RegisterInput, type RegisterFormInput } from '@/lib/validation/auth';
 import { useAuth } from './auth-provider';
 import { ApiError } from '@/lib/api/client';
 import { Button } from '@/components/ui/button';
@@ -33,7 +34,7 @@ export function RegisterForm() {
     handleSubmit,
     watch,
     formState: { errors, isSubmitting },
-  } = useForm<RegisterInput>({
+  } = useForm<RegisterFormInput, unknown, RegisterInput>({
     resolver: zodResolver(registerSchema),
     defaultValues: {
       email: '',
@@ -51,7 +52,7 @@ export function RegisterForm() {
     try {
       await registerUser(data);
       toast.success('Account created!', 'Welcome to the marketplace.');
-      const next = searchParams?.get('next') || '/dashboard';
+      const next = safeNext(searchParams?.get('next'));
       router.push(next);
     } catch (err) {
       if (err instanceof ApiError) {

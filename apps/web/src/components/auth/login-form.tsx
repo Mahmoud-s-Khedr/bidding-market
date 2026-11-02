@@ -5,6 +5,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import { safeNext } from '@/lib/utils';
 import { loginSchema, type LoginInput } from '@/lib/validation/auth';
 import { useAuth } from './auth-provider';
 import { ApiError } from '@/lib/api/client';
@@ -45,7 +46,7 @@ export function LoginForm() {
     try {
       await login(data);
       toast.success('Welcome back!', 'You have successfully signed in.');
-      const next = searchParams?.get('next') || '/dashboard';
+      const next = safeNext(searchParams?.get('next'));
       router.push(next);
     } catch (err) {
       if (err instanceof ApiError) {

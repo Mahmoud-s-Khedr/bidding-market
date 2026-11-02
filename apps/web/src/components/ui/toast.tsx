@@ -41,6 +41,12 @@ export const toast = {
     externalInfo?.(title, description) ?? '',
 };
 
+let toastCounter = 0;
+function createToastId(): string {
+  toastCounter = (toastCounter + 1) % Number.MAX_SAFE_INTEGER;
+  return `toast-${Date.now()}-${toastCounter}`;
+}
+
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = React.useState<ToastData[]>([]);
 
@@ -49,7 +55,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const addToast = React.useCallback((options: Omit<ToastData, 'id'>) => {
-    const id = Math.random().toString(36).substring(2, 9);
+    const id = createToastId();
     const newToast: ToastData = { id, ...options };
     setToasts((prev) => [...prev, newToast]);
     return id;
@@ -110,25 +116,29 @@ export function useToast(): ToastContextValue {
 function ToastItem({ data, onDismiss }: { data: ToastData; onDismiss: () => void }) {
   const variantIcons = {
     default: null,
-    success: <CheckCircle className="h-5 w-5 text-emerald-600 shrink-0 mt-0.5" />,
-    error: <AlertCircle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />,
-    info: <Info className="h-5 w-5 text-primary shrink-0 mt-0.5" />,
+    success: (
+      <CheckCircle className="h-5 w-5 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+    ),
+    error: <AlertCircle className="h-5 w-5 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />,
+    info: <Info className="h-5 w-5 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />,
   };
 
+  // Meets WCAG AA contrast on both light and dark themes
   const variantStyles: Record<ToastVariant, string> = {
     default: 'border-border bg-card text-card-foreground',
     success:
       'border-emerald-500/30 bg-emerald-50 text-emerald-950 dark:bg-emerald-950/40 dark:text-emerald-100',
-    error:
-      'border-destructive/30 bg-destructive/10 text-destructive-foreground dark:bg-destructive/20',
-    info: 'border-primary/30 bg-primary/10 text-primary-foreground dark:bg-primary/20',
+    error: 'border-red-500/30 bg-red-50 text-red-950 dark:bg-red-950/40 dark:text-red-100',
+    info: 'border-blue-500/30 bg-blue-50 text-blue-950 dark:bg-blue-950/40 dark:text-blue-100',
   };
 
   const variant = data.variant || 'default';
+  // duration: 0 means no auto-dismiss (Infinity). Default is 5000ms.
+  const duration = data.duration === 0 ? Infinity : (data.duration ?? 5000);
 
   return (
     <ToastPrimitive.Root
-      duration={data.duration || 5000}
+      duration={duration}
       onOpenChange={(open) => {
         if (!open) onDismiss();
       }}

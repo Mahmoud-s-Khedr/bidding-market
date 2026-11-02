@@ -1,8 +1,8 @@
 'use client';
 
 import * as React from 'react';
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { useAuth } from './auth-provider';
+import { useRouter } from 'next/navigation';
+import { useRequireAuthRedirect } from './require-auth';
 import { Spinner } from '@/components/ui/spinner';
 import { ErrorState } from '@/components/ui/error-state';
 
@@ -12,18 +12,8 @@ export interface RequireAdminProps {
 }
 
 export function RequireAdmin({ children, fallback }: RequireAdminProps) {
-  const { isAuthenticated, isAdmin, isLoading } = useAuth();
+  const { isAuthenticated, isAdmin, isLoading } = useRequireAuthRedirect();
   const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
-
-  React.useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
-      const qs = searchParams?.toString();
-      const currentUrl = qs ? `${pathname}?${qs}` : pathname;
-      router.replace(`/login?next=${encodeURIComponent(currentUrl || '/')}`);
-    }
-  }, [isLoading, isAuthenticated, router, pathname, searchParams]);
 
   if (isLoading) {
     return (
@@ -36,7 +26,13 @@ export function RequireAdmin({ children, fallback }: RequireAdminProps) {
   }
 
   if (!isAuthenticated) {
-    return null;
+    return (
+      fallback || (
+        <div className="flex min-h-[50vh] items-center justify-center p-8">
+          <Spinner size="lg" label="Redirecting to login..." />
+        </div>
+      )
+    );
   }
 
   if (!isAdmin) {

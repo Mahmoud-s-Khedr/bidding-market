@@ -93,4 +93,27 @@ describe('LoginForm component', () => {
 
     expect(mockPush).not.toHaveBeenCalled();
   });
+
+  it.each([['//evil.com'], ['https://evil.com'], ['/\\evil.com'], ['javascript:']])(
+    'sanitizes malicious next param %s and redirects safely to /dashboard',
+    async (maliciousNext) => {
+      const user = userEvent.setup();
+      mockLogin.mockResolvedValueOnce(undefined);
+      mockGetParam.mockReturnValue(maliciousNext);
+
+      render(<LoginForm />);
+
+      await user.type(screen.getByLabelText(/email address/i), 'alice@market.test');
+      await user.type(screen.getByLabelText(/password/i), 'Password123!');
+      await user.click(screen.getByRole('button', { name: /sign in/i }));
+
+      await waitFor(() => {
+        expect(mockLogin).toHaveBeenCalled();
+      });
+
+      await waitFor(() => {
+        expect(mockPush).toHaveBeenCalledWith('/dashboard');
+      });
+    },
+  );
 });

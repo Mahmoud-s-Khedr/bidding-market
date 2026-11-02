@@ -5,13 +5,8 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from './auth-provider';
 import { Spinner } from '@/components/ui/spinner';
 
-export interface RequireAuthProps {
-  children: React.ReactNode;
-  fallback?: React.ReactNode;
-}
-
-export function RequireAuth({ children, fallback }: RequireAuthProps) {
-  const { isAuthenticated, isLoading } = useAuth();
+export function useRequireAuthRedirect() {
+  const { isAuthenticated, isLoading, isAdmin, user } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -24,6 +19,17 @@ export function RequireAuth({ children, fallback }: RequireAuthProps) {
     }
   }, [isLoading, isAuthenticated, router, pathname, searchParams]);
 
+  return { isAuthenticated, isLoading, isAdmin, user };
+}
+
+export interface RequireAuthProps {
+  children: React.ReactNode;
+  fallback?: React.ReactNode;
+}
+
+export function RequireAuth({ children, fallback }: RequireAuthProps) {
+  const { isAuthenticated, isLoading } = useRequireAuthRedirect();
+
   if (isLoading) {
     return (
       fallback || (
@@ -35,7 +41,13 @@ export function RequireAuth({ children, fallback }: RequireAuthProps) {
   }
 
   if (!isAuthenticated) {
-    return null;
+    return (
+      fallback || (
+        <div className="flex min-h-[50vh] items-center justify-center p-8">
+          <Spinner size="lg" label="Redirecting to login..." />
+        </div>
+      )
+    );
   }
 
   return <>{children}</>;

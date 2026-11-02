@@ -89,4 +89,17 @@ describe('FormField component', () => {
     expect(input).toHaveAttribute('aria-describedby', 'func-field-error');
     expect(input).toHaveAttribute('aria-invalid', 'true');
   });
+
+  it('does not pass unknown error prop to native DOM element child', () => {
+    render(
+      <FormField id="native-field" label="Native" error="Some error">
+        <input data-testid="native-input" />
+      </FormField>,
+    );
+
+    const input = screen.getByTestId('native-input');
+    expect(input).toHaveAttribute('id', 'native-field');
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(input).not.toHaveAttribute('error');
+  });
 });

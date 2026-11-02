@@ -25,7 +25,7 @@ test.describe('Smoke tests', () => {
     await page.goto('/login');
 
     await expect(page).toHaveTitle(/Sign In/);
-    await expect(page.getByRole('heading', { name: /sign in/i, level: 3 })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /sign in/i })).toBeVisible();
 
     const submitBtn = page.getByRole('button', { name: /sign in/i });
     await expect(submitBtn).toBeVisible();
