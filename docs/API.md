@@ -32,7 +32,7 @@ Requests from the web app use `credentials: 'include'`.
 
 | POST | /uploads/presign 🔒 | `{purpose: 'LISTING_IMAGE'|'LISTING_ATTACHMENT'|'BID_ATTACHMENT'|'MESSAGE_ATTACHMENT'|'DELIVERABLE'|'AVATAR', fileName, mimeType, sizeBytes}` → `{uploadId, url, headers, key, expiresAt}` (validates MIME allowlist + size per purpose; key format: `${purpose.toLowerCase()}/${userId}/${cuid}/${sanitizedFileName}`) |
 |---|---|---|
-| POST | /uploads/:uploadId/complete 🔒 | owner only; verifies object exists in S3 via `headObject` and size/content-type match presigned parameters (else 400); marks upload ready (status READY), returns `Attachment {id, key, url, fileName, mimeType, sizeBytes}` |
+| POST | /uploads/:uploadId/complete 🔒 | owner only; verifies object exists in S3 via `headObject` and size/content-type match presigned parameters (else 400); already READY returns 409; marks upload ready (status READY), returns `Attachment {id, key, url, fileName, mimeType, sizeBytes}` |
 | GET | /uploads/:id/url 🔒 | short-lived (300s) presigned GET URL (authorization: uploader, admin, OR the upload is attached to a publicly visible listing [OPEN/IN_PROGRESS/COMPLETED/CLOSED], OR to a listing/bid/message/deliverable where the requester is an authorized participant; else 404) |
 
 Limits: images (jpeg/png/webp/gif) ≤ 10 MB; documents (pdf, docx, xlsx, txt, zip) ≤ 25 MB; voice (webm/ogg/mp4/mpeg audio) ≤ 10 MB.
@@ -41,19 +41,19 @@ Scheduled lifecycle cleanup of uncompleted PENDING uploads is out of scope and s
 
 ## Categories
 
-| GET               | /categories                | tree `[{id, name, slug, parentId, description, listingCount, children: [...]}]` (counts OPEN listings including all descendants; cached in Redis with automatic invalidation on admin writes)                                                                                       |
+| GET               | /categories                | tree `[{id, name, slug, parentId, description, listingCount, children: [...]}]` (counts OPEN listings including all descendants; cached in Redis with automatic invalidation on admin writes and listing lifecycle events [create, update, close, delete])                          |
 | ----------------- | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | POST/PATCH/DELETE | /admin/categories[/:id] 👑 | `{name, slug, parentId?, description?}`; slug must be unique (409); parentId if provided must exist (400); cycles prevented (a category cannot become its own descendant, 400); delete fails with 409 if category has subcategories or if category or its descendants have listings |
 
 ## Listings
 
-| GET | /listings | filters: `q` (Postgres full-text using GIN index: `websearch_to_tsquery('simple', ...)` with ranking when sort is relevance), `kind` (REQUEST/OFFER), `categoryId` / `categorySlug` (includes all descendants), `minPrice` / `maxPrice` (interval overlap semantics on `[priceMinCents, COALESCE(priceMaxCents, priceMinCents)]`), `currency`, `location` (case-insensitive substring contains), `status` (default OPEN; non-admins may only query OPEN/IN_PROGRESS/COMPLETED/CLOSED or their own via `ownerId=me`), `ownerId`, `sort=newest|price_asc|price_desc|ending_soon|most_bids|relevance`, `cursor`, `limit` → paginated `ListingSummary`. Listings with `status: OPEN` that are expired (`expiresAt <= NOW()`) are excluded from default browse and active OPEN queries. Stable cursor pagination uses compound base64url JSON cursors `{"v": <sortValue>, "id": "<listingId>"}` |
+| GET | /listings | filters: `q` (Postgres full-text using GIN index: `websearch_to_tsquery('simple', ...)` with ranking when sort is relevance), `kind` (REQUEST/OFFER), `categoryId` / `categorySlug` (includes all descendants), `minPrice` / `maxPrice` (interval overlap semantics on `[priceMinCents, COALESCE(priceMaxCents, priceMinCents)]`), `currency`, `location` (case-insensitive substring contains), `status` (default OPEN; when `ownerId=me` without explicit status returns all of the caller's own listings regardless of status; non-admins may only query OPEN/IN_PROGRESS/COMPLETED/CLOSED or their own via `ownerId=me`), `ownerId`, `sort=newest|price_asc|price_desc|ending_soon|most_bids|relevance`, `cursor`, `limit` → paginated `ListingSummary`. Listings with `status: OPEN` that are expired (`expiresAt <= NOW()`) are excluded from default browse and active OPEN queries. Stable cursor pagination uses compound base64url JSON cursors `{"s": "<sort>", "v": <sortValue>, "id": "<listingId>"}` |
 |---|---|---|
 | GET | /listings/:id | optional auth: valid token → user, no token → anonymous, invalid token → 401; returns `ListingDetail` (owner public profile, category, images and attachments with ids and presigned URLs, bidCount, and `myBid` if authed); DRAFT and REMOVED only visible to owner or admin (else 404) |
-| POST | /listings 🔒 | owner = current user; categoryId must exist; price rules: FIXED requires `priceMinCents` (no `priceMaxCents`), RANGE requires `priceMinCents <= priceMaxCents`, NEGOTIABLE neither; imageIds / attachmentIds must be READY uploads owned by user with purpose `LISTING_IMAGE` / `LISTING_ATTACHMENT`; status DRAFT\|OPEN (default OPEN) |
-| PATCH | /listings/:id 🔒 owner | owner (or admin); forbidden when IN_PROGRESS/COMPLETED/REMOVED (409); same price and upload validation |
-| POST | /listings/:id/close 🔒 owner | owner; OPEN → CLOSED; pending/shortlisted/countered bids declined in a single transaction |
-| DELETE | /listings/:id 🔒 owner | owner; allowed only when listing is DRAFT or has zero bids, else 409 |
+| POST | /listings 🔒 | owner = current user; categoryId must exist; price rules: FIXED requires `priceMinCents` (no `priceMaxCents`), RANGE requires `priceMinCents <= priceMaxCents`, NEGOTIABLE neither; imageIds / attachmentIds must be READY uploads owned by user with purpose `LISTING_IMAGE` / `LISTING_ATTACHMENT`, attached to at most one listing; status DRAFT\|OPEN (default OPEN) |
+| PATCH | /listings/:id 🔒 owner | owner (or admin); forbidden when IN_PROGRESS/COMPLETED/REMOVED (409); status changes restricted to DRAFT→OPEN, OPEN→DRAFT rejected when bids exist (409), reopening CLOSED returns 409; admin PATCH validates uploads against listing owner; same price and upload validation |
+| POST | /listings/:id/close 🔒 owner | owner; OPEN → CLOSED (conditional write); pending/shortlisted/countered bids declined in a single transaction |
+| DELETE | /listings/:id 🔒 owner | owner; allowed only when listing is DRAFT or has zero bids (conditional write; never deletes bids for non-DRAFT listings), else 409 |
 
 ## Bids
 
