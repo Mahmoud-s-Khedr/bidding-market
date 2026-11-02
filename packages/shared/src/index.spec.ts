@@ -7,12 +7,14 @@ import {
   listingCreateSchema,
   listingDetailSchema,
   listingQuerySchema,
+  listingSummarySchema,
   listingUpdateSchema,
   loginSchema,
   messageCreateSchema,
   passwordSchema,
   presignUploadSchema,
   registerSchema,
+  updateProfileSchema,
   uploadPresignResponseSchema,
 } from './index.js';
 describe('shared schemas', () => {
@@ -135,6 +137,8 @@ describe('shared schemas', () => {
         createdAt: new Date(),
       },
       categoryId: 'c1',
+      categoryName: 'Tech',
+      thumbnailUrl: 'https://s3/thumb.png',
       kind: 'REQUEST',
       status: 'OPEN',
       title: 'Valid title',
@@ -156,6 +160,44 @@ describe('shared schemas', () => {
       myBid: null,
     };
     expect(listingDetailSchema.safeParse(detail).success).toBe(true);
+  });
+  it('validates listingSummarySchema with categoryName and thumbnailUrl', () => {
+    const summary = {
+      id: 'l1',
+      owner: {
+        id: 'u1',
+        displayName: 'Alice',
+        avatarUrl: null,
+        bio: null,
+        location: null,
+        isBusiness: false,
+        companyName: null,
+        ratingAvg: 0,
+        ratingCount: 0,
+        completedCount: 0,
+        createdAt: new Date(),
+      },
+      categoryId: 'c1',
+      categoryName: 'Tech',
+      thumbnailUrl: null,
+      kind: 'REQUEST',
+      status: 'OPEN',
+      title: 'Valid title',
+      priceType: 'FIXED',
+      priceMinCents: 100,
+      priceMaxCents: null,
+      currency: 'USD',
+      location: null,
+      expiresAt: null,
+      bidCount: 0,
+      createdAt: new Date(),
+    };
+    expect(listingSummarySchema.safeParse(summary).success).toBe(true);
+  });
+  it('validates updateProfileSchema with avatarUploadId', () => {
+    expect(updateProfileSchema.safeParse({ avatarUploadId: 'upload_123' }).success).toBe(true);
+    expect(updateProfileSchema.safeParse({ avatarUploadId: null }).success).toBe(true);
+    expect(updateProfileSchema.safeParse({ avatarUploadId: '' }).success).toBe(false);
   });
 });
 describe('schema refinements', () => {

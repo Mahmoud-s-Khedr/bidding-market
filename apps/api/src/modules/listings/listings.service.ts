@@ -19,6 +19,7 @@ import { paginate, type PaginatedResult } from '../../common/pagination.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { StorageService } from '../../storage/storage.service.js';
 import { CategoriesService } from '../categories/categories.service.js';
+import { UserPresenter } from '../users/user.presenter.js';
 import { decodeCursor, encodeCursor, type ListingSort } from './listings.cursor.js';
 
 export function validatePriceRules(
@@ -61,6 +62,8 @@ interface RawListingRow {
   id: string;
   ownerId: string;
   categoryId: string;
+  categoryName: string;
+  firstImageKey: string | null;
   kind: 'REQUEST' | 'OFFER';
   status: 'DRAFT' | 'OPEN' | 'IN_PROGRESS' | 'COMPLETED' | 'CLOSED' | 'REMOVED';
   title: string;
@@ -92,6 +95,7 @@ export class ListingsService {
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
     private readonly categoriesService: CategoriesService,
+    private readonly userPresenter: UserPresenter,
   ) {}
 
   async validateUploads(
@@ -465,19 +469,7 @@ export class ListingsService {
         myBid = {
           id: bid.id,
           listingId: bid.listingId,
-          bidder: {
-            id: bid.bidder.id,
-            displayName: bid.bidder.displayName,
-            avatarUrl: bid.bidder.avatarKey,
-            bio: bid.bidder.bio,
-            location: bid.bidder.location,
-            isBusiness: bid.bidder.isBusiness,
-            companyName: bid.bidder.companyName,
-            ratingAvg: bid.bidder.ratingAvg,
-            ratingCount: bid.bidder.ratingCount,
-            completedCount: bid.bidder.completedCount,
-            createdAt: bid.bidder.createdAt,
-          },
+          bidder: await this.userPresenter.toPublicUser(bid.bidder),
           amountCents: bid.amountCents,
           currency: bid.currency,
           deliveryDays: bid.deliveryDays,
@@ -515,21 +507,11 @@ export class ListingsService {
 
     return {
       id: listing.id,
-      owner: {
-        id: listing.owner.id,
-        displayName: listing.owner.displayName,
-        avatarUrl: listing.owner.avatarKey,
-        bio: listing.owner.bio,
-        location: listing.owner.location,
-        isBusiness: listing.owner.isBusiness,
-        companyName: listing.owner.companyName,
-        ratingAvg: listing.owner.ratingAvg,
-        ratingCount: listing.owner.ratingCount,
-        completedCount: listing.owner.completedCount,
-        createdAt: listing.owner.createdAt,
-      },
+      owner: await this.userPresenter.toPublicUser(listing.owner),
       categoryId: listing.categoryId,
+      categoryName: listing.category.name,
       category: listing.category,
+      thumbnailUrl: images[0]?.url ?? null,
       kind: listing.kind,
       status: listing.status,
       title: listing.title,
@@ -708,6 +690,8 @@ export class ListingsService {
         l."createdAt",
         bc."bidCount"
         ${rankSelect},
+        c.name AS "categoryName",
+        img."firstImageKey",
         u.id AS "owner_id",
         u."displayName" AS "owner_displayName",
         u."avatarKey" AS "owner_avatarKey",
@@ -721,9 +705,18 @@ export class ListingsService {
         u."createdAt" AS "owner_createdAt"
       FROM "Listing" l
       JOIN "User" u ON u.id = l."ownerId"
+      JOIN "Category" c ON c.id = l."categoryId"
       LEFT JOIN LATERAL (
         SELECT COUNT(*)::int AS "bidCount" FROM "Bid" b WHERE b."listingId" = l.id
       ) bc ON true
+      LEFT JOIN LATERAL (
+        SELECT up.key AS "firstImageKey"
+        FROM "ListingImage" li
+        JOIN "Upload" up ON up.id = li."uploadId"
+        WHERE li."listingId" = l.id
+        ORDER BY li.position ASC
+        LIMIT 1
+      ) img ON true
       ${rankLateral}
       ${whereClause}
       ${orderByClause}
@@ -739,41 +732,45 @@ export class ListingsService {
       return row.createdAt.toISOString();
     };
 
-    const items: ListingSummary[] = rows.map((r) => ({
-      id: r.id,
-      owner: {
-        id: r.owner_id,
-        displayName: r.owner_displayName,
-        avatarUrl: r.owner_avatarKey,
-        bio: r.owner_bio,
-        location: r.owner_location,
-        isBusiness: r.owner_isBusiness,
-        companyName: r.owner_companyName,
-        ratingAvg: r.owner_ratingAvg,
-        ratingCount: r.owner_ratingCount,
-        completedCount: r.owner_completedCount,
-        createdAt: r.owner_createdAt,
-      },
-      categoryId: r.categoryId,
-      kind: r.kind,
-      status: r.status,
-      title: r.title,
-      priceType: r.priceType,
-      priceMinCents: r.priceMinCents,
-      priceMaxCents: r.priceMaxCents,
-      currency: r.currency,
-      location: r.location,
-      expiresAt: r.expiresAt,
-      bidCount: r.bidCount,
-      createdAt: r.createdAt,
-    }));
-
     const paginatedResult = paginate(rows, limit, (row) =>
       encodeCursor(sort, getCursorValue(row), row.id),
     );
 
+    const items: ListingSummary[] = await Promise.all(
+      paginatedResult.items.map(async (r) => ({
+        id: r.id,
+        owner: await this.userPresenter.toPublicUser({
+          id: r.owner_id,
+          displayName: r.owner_displayName,
+          avatarKey: r.owner_avatarKey,
+          bio: r.owner_bio,
+          location: r.owner_location,
+          isBusiness: r.owner_isBusiness,
+          companyName: r.owner_companyName,
+          ratingAvg: r.owner_ratingAvg,
+          ratingCount: r.owner_ratingCount,
+          completedCount: r.owner_completedCount,
+          createdAt: r.owner_createdAt,
+        }),
+        categoryId: r.categoryId,
+        categoryName: r.categoryName,
+        thumbnailUrl: r.firstImageKey ? await this.storage.presignGet(r.firstImageKey) : null,
+        kind: r.kind,
+        status: r.status,
+        title: r.title,
+        priceType: r.priceType,
+        priceMinCents: r.priceMinCents,
+        priceMaxCents: r.priceMaxCents,
+        currency: r.currency,
+        location: r.location,
+        expiresAt: r.expiresAt,
+        bidCount: r.bidCount,
+        createdAt: r.createdAt,
+      })),
+    );
+
     return {
-      items: items.slice(0, paginatedResult.items.length),
+      items,
       nextCursor: paginatedResult.nextCursor,
     };
   }

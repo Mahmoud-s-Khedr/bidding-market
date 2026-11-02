@@ -766,6 +766,127 @@ describe('Listings endpoints', () => {
   });
 
   describe('GET /api/v1/listings (search, filters, sort, stable cursor pagination)', () => {
+    it('returns thumbnailUrl downloading first image bytes from S3 for listing with 2 images, and null for listing without images', async () => {
+      // 1. Create upload 1 with real S3 PUT
+      const img1Content = 'first-image-raw-bytes-content-12345';
+      const p1 = await request(server)
+        .post('/api/v1/uploads/presign')
+        .set('Authorization', `Bearer ${user1Token}`)
+        .send({
+          purpose: 'LISTING_IMAGE',
+          fileName: 'img1.png',
+          mimeType: 'image/png',
+          sizeBytes: Buffer.byteLength(img1Content),
+        })
+        .expect(201);
+      const put1 = await fetch(p1.body.url, {
+        method: 'PUT',
+        headers: { 'content-type': 'image/png' },
+        body: img1Content,
+      });
+      expect(put1.ok).toBe(true);
+      await request(server)
+        .post(`/api/v1/uploads/${p1.body.uploadId}/complete`)
+        .set('Authorization', `Bearer ${user1Token}`)
+        .expect(201);
+
+      // 2. Create upload 2 with real S3 PUT
+      const img2Content = 'second-image-raw-bytes-content-67890';
+      const p2 = await request(server)
+        .post('/api/v1/uploads/presign')
+        .set('Authorization', `Bearer ${user1Token}`)
+        .send({
+          purpose: 'LISTING_IMAGE',
+          fileName: 'img2.png',
+          mimeType: 'image/png',
+          sizeBytes: Buffer.byteLength(img2Content),
+        })
+        .expect(201);
+      const put2 = await fetch(p2.body.url, {
+        method: 'PUT',
+        headers: { 'content-type': 'image/png' },
+        body: img2Content,
+      });
+      expect(put2.ok).toBe(true);
+      await request(server)
+        .post(`/api/v1/uploads/${p2.body.uploadId}/complete`)
+        .set('Authorization', `Bearer ${user1Token}`)
+        .expect(201);
+
+      // 3. Create listing with 2 images
+      const listingWithImages = await request(server)
+        .post('/api/v1/listings')
+        .set('Authorization', `Bearer ${user1Token}`)
+        .send({
+          kind: 'REQUEST',
+          title: 'Listing with two images',
+          description: 'A sufficiently long description for testing two images thumbnail',
+          categoryId,
+          priceType: 'FIXED',
+          priceMinCents: 1000,
+          currency: 'USD',
+          imageIds: [p1.body.uploadId, p2.body.uploadId],
+          status: 'OPEN',
+        })
+        .expect(201);
+
+      // 4. Create listing without images
+      const listingWithoutImages = await request(server)
+        .post('/api/v1/listings')
+        .set('Authorization', `Bearer ${user1Token}`)
+        .send({
+          kind: 'REQUEST',
+          title: 'Listing without any images',
+          description: 'A sufficiently long description for testing listing with no images',
+          categoryId: subCategoryId,
+          priceType: 'FIXED',
+          priceMinCents: 2000,
+          currency: 'USD',
+          imageIds: [],
+          status: 'OPEN',
+        })
+        .expect(201);
+
+      // 5. Query GET /api/v1/listings
+      const listRes = await request(server).get('/api/v1/listings').expect(200);
+      expect(listRes.body.items).toHaveLength(2);
+
+      const items = listRes.body.items as Array<{
+        id: string;
+        categoryName: string;
+        thumbnailUrl: string | null;
+      }>;
+      const itemWithImages = items.find((i) => i.id === listingWithImages.body.id);
+      const itemWithoutImages = items.find((i) => i.id === listingWithoutImages.body.id);
+      expect(itemWithImages).toBeDefined();
+      expect(itemWithoutImages).toBeDefined();
+
+      // Listing with images: thumbnailUrl is presigned GET URL of first image
+      expect(itemWithImages!.categoryName).toBe('Technology');
+      expect(itemWithImages!.thumbnailUrl).toBeDefined();
+      expect(typeof itemWithImages!.thumbnailUrl).toBe('string');
+
+      // Verify downloading the thumbnailUrl returns the first image's bytes
+      const thumbRes = await fetch(itemWithImages!.thumbnailUrl!);
+      expect(thumbRes.ok).toBe(true);
+      const downloadedBytes = await thumbRes.text();
+      expect(downloadedBytes).toBe(img1Content);
+
+      // Listing without images: thumbnailUrl is null
+      expect(itemWithoutImages!.categoryName).toBe('Web Dev');
+      expect(itemWithoutImages!.thumbnailUrl).toBeNull();
+
+      // Detail endpoint also includes categoryName and thumbnailUrl
+      const detailRes = await request(server)
+        .get(`/api/v1/listings/${listingWithImages.body.id}`)
+        .expect(200);
+      expect(detailRes.body.categoryName).toBe('Technology');
+      expect(detailRes.body.thumbnailUrl).toBeDefined();
+      const detailThumbRes = await fetch(detailRes.body.thumbnailUrl as string);
+      expect(detailThumbRes.ok).toBe(true);
+      expect(await detailThumbRes.text()).toBe(img1Content);
+    });
+
     it('filters by category including descendants', async () => {
       // 1 listing in parent category, 1 in subcategory
       await prisma.listing.create({

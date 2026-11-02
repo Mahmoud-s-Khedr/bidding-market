@@ -1,6 +1,7 @@
 import {
   ConflictException,
   ForbiddenException,
+  forwardRef,
   Inject,
   Injectable,
   UnauthorizedException,
@@ -12,38 +13,7 @@ import type { LoginInput, RegisterInput, PrivateUser } from '@market/shared';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { APP_CONFIG, type Env } from '../../common/env.js';
 import { parseDurationMs } from '../../common/duration.js';
-
-const privateUserSelect = {
-  id: true,
-  email: true,
-  role: true,
-  displayName: true,
-  avatarKey: true,
-  bio: true,
-  location: true,
-  isBusiness: true,
-  companyName: true,
-  ratingAvg: true,
-  ratingCount: true,
-  completedCount: true,
-  createdAt: true,
-} as const;
-
-type PrivateUserData = {
-  id: string;
-  email: string;
-  role: 'USER' | 'ADMIN';
-  displayName: string;
-  avatarKey: string | null;
-  bio: string | null;
-  location: string | null;
-  isBusiness: boolean;
-  companyName: string | null;
-  ratingAvg: number;
-  ratingCount: number;
-  completedCount: number;
-  createdAt: Date;
-};
+import { privateUserSelect, UserPresenter } from '../users/user.presenter.js';
 
 @Injectable()
 export class AuthService {
@@ -53,26 +23,9 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
     @Inject(APP_CONFIG) private readonly env: Env,
+    @Inject(forwardRef(() => UserPresenter)) private readonly userPresenter: UserPresenter,
   ) {
     this.refreshTtlMs = parseDurationMs(this.env.JWT_REFRESH_TTL);
-  }
-
-  private safe(user: PrivateUserData): PrivateUser {
-    return {
-      id: user.id,
-      email: user.email,
-      role: user.role,
-      displayName: user.displayName,
-      avatarUrl: user.avatarKey,
-      bio: user.bio,
-      location: user.location,
-      isBusiness: user.isBusiness,
-      companyName: user.companyName,
-      ratingAvg: user.ratingAvg,
-      ratingCount: user.ratingCount,
-      completedCount: user.completedCount,
-      createdAt: user.createdAt,
-    };
   }
 
   private access(user: { id: string; role: 'USER' | 'ADMIN' }): string {
@@ -118,7 +71,7 @@ export class AuthService {
     return {
       accessToken: this.access(user),
       refreshToken: await this.issue(user.id),
-      user: this.safe(user),
+      user: await this.userPresenter.toPrivateUser(user),
     };
   }
 
@@ -144,7 +97,7 @@ export class AuthService {
     return {
       accessToken: this.access(user),
       refreshToken: await this.issue(user.id),
-      user: this.safe(user),
+      user: await this.userPresenter.toPrivateUser(user),
     };
   }
 
@@ -204,7 +157,7 @@ export class AuthService {
     return {
       accessToken: this.access(token.user),
       refreshToken: next,
-      user: this.safe(token.user),
+      user: await this.userPresenter.toPrivateUser(token.user),
     };
   }
 
@@ -222,6 +175,6 @@ export class AuthService {
       select: privateUserSelect,
     });
     if (!user) throw new UnauthorizedException();
-    return this.safe(user);
+    return this.userPresenter.toPrivateUser(user);
   }
 }

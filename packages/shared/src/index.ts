@@ -82,7 +82,7 @@ export const updateProfileSchema = z.object({
   displayName: z.string().trim().min(2).max(80).optional(),
   bio: z.string().trim().max(1000).nullable().optional(),
   location: z.string().trim().max(120).nullable().optional(),
-  avatarKey: z.string().max(500).nullable().optional(),
+  avatarUploadId: z.string().min(1).nullable().optional(),
   isBusiness: z.boolean().optional(),
   companyName: z.string().trim().min(1).max(120).nullable().optional(),
 });
@@ -407,6 +407,8 @@ export const listingSummarySchema = z.object({
   id: z.string(),
   owner: publicUserSchema,
   categoryId: z.string(),
+  categoryName: z.string(),
+  thumbnailUrl: z.string().nullable(),
   kind: ListingKind,
   status: ListingStatus,
   title: z.string(),

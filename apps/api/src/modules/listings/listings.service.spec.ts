@@ -10,6 +10,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { decodeCursor, encodeCursor } from './listings.cursor.js';
 import { ListingsController } from './listings.controller.js';
 import { ListingsService, validatePriceRules } from './listings.service.js';
+import { UserPresenter } from '../users/user.presenter.js';
 
 describe('listings.cursor', () => {
   it('encodes and decodes cursors with different sort values', () => {
@@ -200,7 +201,12 @@ describe('ListingsService', () => {
       invalidateCache: vi.fn().mockResolvedValue(undefined),
     };
 
-    service = new ListingsService(prisma as never, storage as never, categoriesService as never);
+    service = new ListingsService(
+      prisma as never,
+      storage as never,
+      categoriesService as never,
+      new UserPresenter(storage as never),
+    );
   });
 
   describe('create', () => {
@@ -572,6 +578,9 @@ describe('ListingsService', () => {
       expect(res.id).toBe('l1');
       expect(res.bidCount).toBe(2);
       expect(res.myBid).toBeNull();
+      expect(res.categoryName).toBe('Tech');
+      expect(res.thumbnailUrl).toBe('https://s3/file');
+      expect(res.owner.avatarUrl).toBe('https://s3/file');
       expect(res.images[0]?.url).toBe('https://s3/file');
     });
 
@@ -689,6 +698,8 @@ describe('ListingsService', () => {
           id: 'l1',
           ownerId: 'u1',
           categoryId: 'c1',
+          categoryName: 'Tech',
+          firstImageKey: 'image1.png',
           kind: 'REQUEST',
           status: 'OPEN',
           title: 'Listing 1',
@@ -716,6 +727,8 @@ describe('ListingsService', () => {
           id: 'l2',
           ownerId: 'u1',
           categoryId: 'c1',
+          categoryName: 'Tech',
+          firstImageKey: null,
           kind: 'REQUEST',
           status: 'OPEN',
           title: 'Listing 2',
@@ -745,6 +758,9 @@ describe('ListingsService', () => {
         listingQuerySchema.parse({ sort: 'price_asc', cursor, limit: 1 }),
       );
       expect(res.items).toHaveLength(1);
+      expect(res.items[0]?.categoryName).toBe('Tech');
+      expect(res.items[0]?.thumbnailUrl).toBe('https://s3/file');
+      expect(res.items[0]?.owner.avatarUrl).toBeNull();
       expect(res.nextCursor).toBeDefined();
     });
 

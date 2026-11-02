@@ -1,11 +1,13 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { AuthController } from './auth.controller.js';
 import { AuthService } from './auth.service.js';
 import { JwtAuthGuard, RolesGuard } from './auth.guard.js';
 import { APP_CONFIG, type Env } from '../../common/env.js';
+import { UsersModule } from '../users/users.module.js';
 @Module({
   imports: [
+    forwardRef(() => UsersModule),
     JwtModule.registerAsync({
       inject: [APP_CONFIG],
       useFactory: (env: Env) => ({
