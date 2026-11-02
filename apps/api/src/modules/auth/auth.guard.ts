@@ -43,7 +43,9 @@ export class JwtAuthGuard implements CanActivate {
       if (user.status !== 'ACTIVE') throw new ForbiddenException('Account is not active');
       request.user = { id: payload.sub, role: user.role };
       return true;
-    } catch {
+    } catch (error: unknown) {
+      if (error instanceof ForbiddenException || error instanceof UnauthorizedException)
+        throw error;
       throw new UnauthorizedException('Invalid access token');
     }
   }

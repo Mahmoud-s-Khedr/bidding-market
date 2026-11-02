@@ -31,7 +31,7 @@ export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
-    @Inject(APP_CONFIG) private readonly env?: Env,
+    @Inject(APP_CONFIG) private readonly env: Env,
   ) {}
   private safe(user: {
     id: string;
@@ -60,12 +60,7 @@ export class AuthService {
     return this.jwt.sign({ sub: user.id, role: user.role });
   }
   private hashToken(raw: string): string {
-    return createHmac(
-      'sha256',
-      this.env?.JWT_REFRESH_SECRET ?? process.env.JWT_REFRESH_SECRET ?? 'test',
-    )
-      .update(raw)
-      .digest('hex');
+    return createHmac('sha256', this.env.JWT_REFRESH_SECRET).update(raw).digest('hex');
   }
   private expiry(): Date {
     return new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
@@ -106,7 +101,12 @@ export class AuthService {
     input: LoginInput,
   ): Promise<{ accessToken: string; refreshToken: string; user: SafeUser }> {
     const user = await this.prisma.user.findUnique({ where: { email: input.email.toLowerCase() } });
-    if (!user || !(await argon2.verify(user.passwordHash, input.password)))
+    // Keep unknown-email failures comparable to bad-password failures.  This value is
+    // a valid argon2id hash for an otherwise unusable password.
+    const passwordHash =
+      user?.passwordHash ??
+      '$argon2id$v=19$m=65536,t=3,p=4$4artz94qxOHK7ZyMCbTzaw$EBRK7Vi3Do5OObJ3p5K+qqola5D/kjhS8zmJTkNVkGE';
+    if (!(await argon2.verify(passwordHash, input.password)) || !user)
       throw new UnauthorizedException('Invalid email or password');
     if (user.status !== 'ACTIVE') throw new ForbiddenException('Account is not active');
     return {
@@ -134,12 +134,12 @@ export class AuthService {
     if (token.expiresAt < new Date()) throw new UnauthorizedException('Refresh token expired');
     if (token.user.status !== 'ACTIVE') throw new ForbiddenException('Account is not active');
     const next = randomBytes(48).toString('base64url');
-    await this.prisma.$transaction(async (tx) => {
+    const rotated = await this.prisma.$transaction(async (tx) => {
       const newToken = await tx.refreshToken.create({
         data: {
           userId: token.userId,
           familyId: token.familyId,
-          tokenHash: await argon2.hash(next, { type: argon2.argon2id }),
+          tokenHash: this.hashToken(next),
           expiresAt: this.expiry(),
         },
       });
@@ -148,13 +148,19 @@ export class AuthService {
         data: { revokedAt: new Date(), replacedById: newToken.id },
       });
       if (revoked.count === 0) {
-        await tx.refreshToken.updateMany({
-          where: { familyId: token.familyId, revokedAt: null },
-          data: { revokedAt: new Date() },
-        });
-        throw new UnauthorizedException('Invalid refresh token');
+        return false;
       }
+      return true;
     });
+    if (!rotated) {
+      // This is an atomic compare-and-set failure: another request already
+      // consumed this token. Revoke every remaining member of the family.
+      await this.prisma.refreshToken.updateMany({
+        where: { familyId: token.familyId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      throw new UnauthorizedException('Invalid refresh token');
+    }
     return {
       accessToken: this.access(token.user),
       refreshToken: next,

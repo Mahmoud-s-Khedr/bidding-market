@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Post, Req, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Inject, Post, Req, Res } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import type { LoginInput, RegisterInput } from '@market/shared';
 import { loginSchema, registerSchema } from '@market/shared';
@@ -6,21 +6,32 @@ import type { Request, Response } from 'express';
 import { CurrentUser, Public, type AuthUser } from '../../common/auth.js';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe.js';
 import { AuthService } from './auth.service.js';
-import { JwtAuthGuard } from './auth.guard.js';
+import { APP_CONFIG, type Env } from '../../common/env.js';
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly auth: AuthService) {}
-  private readonly cookieOptions = {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax' as const,
-    path: '/api/v1/auth',
-    maxAge: 7 * 24 * 60 * 60 * 1000,
+  constructor(
+    private readonly auth: AuthService,
+    @Inject(APP_CONFIG) env: Env,
+  ) {
+    this.cookieOptions = {
+      httpOnly: true,
+      secure: env.NODE_ENV === 'production',
+      sameSite: 'lax' as const,
+      path: '/api/v1/auth',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    };
+  }
+  private readonly cookieOptions: {
+    httpOnly: boolean;
+    secure: boolean;
+    sameSite: 'lax';
+    path: string;
+    maxAge: number;
   };
   private cookie(res: Response, token: string): void {
     res.cookie('refresh_token', token, this.cookieOptions);
   }
-  @Post('register') @Public() @Throttle({ default: { limit: 100, ttl: 60000 } }) async register(
+  @Post('register') @Public() @Throttle({ default: { limit: 20, ttl: 60000 } }) async register(
     @Body(new ZodValidationPipe(registerSchema)) body: unknown,
     @Res({ passthrough: true }) res: Response,
   ) {
@@ -51,7 +62,7 @@ export class AuthController {
     await this.auth.logout(req.cookies?.refresh_token as string | undefined);
     res.clearCookie('refresh_token', this.cookieOptions);
   }
-  @Get('me') @UseGuards(JwtAuthGuard) me(@CurrentUser() user: AuthUser) {
+  @Get('me') me(@CurrentUser() user: AuthUser) {
     return this.auth.me(user.id);
   }
 }

@@ -1,4 +1,5 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
+import { APP_CONFIG, type Env } from '../common/env.js';
 import {
   CreateBucketCommand,
   DeleteObjectCommand,
@@ -10,18 +11,22 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 @Injectable()
 export class StorageService implements OnModuleInit {
-  private readonly bucket = process.env.S3_BUCKET ?? '';
-  private readonly client = new S3Client({
-    endpoint: process.env.S3_ENDPOINT,
-    region: process.env.S3_REGION,
-    forcePathStyle: true,
-    requestChecksumCalculation: 'WHEN_REQUIRED',
-    responseChecksumValidation: 'WHEN_REQUIRED',
-    credentials: {
-      accessKeyId: process.env.S3_ACCESS_KEY ?? '',
-      secretAccessKey: process.env.S3_SECRET_KEY ?? '',
-    },
-  });
+  private readonly bucket: string;
+  private readonly client: S3Client;
+  constructor(@Inject(APP_CONFIG) env: Env) {
+    this.bucket = env.S3_BUCKET;
+    this.client = new S3Client({
+      endpoint: env.S3_ENDPOINT,
+      region: env.S3_REGION,
+      forcePathStyle: true,
+      requestChecksumCalculation: 'WHEN_REQUIRED',
+      responseChecksumValidation: 'WHEN_REQUIRED',
+      credentials: {
+        accessKeyId: env.S3_ACCESS_KEY,
+        secretAccessKey: env.S3_SECRET_KEY,
+      },
+    });
+  }
   async onModuleInit(): Promise<void> {
     try {
       await this.client.send(new CreateBucketCommand({ Bucket: this.bucket }));
