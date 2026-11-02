@@ -35,6 +35,7 @@ Every package: `build`, `lint` (`eslint .`), `typecheck` (`tsc --noEmit`), `test
 
 ## Definition of done for a task
 
+- [ ] `scripts/ci-local.sh --with-db` passes (runs the CI pipeline on a clean checkout of HEAD — commit first). It catches missing generated files, env assumptions and lockfile drift that your dirty worktree hides.
 - [ ] `pnpm install && pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build` all pass locally from the repo root.
 - [ ] API: `pnpm --filter api test:integration` passes against local docker Postgres/Redis/S3.
 - [ ] `pnpm audit --audit-level high` and `pnpm audit --prod --audit-level moderate` exit 0.

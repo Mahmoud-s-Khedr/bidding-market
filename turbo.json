@@ -4,17 +4,53 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
+      "outputs": ["dist/**", ".next/**", "!.next/cache/**"],
+      "env": ["NEXT_PUBLIC_*"]
     },
-    "dev": { "cache": false, "persistent": true },
-    "lint": { "dependsOn": ["^build"] },
-    "typecheck": { "dependsOn": ["^build"] },
-    "test": { "dependsOn": ["^build"], "outputs": ["coverage/**"] },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "lint": {
+      "dependsOn": ["^build"]
+    },
+    "typecheck": {
+      "dependsOn": ["^build"]
+    },
+    "test": {
+      "dependsOn": ["^build"],
+      "outputs": ["coverage/**"]
+    },
     "test:integration": {
       "dependsOn": ["^build"],
       "cache": false,
-      "env": ["DATABASE_URL", "REDIS_URL", "S3_*", "JWT_*"]
+      "env": [
+        "DATABASE_URL",
+        "SHADOW_DATABASE_URL",
+        "REDIS_URL",
+        "S3_*",
+        "JWT_*",
+        "WEB_ORIGIN",
+        "API_PORT",
+        "NODE_ENV"
+      ]
     },
-    "test:e2e": { "dependsOn": ["^build"], "cache": false }
+    "test:e2e": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "env": [
+        "DATABASE_URL",
+        "SHADOW_DATABASE_URL",
+        "REDIS_URL",
+        "S3_*",
+        "JWT_*",
+        "WEB_ORIGIN",
+        "API_PORT",
+        "NODE_ENV",
+        "WEB_PORT",
+        "NEXT_PUBLIC_*",
+        "CI"
+      ]
+    }
   }
 }

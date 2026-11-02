@@ -6,7 +6,7 @@ Requests from the web app use `credentials: 'include'`.
 
 ## Conventions
 
-- IDs: cuid2 strings. Timestamps: ISO 8601 strings. Money: integer **minor units** (`amountCents`) + `currency` (ISO 4217, default `USD`).
+- IDs: cuid strings. Timestamps: ISO 8601 strings. Money: integer **minor units** (`amountCents`) + `currency` (ISO 4217, default `USD`). Passwords are 8–128 characters and must contain lowercase, uppercase, and numeric characters.
 - Errors: `{ "error": { "code": "VALIDATION_ERROR" | "UNAUTHORIZED" | "FORBIDDEN" | "NOT_FOUND" | "CONFLICT" | "RATE_LIMITED" | "INTERNAL", "message": string, "details"?: unknown } }` with matching HTTP status.
 - Lists: `?cursor=<id>&limit=<1..50, default 20>` → `{ "items": T[], "nextCursor": string | null }`.
 - 🔒 = requires auth, 👑 = admin only. Authorization failures on someone else's resource return 404 when existence should not leak, else 403.
