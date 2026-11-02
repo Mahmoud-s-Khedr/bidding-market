@@ -1,8 +1,5 @@
-pnpm-lock.yaml
-**/dist
-**/.next
-**/coverage
-**/node_modules
-**/playwright-report
-**/test-results
-apps/api/prisma/migrations/**/migration.sql
+apps/api/src/generated/
+apps/api/dist/
+packages/shared/dist/
+coverage/
+node_modules/

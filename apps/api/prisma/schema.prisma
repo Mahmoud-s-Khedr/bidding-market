@@ -1,0 +1,431 @@
+generator client {
+provider = "prisma-client"
+output = "../src/generated/prisma"
+}
+datasource db {
+provider = "postgresql"
+}
+
+enum Role {
+USER
+ADMIN
+}
+enum UserStatus {
+ACTIVE
+SUSPENDED
+BANNED
+}
+enum ListingKind {
+REQUEST
+OFFER
+}
+enum ListingStatus {
+DRAFT
+OPEN
+IN_PROGRESS
+COMPLETED
+CLOSED
+REMOVED
+}
+enum PriceType {
+FIXED
+RANGE
+NEGOTIABLE
+}
+enum BidStatus {
+PENDING
+SHORTLISTED
+COUNTERED
+ACCEPTED
+REJECTED
+WITHDRAWN
+DECLINED
+}
+enum MessageType {
+TEXT
+IMAGE
+FILE
+VOICE
+}
+enum AgreementStatus {
+ACTIVE
+DELIVERED
+COMPLETED
+CANCELLED
+DISPUTED
+}
+enum MilestoneStatus {
+PENDING
+IN_PROGRESS
+DONE
+}
+enum UploadPurpose {
+LISTING_IMAGE
+LISTING_ATTACHMENT
+BID_ATTACHMENT
+MESSAGE_ATTACHMENT
+DELIVERABLE
+AVATAR
+}
+enum UploadStatus {
+PENDING
+READY
+FAILED
+}
+enum NotificationType {
+BID_RECEIVED
+BID_UPDATED
+BID_COUNTERED
+BID_ACCEPTED
+BID_REJECTED
+MESSAGE_RECEIVED
+DELIVERABLE_SUBMITTED
+DELIVERABLE_ACCEPTED
+REVISION_REQUESTED
+AGREEMENT_COMPLETED
+AGREEMENT_CANCELLED
+REPORT_RESOLVED
+REVIEW_RECEIVED
+}
+enum ReportTargetType {
+LISTING
+USER
+MESSAGE
+BID
+}
+enum ReportReason {
+SPAM
+FRAUD
+INAPPROPRIATE
+HARASSMENT
+OTHER
+}
+enum ReportStatus {
+OPEN
+RESOLVED
+DISMISSED
+}
+
+model User {
+id String @id @default(cuid())
+email String @unique
+passwordHash String
+role Role @default(USER)
+status UserStatus @default(ACTIVE)
+displayName String
+avatarKey String?
+bio String?
+location String?
+isBusiness Boolean @default(false)
+companyName String?
+ratingAvg Float @default(0)
+ratingCount Int @default(0)
+completedCount Int @default(0)
+createdAt DateTime @default(now())
+updatedAt DateTime @updatedAt
+refreshTokens RefreshToken[]
+listings Listing[]
+bids Bid[]
+sentMessages Message[]
+participants ConversationParticipant[]
+buyerAgreements Agreement[] @relation("Buyer")
+providerAgreements Agreement[] @relation("Provider")
+reviewsWritten Review[] @relation("ReviewAuthor")
+reviewsReceived Review[] @relation("ReviewTarget")
+notifications Notification[]
+uploads Upload[]
+reports Report[]
+auditLogs AuditLog[]
+@@index([status])
+}
+model RefreshToken {
+id String @id @default(cuid())
+tokenHash String @unique
+familyId String
+userId String
+user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+expiresAt DateTime
+revokedAt DateTime?
+replacedById String?
+replacedBy RefreshToken? @relation("TokenReplacement",fields:[replacedById],references:[id])
+replaces RefreshToken[] @relation("TokenReplacement")
+createdAt DateTime @default(now())
+@@index([userId,familyId])
+}
+model Category {
+id String @id @default(cuid())
+name String
+slug String @unique
+description String?
+parentId String?
+parent Category? @relation("CategoryTree",fields:[parentId],references:[id],onDelete:Restrict)
+children Category[] @relation("CategoryTree")
+listings Listing[]
+createdAt DateTime @default(now())
+updatedAt DateTime @updatedAt
+@@index([parentId])
+}
+model Listing {
+id String @id @default(cuid())
+ownerId String
+owner User @relation(fields:[ownerId],references:[id],onDelete:Restrict)
+categoryId String
+category Category @relation(fields:[categoryId],references:[id],onDelete:Restrict)
+kind ListingKind
+status ListingStatus @default(DRAFT)
+title String
+description String
+priceType PriceType
+priceMinCents Int?
+priceMaxCents Int?
+currency String @default("USD")
+deliveryDays Int?
+location String?
+tags String[] @default([])
+expiresAt DateTime?
+images ListingImage[]
+attachments ListingAttachment[]
+bids Bid[]
+agreement Agreement?
+createdAt DateTime @default(now())
+updatedAt DateTime @updatedAt
+@@index([status,createdAt])
+@@index([ownerId,status])
+@@index([categoryId,status])
+@@index([priceMinCents])
+}
+model Upload {
+id String @id @default(cuid())
+uploaderId String
+uploader User @relation(fields:[uploaderId],references:[id],onDelete:Restrict)
+purpose UploadPurpose
+status UploadStatus @default(PENDING)
+key String @unique
+fileName String
+mimeType String
+sizeBytes Int
+createdAt DateTime @default(now())
+completedAt DateTime?
+listingImages ListingImage[]
+listingAttachments ListingAttachment[]
+bidAttachments BidAttachment[]
+messageAttachments MessageAttachment[]
+deliverableAttachments DeliverableAttachment[]
+@@index([uploaderId,status])
+}
+model ListingImage {
+id String @id @default(cuid())
+listingId String
+listing Listing @relation(fields:[listingId],references:[id],onDelete:Cascade)
+uploadId String
+upload Upload @relation(fields:[uploadId],references:[id],onDelete:Restrict)
+position Int @default(0)
+@@unique([listingId,uploadId])
+}
+model ListingAttachment {
+id String @id @default(cuid())
+listingId String
+listing Listing @relation(fields:[listingId],references:[id],onDelete:Cascade)
+uploadId String
+upload Upload @relation(fields:[uploadId],references:[id],onDelete:Restrict)
+@@unique([listingId,uploadId])
+}
+model Bid {
+id String @id @default(cuid())
+listingId String
+listing Listing @relation(fields:[listingId],references:[id],onDelete:Restrict)
+bidderId String
+bidder User @relation(fields:[bidderId],references:[id],onDelete:Restrict)
+amountCents Int
+currency String
+deliveryDays Int
+message String
+status BidStatus @default(PENDING)
+revisions BidRevision[]
+attachments BidAttachment[]
+agreement Agreement?
+createdAt DateTime @default(now())
+updatedAt DateTime @updatedAt
+@@index([listingId,status])
+@@index([bidderId,status])
+}
+model BidRevision {
+id String @id @default(cuid())
+bidId String
+bid Bid @relation(fields:[bidId],references:[id],onDelete:Cascade)
+authorId String
+amountCents Int
+deliveryDays Int
+message String
+createdAt DateTime @default(now())
+@@index([bidId,createdAt])
+}
+model BidAttachment {
+id String @id @default(cuid())
+bidId String
+bid Bid @relation(fields:[bidId],references:[id],onDelete:Cascade)
+uploadId String
+upload Upload @relation(fields:[uploadId],references:[id],onDelete:Restrict)
+@@unique([bidId,uploadId])
+}
+model Conversation {
+id String @id @default(cuid())
+listingId String?
+bidId String?
+agreementId String? @unique
+agreement Agreement? @relation(fields:[agreementId],references:[id],onDelete:Restrict)
+participants ConversationParticipant[]
+messages Message[]
+createdAt DateTime @default(now())
+updatedAt DateTime @updatedAt
+@@index([listingId])
+@@index([bidId])
+}
+model ConversationParticipant {
+conversationId String
+userId String
+conversation Conversation @relation(fields:[conversationId],references:[id],onDelete:Cascade)
+user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+lastReadMessageId String?
+joinedAt DateTime @default(now())
+@@id([conversationId,userId])
+@@index([userId])
+}
+model Message {
+id String @id @default(cuid())
+conversationId String
+conversation Conversation @relation(fields:[conversationId],references:[id],onDelete:Cascade)
+senderId String
+sender User @relation(fields:[senderId],references:[id],onDelete:Restrict)
+type MessageType
+body String?
+voiceDurationSec Int?
+attachments MessageAttachment[]
+createdAt DateTime @default(now())
+@@index([conversationId,createdAt])
+}
+model MessageAttachment {
+id String @id @default(cuid())
+messageId String
+message Message @relation(fields:[messageId],references:[id],onDelete:Cascade)
+uploadId String
+upload Upload @relation(fields:[uploadId],references:[id],onDelete:Restrict)
+@@unique([messageId,uploadId])
+}
+model Agreement {
+id String @id @default(cuid())
+listingId String @unique
+listing Listing @relation(fields:[listingId],references:[id],onDelete:Restrict)
+bidId String @unique
+bid Bid @relation(fields:[bidId],references:[id],onDelete:Restrict)
+buyerId String
+buyer User @relation("Buyer",fields:[buyerId],references:[id],onDelete:Restrict)
+providerId String
+provider User @relation("Provider",fields:[providerId],references:[id],onDelete:Restrict)
+conversation Conversation?
+status AgreementStatus @default(ACTIVE)
+buyerConfirmedAt DateTime?
+providerConfirmedAt DateTime?
+milestones Milestone[]
+deliverables Deliverable[]
+events AgreementEvent[]
+reviews Review[]
+createdAt DateTime @default(now())
+updatedAt DateTime @updatedAt
+@@index([buyerId,status])
+@@index([providerId,status])
+}
+model Milestone {
+id String @id @default(cuid())
+agreementId String
+agreement Agreement @relation(fields:[agreementId],references:[id],onDelete:Cascade)
+title String
+amountCents Int?
+dueDate DateTime?
+status MilestoneStatus @default(PENDING)
+position Int @default(0)
+createdAt DateTime @default(now())
+}
+model Deliverable {
+id String @id @default(cuid())
+agreementId String
+agreement Agreement @relation(fields:[agreementId],references:[id],onDelete:Cascade)
+note String
+submittedById String
+acceptedAt DateTime?
+revisionNote String?
+attachments DeliverableAttachment[]
+createdAt DateTime @default(now())
+}
+model DeliverableAttachment {
+id String @id @default(cuid())
+deliverableId String
+deliverable Deliverable @relation(fields:[deliverableId],references:[id],onDelete:Cascade)
+uploadId String
+upload Upload @relation(fields:[uploadId],references:[id],onDelete:Restrict)
+@@unique([deliverableId,uploadId])
+}
+model AgreementEvent {
+id String @id @default(cuid())
+agreementId String
+agreement Agreement @relation(fields:[agreementId],references:[id],onDelete:Cascade)
+actorId String?
+type String
+data Json?
+createdAt DateTime @default(now())
+@@index([agreementId,createdAt])
+}
+model Review {
+id String @id @default(cuid())
+agreementId String
+agreement Agreement @relation(fields:[agreementId],references:[id],onDelete:Cascade)
+authorId String
+author User @relation("ReviewAuthor",fields:[authorId],references:[id],onDelete:Restrict)
+targetId String
+target User @relation("ReviewTarget",fields:[targetId],references:[id],onDelete:Restrict)
+rating Int
+comment String?
+createdAt DateTime @default(now())
+@@unique([agreementId,authorId])
+@@index([targetId,createdAt])
+}
+model Notification {
+id String @id @default(cuid())
+userId String
+user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+type NotificationType
+title String
+body String
+link String?
+data Json?
+readAt DateTime?
+createdAt DateTime @default(now())
+@@index([userId,readAt,createdAt])
+}
+model Report {
+id String @id @default(cuid())
+reporterId String
+reporter User @relation(fields:[reporterId],references:[id],onDelete:Restrict)
+targetType ReportTargetType
+targetId String
+reason ReportReason
+details String?
+status ReportStatus @default(OPEN)
+resolutionNote String?
+resolvedById String?
+createdAt DateTime @default(now())
+resolvedAt DateTime?
+@@index([status,createdAt])
+@@index([targetType,targetId])
+}
+model AuditLog {
+id String @id @default(cuid())
+actorId String
+actor User @relation(fields:[actorId],references:[id],onDelete:Restrict)
+action String
+targetType String
+targetId String?
+data Json?
+createdAt DateTime @default(now())
+@@index([actorId,createdAt])
+}

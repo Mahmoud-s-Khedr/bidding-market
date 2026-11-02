@@ -20,6 +20,8 @@ packages/
 - Auth: JWT access token (Bearer, 15m) + rotating refresh token (httpOnly, Secure in prod,
   SameSite=Lax cookie `refresh_token`, hashed in DB). argon2 password hashing.
 - Validation: zod schemas from `@market/shared` via a `ZodValidationPipe`.
+- REST controllers use an opt-in authentication pattern: endpoints are public unless they explicitly
+  apply `JwtAuthGuard`; role-restricted endpoints also apply `RolesGuard` with `@Roles('ADMIN')`.
 - Config: env validated by zod at boot.
 - Module layout: `src/modules/<feature>/{<feature>.module.ts, .controller.ts, .service.ts, *.spec.ts}`.
 - Tests: **Vitest** (with `unplugin-swc` for decorators). Unit: `*.spec.ts` next to code.
