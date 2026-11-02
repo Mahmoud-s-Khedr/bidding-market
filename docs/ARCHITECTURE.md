@@ -16,7 +16,7 @@ packages/
 - Prisma **7.10.1** (pin exact; do not use 8.x rc) with PostgreSQL 17. Schema in `apps/api/prisma/schema.prisma`,
   migrations committed in `apps/api/prisma/migrations`.
 - Redis: Socket.IO redis adapter + presence.
-- S3-compatible storage (MinIO locally) via `@aws-sdk/client-s3` + presigned URLs.
+- S3-compatible storage (SeaweedFS S3 locally, port 8333) via `@aws-sdk/client-s3` + presigned URLs.
 - Auth: JWT access token (Bearer, 15m) + rotating refresh token (httpOnly, Secure in prod,
   SameSite=Lax cookie `refresh_token`, hashed in DB). argon2 password hashing.
 - Validation: zod schemas from `@market/shared` via a `ZodValidationPipe`.
@@ -38,7 +38,14 @@ packages/
 
 Every PR to `main` must pass the single required check **CI OK**, which aggregates:
 format check, ESLint (type-aware), typecheck, unit tests with coverage thresholds, integration tests
-against real Postgres/Redis/MinIO, Prisma schema↔migration drift check, production build,
+against real Postgres/Redis/S3, Prisma schema↔migration drift check, production build,
 Playwright e2e, `pnpm audit` (high+), gitleaks secret scan, dependency review (license + vuln),
 conventional PR title. CodeQL runs separately. Branch protection forbids direct pushes and
 force-pushes to `main`. Each PR is additionally reviewed by a Claude Sonnet 5.5 reviewer before merge.
+
+### S3 client note
+
+SeaweedFS (and other non-AWS S3 servers) reject the AWS SDK v3 default flexible checksums on
+presigned PUTs. Always construct the client with
+`requestChecksumCalculation: 'WHEN_REQUIRED', responseChecksumValidation: 'WHEN_REQUIRED', forcePathStyle: true`.
+The API must create the bucket on boot if it does not exist.

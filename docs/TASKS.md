@@ -12,7 +12,7 @@ Every task = one branch `task/<id>-<slug>` → PR → CI OK + Sonnet 5.5 review 
 
 ## Phase 2 — core marketplace
 
-| API-02 | codex  | Categories (public tree + admin CRUD), uploads (presign/complete/url, MinIO), listings CRUD + search/filter/sort/cursor pagination (Postgres full-text)                    | API-01         | todo |
+| API-02 | codex  | Categories (public tree + admin CRUD), uploads (presign/complete/url, S3/SeaweedFS), listings CRUD + search/filter/sort/cursor pagination (Postgres full-text)             | API-01         | todo |
 | ------ | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------- | ---- |
 | API-03 | codex  | Bids + negotiation (revisions, counter, accept-counter, accept w/ race-safe transaction creating Agreement + Conversation), `/bids/mine`                                   | API-02         | todo |
 | WEB-02 | gemini | Home, browse/search page with filters & sort & infinite scroll, category pages, listing detail, create/edit listing form with image/attachment upload, public profile page | API-02, WEB-01 | todo |

@@ -6,7 +6,7 @@ services:
       POSTGRES_USER: market
       POSTGRES_PASSWORD: market
       POSTGRES_DB: market
-    ports: ['5432:5432']
+    ports: ['5433:5432']
     volumes: [pgdata:/var/lib/postgresql/data]
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U market']
@@ -15,14 +15,12 @@ services:
   redis:
     image: redis:7-alpine
     ports: ['6379:6379']
-  minio:
-    image: minio/minio:latest
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
-    ports: ['9000:9000', '9001:9001']
-    volumes: [miniodata:/data]
+  s3:
+    # S3-compatible object storage (SeaweedFS). Any access key/secret is accepted locally.
+    image: chrislusf/seaweedfs:4.52
+    command: server -s3 -dir=/data
+    ports: ['8333:8333']
+    volumes: [s3data:/data]
 volumes:
   pgdata:
-  miniodata:
+  s3data:

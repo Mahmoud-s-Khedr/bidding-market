@@ -82,7 +82,7 @@ jobs:
       JWT_REFRESH_SECRET: ci-refresh-secret-ci-refresh-secret-000
       JWT_ACCESS_TTL: 15m
       JWT_REFRESH_TTL: 7d
-      S3_ENDPOINT: http://localhost:9000
+      S3_ENDPOINT: http://localhost:8333
       S3_REGION: us-east-1
       S3_BUCKET: market-uploads
       S3_ACCESS_KEY: minioadmin
@@ -91,12 +91,10 @@ jobs:
       WEB_ORIGIN: http://localhost:3000
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Start MinIO
+      - name: Start S3 (SeaweedFS)
         run: |
-          docker run -d --name minio -p 9000:9000 \
-            -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
-            minio/minio:latest server /data
-          for i in $(seq 1 30); do curl -sf http://localhost:9000/minio/health/live && break; sleep 2; done
+          docker run -d --name s3 -p 8333:8333 chrislusf/seaweedfs:4.52 server -s3 -dir=/data
+          for i in $(seq 1 45); do curl -s -o /dev/null http://localhost:8333/ && break; sleep 2; done
       - uses: ./.github/actions/setup
       - name: Create shadow database
         run: PGPASSWORD=market psql -h localhost -U market -d market -c 'CREATE DATABASE market_shadow;'
@@ -145,7 +143,7 @@ jobs:
       JWT_REFRESH_SECRET: ci-refresh-secret-ci-refresh-secret-000
       JWT_ACCESS_TTL: 15m
       JWT_REFRESH_TTL: 7d
-      S3_ENDPOINT: http://localhost:9000
+      S3_ENDPOINT: http://localhost:8333
       S3_REGION: us-east-1
       S3_BUCKET: market-uploads
       S3_ACCESS_KEY: minioadmin
@@ -157,12 +155,10 @@ jobs:
       NEXT_PUBLIC_WS_URL: http://localhost:4000
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Start MinIO
+      - name: Start S3 (SeaweedFS)
         run: |
-          docker run -d --name minio -p 9000:9000 \
-            -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
-            minio/minio:latest server /data
-          for i in $(seq 1 30); do curl -sf http://localhost:9000/minio/health/live && break; sleep 2; done
+          docker run -d --name s3 -p 8333:8333 chrislusf/seaweedfs:4.52 server -s3 -dir=/data
+          for i in $(seq 1 45); do curl -s -o /dev/null http://localhost:8333/ && break; sleep 2; done
       - uses: ./.github/actions/setup
       - run: pnpm --filter api run db:migrate:deploy
       - run: pnpm --filter api run db:seed
