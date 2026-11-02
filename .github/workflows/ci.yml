@@ -202,8 +202,10 @@ jobs:
         with:
           fetch-depth: 0
       - uses: ./.github/actions/setup
-      - name: Audit production dependencies (high+)
-        run: pnpm audit --prod --audit-level high
+      - name: Audit production dependencies (moderate+)
+        run: pnpm audit --prod --audit-level moderate
+      - name: Audit all dependencies incl. dev/tooling (high+)
+        run: pnpm audit --audit-level high
       - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
