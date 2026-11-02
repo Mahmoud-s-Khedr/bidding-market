@@ -284,6 +284,7 @@ export const conversationCreateSchema = z.object({
   listingId: z.string().optional(),
   bidId: z.string().optional(),
 });
+export const messagesQuerySchema = paginationSchema.extend({ before: z.string().optional() });
 export const readSchema = z.object({ lastMessageId: z.string() });
 export const agreementCancelSchema = z.object({ reason: z.string().min(1).max(2000) });
 export const bidRejectSchema = z.object({ reason: z.string().max(2000).optional() });
