@@ -7,6 +7,7 @@ import { CurrentUser, Public, type AuthUser } from '../../common/auth.js';
 import { ZodValidationPipe } from '../../common/zod-validation.pipe.js';
 import { AuthService } from './auth.service.js';
 import { APP_CONFIG, type Env } from '../../common/env.js';
+import { parseDurationMs } from '../../common/duration.js';
 @Controller('auth')
 export class AuthController {
   constructor(
@@ -18,7 +19,7 @@ export class AuthController {
       secure: env.NODE_ENV === 'production',
       sameSite: 'lax' as const,
       path: '/api/v1/auth',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
+      maxAge: parseDurationMs(env.JWT_REFRESH_TTL),
     };
   }
   private readonly cookieOptions: {
@@ -39,7 +40,11 @@ export class AuthController {
     this.cookie(res, result.refreshToken);
     return { accessToken: result.accessToken, user: result.user };
   }
-  @Post('login') @Public() @Throttle({ default: { limit: 5, ttl: 60000 } }) async login(
+  @Post('login')
+  @Public()
+  @HttpCode(200)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  async login(
     @Body(new ZodValidationPipe(loginSchema)) body: unknown,
     @Res({ passthrough: true }) res: Response,
   ) {

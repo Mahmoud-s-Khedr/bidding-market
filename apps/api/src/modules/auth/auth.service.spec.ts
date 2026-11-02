@@ -72,17 +72,41 @@ describe('AuthService', () => {
     const p = base();
     p.user.findUnique.mockResolvedValue(null);
     p.user.create.mockResolvedValue(user);
-    await expect(
-      new AuthService(
-        p as never,
-        { sign: vi.fn().mockReturnValue('access') } as never,
-        env,
-      ).register({
-        email: 'a@test.com',
-        password: 'Password1',
-        displayName: 'AA',
-      }),
-    ).resolves.toMatchObject({ accessToken: 'access' });
+    const result = await new AuthService(
+      p as never,
+      { sign: vi.fn().mockReturnValue('access') } as never,
+      env,
+    ).register({
+      email: 'a@test.com',
+      password: 'Password1',
+      displayName: 'AA',
+    });
+    expect(result).toMatchObject({ accessToken: 'access' });
+    expect(result.user).not.toHaveProperty('passwordHash');
+    expect(result.user).not.toHaveProperty('status');
+  });
+  it('respects custom JWT_REFRESH_TTL for refresh token expiry', async () => {
+    const p = base();
+    p.user.findUnique.mockResolvedValue(null);
+    p.user.create.mockResolvedValue(user);
+    const service = new AuthService(
+      p as never,
+      { sign: vi.fn().mockReturnValue('access') } as never,
+      { ...env, JWT_REFRESH_TTL: '12h' },
+    );
+    const before = Date.now();
+    await service.register({
+      email: 'custom-ttl@test.com',
+      password: 'Password1',
+      displayName: 'AA',
+    });
+    expect(p.refreshToken.create).toHaveBeenCalled();
+    const firstCall = p.refreshToken.create.mock.calls[0] as unknown as [
+      { data: { expiresAt: Date } },
+    ];
+    const expiresAt = firstCall[0].data.expiresAt.getTime();
+    expect(expiresAt - before).toBeGreaterThanOrEqual(12 * 60 * 60 * 1000 - 1000);
+    expect(expiresAt - before).toBeLessThanOrEqual(12 * 60 * 60 * 1000 + 5000);
   });
   it('rejects duplicate registration', async () => {
     const p = base();

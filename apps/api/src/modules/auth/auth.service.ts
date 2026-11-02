@@ -8,15 +8,33 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import * as argon2 from 'argon2';
 import { createHmac, randomBytes } from 'node:crypto';
-import type { LoginInput, RegisterInput } from '@market/shared';
+import type { LoginInput, RegisterInput, PrivateUser } from '@market/shared';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { APP_CONFIG, type Env } from '../../common/env.js';
-type SafeUser = {
+import { parseDurationMs } from '../../common/duration.js';
+
+const privateUserSelect = {
+  id: true,
+  email: true,
+  role: true,
+  displayName: true,
+  avatarKey: true,
+  bio: true,
+  location: true,
+  isBusiness: true,
+  companyName: true,
+  ratingAvg: true,
+  ratingCount: true,
+  completedCount: true,
+  createdAt: true,
+} as const;
+
+type PrivateUserData = {
   id: string;
   email: string;
   role: 'USER' | 'ADMIN';
   displayName: string;
-  avatarUrl: string | null;
+  avatarKey: string | null;
   bio: string | null;
   location: string | null;
   isBusiness: boolean;
@@ -26,45 +44,49 @@ type SafeUser = {
   completedCount: number;
   createdAt: Date;
 };
+
 @Injectable()
 export class AuthService {
+  private readonly refreshTtlMs: number;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
     @Inject(APP_CONFIG) private readonly env: Env,
-  ) {}
-  private safe(user: {
-    id: string;
-    email: string;
-    role: 'USER' | 'ADMIN';
-    displayName: string;
-    avatarKey: string | null;
-    bio: string | null;
-    location: string | null;
-    isBusiness: boolean;
-    companyName: string | null;
-    ratingAvg: number;
-    ratingCount: number;
-    completedCount: number;
-    createdAt: Date;
-  }): SafeUser {
+  ) {
+    this.refreshTtlMs = parseDurationMs(this.env.JWT_REFRESH_TTL);
+  }
+
+  private safe(user: PrivateUserData): PrivateUser {
     return {
-      ...user,
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      displayName: user.displayName,
       avatarUrl: user.avatarKey,
       bio: user.bio,
       location: user.location,
+      isBusiness: user.isBusiness,
       companyName: user.companyName,
+      ratingAvg: user.ratingAvg,
+      ratingCount: user.ratingCount,
+      completedCount: user.completedCount,
+      createdAt: user.createdAt,
     };
   }
+
   private access(user: { id: string; role: 'USER' | 'ADMIN' }): string {
     return this.jwt.sign({ sub: user.id, role: user.role });
   }
+
   private hashToken(raw: string): string {
     return createHmac('sha256', this.env.JWT_REFRESH_SECRET).update(raw).digest('hex');
   }
+
   private expiry(): Date {
-    return new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    return new Date(Date.now() + this.refreshTtlMs);
   }
+
   private async issue(userId: string, familyId = randomBytes(20).toString('hex')): Promise<string> {
     const raw = randomBytes(48).toString('base64url');
     await this.prisma.refreshToken.create({
@@ -77,9 +99,10 @@ export class AuthService {
     });
     return raw;
   }
+
   async register(
     input: RegisterInput,
-  ): Promise<{ accessToken: string; refreshToken: string; user: SafeUser }> {
+  ): Promise<{ accessToken: string; refreshToken: string; user: PrivateUser }> {
     const exists = await this.prisma.user.findUnique({ where: { email: input.email } });
     if (exists) throw new ConflictException('Email already registered');
     const user = await this.prisma.user.create({
@@ -90,6 +113,7 @@ export class AuthService {
         isBusiness: input.isBusiness ?? false,
         companyName: input.companyName,
       },
+      select: privateUserSelect,
     });
     return {
       accessToken: this.access(user),
@@ -97,10 +121,18 @@ export class AuthService {
       user: this.safe(user),
     };
   }
+
   async login(
     input: LoginInput,
-  ): Promise<{ accessToken: string; refreshToken: string; user: SafeUser }> {
-    const user = await this.prisma.user.findUnique({ where: { email: input.email.toLowerCase() } });
+  ): Promise<{ accessToken: string; refreshToken: string; user: PrivateUser }> {
+    const user = await this.prisma.user.findUnique({
+      where: { email: input.email.toLowerCase() },
+      select: {
+        ...privateUserSelect,
+        status: true,
+        passwordHash: true,
+      },
+    });
     // Keep unknown-email failures comparable to bad-password failures.  This value is
     // a valid argon2id hash for an otherwise unusable password.
     const passwordHash =
@@ -115,13 +147,21 @@ export class AuthService {
       user: this.safe(user),
     };
   }
+
   async refresh(
     raw?: string,
-  ): Promise<{ accessToken: string; refreshToken: string; user: SafeUser }> {
+  ): Promise<{ accessToken: string; refreshToken: string; user: PrivateUser }> {
     if (!raw || typeof raw !== 'string') throw new UnauthorizedException('Invalid refresh token');
     const token = await this.prisma.refreshToken.findUnique({
       where: { tokenHash: this.hashToken(raw) },
-      include: { user: true },
+      include: {
+        user: {
+          select: {
+            ...privateUserSelect,
+            status: true,
+          },
+        },
+      },
     });
     if (!token) throw new UnauthorizedException('Invalid refresh token');
     if (token.revokedAt) {
@@ -167,6 +207,7 @@ export class AuthService {
       user: this.safe(token.user),
     };
   }
+
   async logout(raw?: string): Promise<void> {
     if (!raw) return;
     await this.prisma.refreshToken.updateMany({
@@ -174,8 +215,12 @@ export class AuthService {
       data: { revokedAt: new Date() },
     });
   }
-  async me(id: string): Promise<SafeUser> {
-    const user = await this.prisma.user.findUnique({ where: { id } });
+
+  async me(id: string): Promise<PrivateUser> {
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+      select: privateUserSelect,
+    });
     if (!user) throw new UnauthorizedException();
     return this.safe(user);
   }

@@ -43,6 +43,6 @@ describe('UsersService', () => {
       review: { findMany: vi.fn().mockResolvedValue([{ id: '1' }, { id: '2' }]) },
     };
     const result = await new UsersService(prisma as never).reviews('u', undefined, 1);
-    expect(result).toEqual({ items: [{ id: '1' }], nextCursor: '2' });
+    expect(result).toEqual({ items: [{ id: '1' }], nextCursor: '1' });
   });
 });

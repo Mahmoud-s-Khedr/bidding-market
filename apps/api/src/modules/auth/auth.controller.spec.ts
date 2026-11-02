@@ -33,10 +33,29 @@ describe('AuthController', () => {
       accessToken: 'a',
       user: {},
     });
-    expect(res.cookie).toHaveBeenCalled();
+    expect(res.cookie).toHaveBeenCalledWith('refresh_token', 'r', {
+      httpOnly: true,
+      secure: false,
+      sameSite: 'lax',
+      path: '/api/v1/auth',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
     service.logout.mockResolvedValue(undefined);
     await c.logout({ cookies: { refresh_token: 'r' } } as never, res as never);
     expect(res.clearCookie).toHaveBeenCalled();
+  });
+  it('configures cookie maxAge from JWT_REFRESH_TTL', async () => {
+    const c = new AuthController(service as never, { ...env, JWT_REFRESH_TTL: '30m' });
+    service.login.mockResolvedValue({ accessToken: 'a', refreshToken: 'r', user: {} });
+    const res = response();
+    await c.login({}, res as never);
+    expect(res.cookie).toHaveBeenCalledWith(
+      'refresh_token',
+      'r',
+      expect.objectContaining({
+        maxAge: 30 * 60 * 1000,
+      }),
+    );
   });
   it('delegates remaining actions', async () => {
     const c = new AuthController(service as never, env);

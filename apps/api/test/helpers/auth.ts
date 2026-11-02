@@ -2,7 +2,25 @@ import type { INestApplication } from '@nestjs/common';
 import type { Server } from 'node:http';
 import request from 'supertest';
 import * as argon2 from 'argon2';
+import { expect } from 'vitest';
 import { prisma } from './db.js';
+
+export function assertNoPasswordHash(obj: unknown): void {
+  if (obj === null || typeof obj !== 'object') {
+    return;
+  }
+  if (Array.isArray(obj)) {
+    for (const item of obj) {
+      assertNoPasswordHash(item);
+    }
+    return;
+  }
+  const record = obj as Record<string, unknown>;
+  expect(record).not.toHaveProperty('passwordHash');
+  for (const value of Object.values(record)) {
+    assertNoPasswordHash(value);
+  }
+}
 export async function registerAndLogin(
   app: INestApplication,
   email = `user-${Date.now()}@test.local`,

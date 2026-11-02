@@ -4,6 +4,7 @@ import request from 'supertest';
 import { createTestApp } from './helpers/app.js';
 import { resetDb, prisma } from './helpers/db.js';
 import { userInput } from './helpers/factories.js';
+import { assertNoPasswordHash } from './helpers/auth.js';
 describe('auth', () => {
   let app: INestApplication;
   beforeAll(async () => {
@@ -20,10 +21,12 @@ describe('auth', () => {
       .post('/api/v1/auth/register')
       .send(input)
       .expect(201);
+    assertNoPasswordHash(registered.body);
     expect(registered.body.accessToken).toEqual(expect.any(String));
     expect(registered.headers['set-cookie']?.[0]).toContain('HttpOnly');
     expect(registered.headers['set-cookie']?.[0]).toContain('Path=/api/v1/auth');
     expect(registered.headers['set-cookie']?.[0]).toContain('SameSite=Lax');
+    expect(registered.headers['set-cookie']?.[0]).toContain('Max-Age=604800');
     await request(app.getHttpServer()).post('/api/v1/auth/register').send(input).expect(409);
     const invalid = await request(app.getHttpServer())
       .post('/api/v1/auth/register')
@@ -34,10 +37,17 @@ describe('auth', () => {
       .post('/api/v1/auth/login')
       .send({ email: input.email, password: 'wrong' })
       .expect(401);
+    const loginSuccess = await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .send({ email: input.email, password: input.password })
+      .expect(200);
+    assertNoPasswordHash(loginSuccess.body);
+    expect(loginSuccess.headers['set-cookie']?.[0]).toContain('Max-Age=604800');
     const me = await request(app.getHttpServer())
       .get('/api/v1/auth/me')
       .set('Authorization', `Bearer ${registered.body.accessToken}`)
       .expect(200);
+    assertNoPasswordHash(me.body);
     expect(me.body.email).toBe(input.email);
     await request(app.getHttpServer()).get('/api/v1/auth/me').expect(401);
   });
@@ -58,6 +68,8 @@ describe('auth', () => {
       .post('/api/v1/auth/refresh')
       .set('Cookie', oldCookie)
       .expect(200);
+    assertNoPasswordHash(rotated.body);
+    expect(rotated.headers['set-cookie']?.[0]).toContain('Max-Age=604800');
     const newCookie = rotated.headers['set-cookie']?.[0] ?? '';
     await request(app.getHttpServer())
       .post('/api/v1/auth/refresh')
