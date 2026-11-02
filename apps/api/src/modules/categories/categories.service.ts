@@ -40,7 +40,10 @@ export class CategoriesService {
 
     const openListingCounts = await this.prisma.listing.groupBy({
       by: ['categoryId'],
-      where: { status: 'OPEN' },
+      where: {
+        status: 'OPEN',
+        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+      },
       _count: { id: true },
     });
 
@@ -83,7 +86,7 @@ export class CategoriesService {
     };
 
     const tree = buildSubtree(null);
-    await this.redis.set(CACHE_KEY, JSON.stringify(tree), 'EX', 3600);
+    await this.redis.set(CACHE_KEY, JSON.stringify(tree), 'EX', 60);
     return tree;
   }
 

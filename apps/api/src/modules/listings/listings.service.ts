@@ -98,8 +98,12 @@ export class ListingsService {
     userId: string,
     uploadIds: string[],
     purpose: 'LISTING_IMAGE' | 'LISTING_ATTACHMENT',
+    currentListingId?: string,
   ): Promise<void> {
     if (uploadIds.length === 0) return;
+    if (new Set(uploadIds).size !== uploadIds.length) {
+      throw new BadRequestException('Duplicate upload IDs provided');
+    }
     const uploads = await this.prisma.upload.findMany({
       where: { id: { in: uploadIds } },
     });
@@ -117,6 +121,26 @@ export class ListingsService {
         throw new BadRequestException(`Upload purpose must be ${purpose}`);
       }
     }
+
+    const existingImage = await this.prisma.listingImage.findFirst({
+      where: {
+        uploadId: { in: uploadIds },
+        ...(currentListingId ? { listingId: { not: currentListingId } } : {}),
+      },
+    });
+    if (existingImage) {
+      throw new ConflictException('Upload is already attached to another listing');
+    }
+
+    const existingAttachment = await this.prisma.listingAttachment.findFirst({
+      where: {
+        uploadId: { in: uploadIds },
+        ...(currentListingId ? { listingId: { not: currentListingId } } : {}),
+      },
+    });
+    if (existingAttachment) {
+      throw new ConflictException('Upload is already attached to another listing');
+    }
   }
 
   async create(userId: string, input: ListingCreateInput): Promise<ListingDetail> {
@@ -128,6 +152,13 @@ export class ListingsService {
     }
 
     validatePriceRules(input.priceType, input.priceMinCents, input.priceMaxCents);
+
+    if (input.imageIds && input.attachmentIds) {
+      const overlap = input.imageIds.filter((id) => input.attachmentIds!.includes(id));
+      if (overlap.length > 0) {
+        throw new BadRequestException('Upload cannot be both an image and an attachment');
+      }
+    }
 
     if (input.imageIds && input.imageIds.length > 0) {
       await this.validateUploads(userId, input.imageIds, 'LISTING_IMAGE');
@@ -175,6 +206,8 @@ export class ListingsService {
       return created;
     });
 
+    await this.categoriesService.invalidateCache();
+
     return this.getById(listing.id, { id: userId, role: 'USER' });
   }
 
@@ -189,6 +222,19 @@ export class ListingsService {
 
     if (['IN_PROGRESS', 'COMPLETED', 'REMOVED'].includes(listing.status)) {
       throw new ConflictException('Cannot edit listing in current status');
+    }
+
+    if (listing.status === 'CLOSED' && input.status !== undefined) {
+      if (input.status === 'OPEN') {
+        throw new ConflictException('Cannot reopen a closed listing');
+      }
+      throw new ConflictException('Cannot modify status of a closed listing');
+    }
+    if (listing.status === 'OPEN' && input.status === 'DRAFT') {
+      const bidCount = await this.prisma.bid.count({ where: { listingId: id } });
+      if (bidCount > 0) {
+        throw new ConflictException('Cannot revert listing with bids to draft');
+      }
     }
 
     if (input.categoryId) {
@@ -208,11 +254,19 @@ export class ListingsService {
 
     validatePriceRules(effectivePriceType, effectiveMin, effectiveMax);
 
+    if (input.imageIds && input.attachmentIds) {
+      const overlap = input.imageIds.filter((x) => input.attachmentIds!.includes(x));
+      if (overlap.length > 0) {
+        throw new BadRequestException('Upload cannot be both an image and an attachment');
+      }
+    }
+
+    const targetOwnerId = listing.ownerId;
     if (input.imageIds) {
-      await this.validateUploads(user.id, input.imageIds, 'LISTING_IMAGE');
+      await this.validateUploads(targetOwnerId, input.imageIds, 'LISTING_IMAGE', id);
     }
     if (input.attachmentIds) {
-      await this.validateUploads(user.id, input.attachmentIds, 'LISTING_ATTACHMENT');
+      await this.validateUploads(targetOwnerId, input.attachmentIds, 'LISTING_ATTACHMENT', id);
     }
 
     await this.prisma.$transaction(async (tx) => {
@@ -255,6 +309,8 @@ export class ListingsService {
       });
     });
 
+    await this.categoriesService.invalidateCache();
+
     return this.getById(id, user);
   }
 
@@ -271,10 +327,13 @@ export class ListingsService {
     }
 
     await this.prisma.$transaction(async (tx) => {
-      await tx.listing.update({
-        where: { id },
+      const res = await tx.listing.updateMany({
+        where: { id, status: 'OPEN' },
         data: { status: 'CLOSED' },
       });
+      if (res.count === 0) {
+        throw new ConflictException('Only OPEN listings can be closed');
+      }
       await tx.bid.updateMany({
         where: {
           listingId: id,
@@ -283,6 +342,8 @@ export class ListingsService {
         data: { status: 'DECLINED' },
       });
     });
+
+    await this.categoriesService.invalidateCache();
 
     return this.getById(id, user);
   }
@@ -296,17 +357,33 @@ export class ListingsService {
       throw new ForbiddenException('You cannot delete this listing');
     }
 
-    if (listing.status !== 'DRAFT') {
+    if (listing.status === 'DRAFT') {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.bid.deleteMany({ where: { listingId: id } });
+        const res = await tx.listing.deleteMany({
+          where: { id, status: 'DRAFT' },
+        });
+        if (res.count === 0) {
+          throw new ConflictException('Listing status changed concurrently');
+        }
+      });
+    } else {
       const bidCount = await this.prisma.bid.count({ where: { listingId: id } });
       if (bidCount > 0) {
         throw new ConflictException('Cannot delete listing with bids unless DRAFT');
       }
+      await this.prisma.$transaction(async (tx) => {
+        // Never call bid.deleteMany for non-DRAFT listings
+        const res = await tx.listing.deleteMany({
+          where: { id, status: listing.status },
+        });
+        if (res.count === 0) {
+          throw new ConflictException('Listing status changed concurrently');
+        }
+      });
     }
 
-    await this.prisma.$transaction(async (tx) => {
-      await tx.bid.deleteMany({ where: { listingId: id } });
-      await tx.listing.delete({ where: { id } });
-    });
+    await this.categoriesService.invalidateCache();
   }
 
   async getById(id: string, user?: AuthUser): Promise<ListingDetail> {
@@ -547,37 +624,36 @@ export class ListingsService {
     const sort: ListingSort = query.sort ?? 'newest';
 
     if (query.cursor) {
-      const d = decodeCursor(query.cursor);
+      const d = decodeCursor(query.cursor, sort);
       if (sort === 'newest') {
-        const sv = typeof d.sortValue === 'string' ? d.sortValue : '9999-12-31T23:59:59.999Z';
+        const sv = d.sortValue as string;
         conditions.push(
           Prisma.sql`(l."createdAt" < ${sv}::timestamptz OR (l."createdAt" = ${sv}::timestamptz AND l.id < ${d.id}))`,
         );
       } else if (sort === 'price_asc') {
-        const sv = typeof d.sortValue === 'number' ? d.sortValue : 2147483647;
+        const sv = d.sortValue !== null ? (d.sortValue as number) : 2147483647;
         conditions.push(
           Prisma.sql`(COALESCE(l."priceMinCents", 2147483647) > ${sv} OR (COALESCE(l."priceMinCents", 2147483647) = ${sv} AND l.id > ${d.id}))`,
         );
       } else if (sort === 'price_desc') {
-        const sv = typeof d.sortValue === 'number' ? d.sortValue : -1;
+        const sv = d.sortValue !== null ? (d.sortValue as number) : -1;
         conditions.push(
           Prisma.sql`(COALESCE(l."priceMinCents", -1) < ${sv} OR (COALESCE(l."priceMinCents", -1) = ${sv} AND l.id < ${d.id}))`,
         );
       } else if (sort === 'ending_soon') {
-        const sv = typeof d.sortValue === 'string' ? d.sortValue : '9999-12-31T23:59:59.999Z';
+        const sv = d.sortValue !== null ? (d.sortValue as string) : '9999-12-31T23:59:59.999Z';
         conditions.push(
           Prisma.sql`(COALESCE(l."expiresAt", '9999-12-31T23:59:59.999Z'::timestamptz) > ${sv}::timestamptz OR (COALESCE(l."expiresAt", '9999-12-31T23:59:59.999Z'::timestamptz) = ${sv}::timestamptz AND l.id > ${d.id}))`,
         );
       } else if (sort === 'most_bids') {
-        const sv = typeof d.sortValue === 'number' ? d.sortValue : 0;
+        const sv = d.sortValue as number;
         conditions.push(
-          Prisma.sql`((SELECT COUNT(*)::int FROM "Bid" b WHERE b."listingId" = l.id) < ${sv} OR ((SELECT COUNT(*)::int FROM "Bid" b WHERE b."listingId" = l.id) = ${sv} AND l.id < ${d.id}))`,
+          Prisma.sql`(bc."bidCount" < ${sv} OR (bc."bidCount" = ${sv} AND l.id < ${d.id}))`,
         );
       } else if (sort === 'relevance' && query.q?.trim()) {
-        const qTrim = query.q.trim();
-        const sv = typeof d.sortValue === 'number' ? d.sortValue : 0.0;
+        const sv = d.sortValue as number;
         conditions.push(
-          Prisma.sql`(ts_rank(to_tsvector('simple', l.title || ' ' || l.description), websearch_to_tsquery('simple', ${qTrim})) < ${sv}::float OR (ts_rank(to_tsvector('simple', l.title || ' ' || l.description), websearch_to_tsquery('simple', ${qTrim})) = ${sv}::float AND l.id < ${d.id}))`,
+          Prisma.sql`(rk.rank < ${sv}::float8 OR (rk.rank = ${sv}::float8 AND l.id < ${d.id}))`,
         );
       }
     }
@@ -592,17 +668,22 @@ export class ListingsService {
     } else if (sort === 'ending_soon') {
       orderByClause = Prisma.sql`ORDER BY COALESCE(l."expiresAt", '9999-12-31T23:59:59.999Z'::timestamptz) ASC, l.id ASC`;
     } else if (sort === 'most_bids') {
-      orderByClause = Prisma.sql`ORDER BY "bidCount" DESC, l.id DESC`;
+      orderByClause = Prisma.sql`ORDER BY bc."bidCount" DESC, l.id DESC`;
     } else if (sort === 'relevance' && query.q?.trim()) {
-      orderByClause = Prisma.sql`ORDER BY rank DESC, l.id DESC`;
+      orderByClause = Prisma.sql`ORDER BY rk.rank DESC, l.id DESC`;
     } else {
       orderByClause = Prisma.sql`ORDER BY l."createdAt" DESC, l.id DESC`;
     }
 
-    const rankSelect =
+    const rankLateral =
       sort === 'relevance' && query.q?.trim()
-        ? Prisma.sql`, ts_rank(to_tsvector('simple', l.title || ' ' || l.description), websearch_to_tsquery('simple', ${query.q.trim()})) AS rank`
+        ? Prisma.sql`LEFT JOIN LATERAL (
+            SELECT ts_rank(to_tsvector('simple', l.title || ' ' || l.description), websearch_to_tsquery('simple', ${query.q.trim()}))::float8 AS rank
+          ) rk ON true`
         : Prisma.empty;
+
+    const rankSelect =
+      sort === 'relevance' && query.q?.trim() ? Prisma.sql`, rk.rank` : Prisma.empty;
 
     const whereClause =
       conditions.length > 0 ? Prisma.sql`WHERE ${Prisma.join(conditions, ' AND ')}` : Prisma.empty;
@@ -625,7 +706,7 @@ export class ListingsService {
         l.location,
         l."expiresAt",
         l."createdAt",
-        (SELECT COUNT(*)::int FROM "Bid" b WHERE b."listingId" = l.id) AS "bidCount"
+        bc."bidCount"
         ${rankSelect},
         u.id AS "owner_id",
         u."displayName" AS "owner_displayName",
@@ -640,6 +721,10 @@ export class ListingsService {
         u."createdAt" AS "owner_createdAt"
       FROM "Listing" l
       JOIN "User" u ON u.id = l."ownerId"
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*)::int AS "bidCount" FROM "Bid" b WHERE b."listingId" = l.id
+      ) bc ON true
+      ${rankLateral}
       ${whereClause}
       ${orderByClause}
       LIMIT ${take}
@@ -684,7 +769,7 @@ export class ListingsService {
     }));
 
     const paginatedResult = paginate(rows, limit, (row) =>
-      encodeCursor(getCursorValue(row), row.id),
+      encodeCursor(sort, getCursorValue(row), row.id),
     );
 
     return {

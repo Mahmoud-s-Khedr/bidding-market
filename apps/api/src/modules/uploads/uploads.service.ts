@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -67,6 +68,10 @@ export class UploadsService {
       throw new ForbiddenException('You are not the owner of this upload');
     }
 
+    if (upload.status === 'READY') {
+      throw new ConflictException('Upload is already completed');
+    }
+
     let head;
     try {
       head = await this.storage.headObject(upload.key);
@@ -78,7 +83,11 @@ export class UploadsService {
       throw new BadRequestException('Uploaded file size mismatch');
     }
 
-    if (head.ContentType && head.ContentType !== upload.mimeType) {
+    if (!head.ContentType) {
+      throw new BadRequestException('Uploaded file missing content type');
+    }
+
+    if (head.ContentType !== upload.mimeType) {
       throw new BadRequestException('Uploaded file content type mismatch');
     }
 
