@@ -82,7 +82,7 @@ export const updateProfileSchema = z.object({
   displayName: z.string().trim().min(2).max(80).optional(),
   bio: z.string().trim().max(1000).nullable().optional(),
   location: z.string().trim().max(120).nullable().optional(),
-  avatarKey: z.string().max(500).nullable().optional(),
+  avatarUploadId: z.string().min(1).nullable().optional(),
   isBusiness: z.boolean().optional(),
   companyName: z.string().trim().min(1).max(120).nullable().optional(),
 });
@@ -96,7 +96,7 @@ export const listingCreateSchema = z
     kind: ListingKind,
     title: z.string().trim().min(5).max(120),
     description: z.string().trim().min(20).max(10000),
-    categoryId: z.string(),
+    categoryId: z.string().min(1),
     priceType: PriceType,
     priceMinCents: z.number().int().nonnegative().optional(),
     priceMaxCents: z.number().int().nonnegative().optional(),
@@ -113,22 +113,80 @@ export const listingCreateSchema = z
     status: z.enum(['DRAFT', 'OPEN']).optional(),
   })
   .superRefine((v, ctx) => {
-    if (v.priceType === 'RANGE' && (v.priceMinCents === undefined || v.priceMaxCents === undefined))
-      ctx.addIssue({
-        code: 'custom',
-        message: 'Range prices require min and max',
-        path: ['priceMinCents'],
-      });
+    if (v.priceType === 'FIXED') {
+      if (v.priceMinCents === undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Fixed prices require priceMinCents',
+          path: ['priceMinCents'],
+        });
+      }
+      if (v.priceMaxCents !== undefined && v.priceMaxCents !== null) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Fixed prices must not specify priceMaxCents',
+          path: ['priceMaxCents'],
+        });
+      }
+    } else if (v.priceType === 'RANGE') {
+      if (v.priceMinCents === undefined || v.priceMaxCents === undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Range prices require min and max',
+          path: ['priceMinCents'],
+        });
+      } else if (v.priceMinCents > v.priceMaxCents) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'priceMinCents must not exceed priceMaxCents',
+          path: ['priceMinCents'],
+        });
+      }
+    } else if (v.priceType === 'NEGOTIABLE') {
+      if (v.priceMinCents !== undefined || v.priceMaxCents !== undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'Negotiable prices must not specify priceMinCents or priceMaxCents',
+          path: ['priceMinCents'],
+        });
+      }
+    }
+  });
+export const listingUpdateSchema = z
+  .object({
+    kind: ListingKind.optional(),
+    title: z.string().trim().min(5).max(120).optional(),
+    description: z.string().trim().min(20).max(10000).optional(),
+    categoryId: z.string().min(1).optional(),
+    priceType: PriceType.optional(),
+    priceMinCents: z.number().int().nonnegative().nullable().optional(),
+    priceMaxCents: z.number().int().nonnegative().nullable().optional(),
+    currency: z
+      .string()
+      .regex(/^[A-Z]{3}$/)
+      .optional(),
+    deliveryDays: z.number().int().positive().nullable().optional(),
+    location: z.string().max(120).nullable().optional(),
+    tags: z.array(z.string().trim().min(1).max(40)).max(10).optional(),
+    imageIds: z.array(z.string()).optional(),
+    attachmentIds: z.array(z.string()).optional(),
+    expiresAt: z.iso.datetime().nullable().optional(),
+    status: z.enum(['DRAFT', 'OPEN']).optional(),
+  })
+  .superRefine((v, ctx) => {
     if (
       v.priceMinCents !== undefined &&
+      v.priceMinCents !== null &&
       v.priceMaxCents !== undefined &&
+      v.priceMaxCents !== null &&
       v.priceMinCents > v.priceMaxCents
-    )
+    ) {
       ctx.addIssue({
         code: 'custom',
         message: 'priceMinCents must not exceed priceMaxCents',
         path: ['priceMinCents'],
       });
+    }
   });
 export const listingQuerySchema = paginationSchema
   .extend({
@@ -140,10 +198,10 @@ export const listingQuerySchema = paginationSchema
     maxPrice: z.coerce.number().int().nonnegative().optional(),
     currency: z.string().length(3).optional(),
     location: z.string().max(120).optional(),
-    status: ListingStatus.default('OPEN'),
+    status: ListingStatus.optional(),
     ownerId: z.string().optional(),
     sort: z
-      .enum(['newest', 'price_asc', 'price_desc', 'ending_soon', 'most_bids'])
+      .enum(['newest', 'price_asc', 'price_desc', 'ending_soon', 'most_bids', 'relevance'])
       .default('newest'),
   })
   .refine((v) => v.minPrice === undefined || v.maxPrice === undefined || v.minPrice <= v.maxPrice, {
@@ -321,7 +379,9 @@ export const attachmentSchema = z.object({
   fileName: z.string(),
   mimeType: z.string(),
   sizeBytes: z.number().int().nonnegative(),
+  url: z.string().optional(),
 });
+export type Attachment = z.infer<typeof attachmentSchema>;
 export const uploadSchema = attachmentSchema.extend({
   purpose: UploadPurpose,
   status: z.enum(['PENDING', 'READY', 'FAILED']),
@@ -329,14 +389,26 @@ export const uploadSchema = attachmentSchema.extend({
   completedAt: date.nullable(),
 });
 export const uploadPresignResponseSchema = z.object({
-  upload: uploadSchema,
-  uploadUrl: z.url(),
+  uploadId: z.string(),
+  url: z.string(),
   headers: z.record(z.string(), z.string()).default({}),
+  key: z.string(),
+  expiresAt: z.string(),
 });
+export type UploadPresignResponse = z.infer<typeof uploadPresignResponseSchema>;
+export const categorySummarySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  slug: z.string(),
+  parentId: z.string().nullable().optional(),
+});
+export type CategorySummary = z.infer<typeof categorySummarySchema>;
 export const listingSummarySchema = z.object({
   id: z.string(),
   owner: publicUserSchema,
   categoryId: z.string(),
+  categoryName: z.string(),
+  thumbnailUrl: z.string().nullable(),
   kind: ListingKind,
   status: ListingStatus,
   title: z.string(),
@@ -348,14 +420,6 @@ export const listingSummarySchema = z.object({
   expiresAt: date.nullable(),
   bidCount: z.number().int().nonnegative(),
   createdAt: date,
-});
-export const listingDetailSchema = listingSummarySchema.extend({
-  description: z.string(),
-  deliveryDays: z.number().int().nullable(),
-  tags: z.array(z.string()),
-  images: z.array(attachmentSchema),
-  attachments: z.array(attachmentSchema),
-  updatedAt: date,
 });
 export const bidSchema = z.object({
   id: z.string(),
@@ -370,6 +434,16 @@ export const bidSchema = z.object({
   lastCounterById: z.string().nullable(),
   createdAt: date,
   updatedAt: date,
+});
+export const listingDetailSchema = listingSummarySchema.extend({
+  description: z.string(),
+  deliveryDays: z.number().int().nullable(),
+  tags: z.array(z.string()),
+  images: z.array(attachmentSchema),
+  attachments: z.array(attachmentSchema),
+  updatedAt: date,
+  category: categorySummarySchema,
+  myBid: bidSchema.nullable().optional(),
 });
 export const milestoneResponseSchema = z.object({
   id: z.string(),
@@ -504,6 +578,38 @@ export const categorySchema = z.object({
   parentId: z.string().nullable().optional(),
   description: z.string().max(500).nullable().optional(),
 });
+export const categoryCreateSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+  slug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+  parentId: z.string().nullable().optional(),
+  description: z.string().trim().max(500).nullable().optional(),
+});
+export const categoryUpdateSchema = categoryCreateSchema.partial();
+export type CategoryCreateInput = z.infer<typeof categoryCreateSchema>;
+export type CategoryUpdateInput = z.infer<typeof categoryUpdateSchema>;
+
+export type CategoryTreeNode = {
+  id: string;
+  name: string;
+  slug: string;
+  parentId: string | null;
+  description: string | null;
+  listingCount: number;
+  children: CategoryTreeNode[];
+};
+
+export const categoryTreeNodeSchema: z.ZodType<CategoryTreeNode> = z.lazy(() =>
+  z.object({
+    id: z.string(),
+    name: z.string(),
+    slug: z.string(),
+    parentId: z.string().nullable(),
+    description: z.string().nullable(),
+    listingCount: z.number().int().nonnegative(),
+    children: z.array(categoryTreeNodeSchema),
+  }),
+);
+export type Category = CategoryTreeNode;
 export const reviewSchema = z.object({
   rating: z.number().int().min(1).max(5),
   comment: z.string().trim().max(2000).optional(),
@@ -544,6 +650,9 @@ export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
 export type ListingCreateInput = z.infer<typeof listingCreateSchema>;
+export type ListingUpdateInput = z.infer<typeof listingUpdateSchema>;
+export type ListingQueryInput = z.infer<typeof listingQuerySchema>;
+export type UploadPresignInput = z.infer<typeof uploadPresignSchema>;
 export type BidCreateInput = z.infer<typeof bidCreateSchema>;
 export type MessageCreateInput = z.infer<typeof messageCreateSchema>;
 export type PaginationInput = z.infer<typeof paginationSchema>;

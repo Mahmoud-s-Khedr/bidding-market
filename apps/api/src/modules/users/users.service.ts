@@ -1,55 +1,15 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import type { PublicUser, UpdateProfileInput } from '@market/shared';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { paginate } from '../../common/pagination.js';
-
-const publicUserSelect = {
-  id: true,
-  displayName: true,
-  avatarKey: true,
-  bio: true,
-  location: true,
-  isBusiness: true,
-  companyName: true,
-  ratingAvg: true,
-  ratingCount: true,
-  completedCount: true,
-  createdAt: true,
-} as const;
-
-type PublicUserData = {
-  id: string;
-  displayName: string;
-  avatarKey: string | null;
-  bio: string | null;
-  location: string | null;
-  isBusiness: boolean;
-  companyName: string | null;
-  ratingAvg: number;
-  ratingCount: number;
-  completedCount: number;
-  createdAt: Date;
-};
+import { publicUserSelect, UserPresenter } from './user.presenter.js';
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
-
-  private toPublicUser(user: PublicUserData): PublicUser {
-    return {
-      id: user.id,
-      displayName: user.displayName,
-      avatarUrl: user.avatarKey,
-      bio: user.bio,
-      location: user.location,
-      isBusiness: user.isBusiness,
-      companyName: user.companyName,
-      ratingAvg: user.ratingAvg,
-      ratingCount: user.ratingCount,
-      completedCount: user.completedCount,
-      createdAt: user.createdAt,
-    };
-  }
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly userPresenter: UserPresenter,
+  ) {}
 
   async profile(id: string): Promise<PublicUser> {
     const user = await this.prisma.user.findUnique({
@@ -57,23 +17,47 @@ export class UsersService {
       select: publicUserSelect,
     });
     if (!user) throw new NotFoundException('User not found');
-    return this.toPublicUser(user);
+    return this.userPresenter.toPublicUser(user);
   }
 
   async update(id: string, input: UpdateProfileInput): Promise<PublicUser> {
+    let newAvatarKey: string | null | undefined = undefined;
+    if (input.avatarUploadId !== undefined) {
+      if (input.avatarUploadId === null) {
+        newAvatarKey = null;
+      } else {
+        const upload = await this.prisma.upload.findUnique({
+          where: { id: input.avatarUploadId },
+        });
+        if (!upload) {
+          throw new BadRequestException('Avatar upload not found');
+        }
+        if (upload.uploaderId !== id) {
+          throw new BadRequestException('Avatar upload belongs to another user');
+        }
+        if (upload.status !== 'READY') {
+          throw new BadRequestException('Avatar upload is not ready');
+        }
+        if (upload.purpose !== 'AVATAR') {
+          throw new BadRequestException('Upload purpose must be AVATAR');
+        }
+        newAvatarKey = upload.key;
+      }
+    }
+
     const user = await this.prisma.user.update({
       where: { id },
       data: {
         ...(input.displayName !== undefined && { displayName: input.displayName }),
         ...(input.bio !== undefined && { bio: input.bio }),
         ...(input.location !== undefined && { location: input.location }),
-        ...(input.avatarKey !== undefined && { avatarKey: input.avatarKey }),
+        ...(newAvatarKey !== undefined && { avatarKey: newAvatarKey }),
         ...(input.isBusiness !== undefined && { isBusiness: input.isBusiness }),
         ...(input.companyName !== undefined && { companyName: input.companyName }),
       },
       select: publicUserSelect,
     });
-    return this.toPublicUser(user);
+    return this.userPresenter.toPublicUser(user);
   }
 
   async reviews(id: string, cursor?: string, limit = 20) {
@@ -84,8 +68,21 @@ export class UsersService {
       cursor: cursor ? { id: cursor } : undefined,
       skip: cursor ? 1 : 0,
       orderBy: { createdAt: 'desc' },
-      include: { author: { select: { id: true, displayName: true, avatarKey: true } } },
+      include: { author: { select: publicUserSelect } },
     });
-    return paginate(reviews, limit);
+    const paginated = paginate(reviews, limit);
+    const items = await Promise.all(
+      paginated.items.map(async (r) => {
+        if ('author' in r && r.author) {
+          const author = await this.userPresenter.toPublicUser(r.author);
+          return { ...r, author };
+        }
+        return r;
+      }),
+    );
+    return {
+      items,
+      nextCursor: paginated.nextCursor,
+    };
   }
 }

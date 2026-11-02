@@ -22,6 +22,14 @@ describe('JwtAuthGuard', () => {
       guard.canActivate(context({ headers: { authorization: 'Bearer x' } }) as never),
     ).rejects.toThrow();
   });
+  it('allows missing token when isOptional is true', async () => {
+    const reflector = {
+      getAllAndOverride: vi.fn((key: string) => key === 'isOptionalAuth'),
+    };
+    const jwt = { verify: vi.fn() };
+    const guard = new JwtAuthGuard(reflector as never, jwt as never);
+    await expect(guard.canActivate(context({ headers: {} }) as never)).resolves.toBe(true);
+  });
   it('accepts valid token', async () => {
     const guard = new JwtAuthGuard(
       { getAllAndOverride: vi.fn().mockReturnValue(false) } as never,
