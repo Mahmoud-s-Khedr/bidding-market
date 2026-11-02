@@ -6,6 +6,7 @@ import {
   type ExceptionFilter,
 } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client.js';
+import { ZodError } from 'zod';
 import type { Response } from 'express';
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
@@ -15,7 +16,12 @@ export class HttpExceptionFilter implements ExceptionFilter {
     let code = 'INTERNAL';
     let message = 'Internal server error';
     let details: unknown;
-    if (exception instanceof Prisma.PrismaClientKnownRequestError) {
+    if (exception instanceof ZodError) {
+      status = 400;
+      code = 'VALIDATION_ERROR';
+      message = 'Validation failed';
+      details = exception.flatten();
+    } else if (exception instanceof Prisma.PrismaClientKnownRequestError) {
       if (exception.code === 'P2002') {
         status = 409;
         code = 'CONFLICT';

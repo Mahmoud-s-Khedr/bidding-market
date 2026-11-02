@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { listingCreateSchema, passwordSchema } from './index.js';
+import {
+  listingCreateSchema,
+  listingQuerySchema,
+  loginSchema,
+  messageCreateSchema,
+  passwordSchema,
+  registerSchema,
+} from './index.js';
 describe('shared schemas', () => {
   it('enforces password strength', () => {
     expect(passwordSchema.safeParse('alllowercase1').success).toBe(false);
@@ -17,5 +24,44 @@ describe('shared schemas', () => {
         priceMaxCents: 10,
       }).success,
     ).toBe(false);
+  });
+});
+describe('schema refinements', () => {
+  it('normalizes email and validates business name', () => {
+    expect(
+      registerSchema.parse({
+        email: 'A@EXAMPLE.COM',
+        password: 'Password1',
+        displayName: 'AB',
+        isBusiness: false,
+      }).email,
+    ).toBe('a@example.com');
+    expect(
+      registerSchema.safeParse({
+        email: 'a@b.com',
+        password: 'Password1',
+        displayName: 'AB',
+        isBusiness: true,
+      }).success,
+    ).toBe(false);
+    expect(loginSchema.parse({ email: 'A@B.COM', password: 'x' }).email).toBe('a@b.com');
+  });
+  it('covers range, query and message refinements', () => {
+    const base = {
+      kind: 'REQUEST',
+      title: 'Valid title',
+      description: 'valid description that is long enough',
+      categoryId: 'c',
+      priceType: 'RANGE',
+      priceMinCents: 1,
+      priceMaxCents: 2,
+    };
+    expect(listingCreateSchema.safeParse({ ...base, priceMaxCents: 0 }).success).toBe(false);
+    expect(listingCreateSchema.safeParse({ ...base, priceMinCents: undefined }).success).toBe(
+      false,
+    );
+    expect(listingQuerySchema.safeParse({ minPrice: 2, maxPrice: 1 }).success).toBe(false);
+    expect(messageCreateSchema.safeParse({ type: 'TEXT' }).success).toBe(false);
+    expect(messageCreateSchema.safeParse({ type: 'TEXT', body: 'yes' }).success).toBe(true);
   });
 });
