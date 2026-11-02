@@ -556,10 +556,11 @@ describe('Listings endpoints', () => {
           status: 'PENDING',
         },
       });
+      const u3 = await createUser({ email: 'user3-bids@market.test' });
       const bidShortlisted = await prisma.bid.create({
         data: {
           listingId: listing.id,
-          bidderId: user2Id,
+          bidderId: u3.id,
           amountCents: 1200,
           currency: 'USD',
           deliveryDays: 4,
