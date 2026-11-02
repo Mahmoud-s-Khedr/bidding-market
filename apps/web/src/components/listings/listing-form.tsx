@@ -5,9 +5,11 @@ import { AlertCircle, Calendar, DollarSign, Layers } from 'lucide-react';
 import {
   listingFormSchema,
   formValuesToApiPayload,
+  formValuesToUpdatePayload,
   type ListingFormOutput,
   type ListingFormValues,
 } from '@/lib/validation/listing';
+import { getCurrencySymbol } from '@/lib/format';
 import { FormField } from '@/components/ui/form-field';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -23,11 +25,16 @@ import { CategorySelect } from '@/components/shared/category-select';
 import { TagsInput } from '@/components/shared/tags-input';
 import { FileDropzone } from '@/components/ui/file-dropzone';
 import { ApiError } from '@/lib/api/client';
-import type { Attachment, CreateListingRequest, ListingDetail } from '@/lib/api/types';
+import type {
+  Attachment,
+  CreateListingRequest,
+  ListingDetail,
+  UpdateListingRequest,
+} from '@/lib/api/types';
 
 export interface ListingFormProps {
   initialListing?: ListingDetail;
-  onSubmit: (data: CreateListingRequest) => Promise<void>;
+  onSubmit: (data: CreateListingRequest | UpdateListingRequest) => Promise<void>;
   isLoading?: boolean;
 }
 
@@ -36,7 +43,21 @@ export function ListingForm({ initialListing, onSubmit, isLoading = false }: Lis
   const [attachments, setAttachments] = React.useState<Attachment[]>(
     initialListing?.attachments || [],
   );
+  const [imageUploadState, setImageUploadState] = React.useState({
+    inFlightCount: 0,
+    hasErrors: false,
+  });
+  const [docUploadState, setDocUploadState] = React.useState({
+    inFlightCount: 0,
+    hasErrors: false,
+  });
   const [serverError, setServerError] = React.useState<string | null>(null);
+
+  const hasInFlightUploads = imageUploadState.inFlightCount > 0 || docUploadState.inFlightCount > 0;
+  const hasUploadErrors = imageUploadState.hasErrors || docUploadState.hasErrors;
+  const isSubmitBlocked = isLoading || hasInFlightUploads || hasUploadErrors;
+
+  const todayStr = React.useMemo(() => new Date().toISOString().split('T')[0], []);
 
   // Convert initial cents to major units for form
   const initialPriceMin =
@@ -86,18 +107,31 @@ export function ListingForm({ initialListing, onSubmit, isLoading = false }: Lis
   const watchedKind = watch('kind');
   const watchedPriceType = watch('priceType');
   const watchedDescription = watch('description') || '';
+  const watchedCurrency = watch('currency') || 'USD';
+  const currencySymbol = getCurrencySymbol(watchedCurrency);
 
-  const handleFormSubmit = async (values: ListingFormOutput, statusOverride?: 'DRAFT' | 'OPEN') => {
+  const handleFormSubmit = async (values: ListingFormOutput, action: 'PUBLISH' | 'DRAFT') => {
     setServerError(null);
 
-    const payload = formValuesToApiPayload(
-      {
-        ...values,
-        imageIds: images.map((img) => img.id),
-        attachmentIds: attachments.map((att) => att.id),
-      },
-      statusOverride,
-    );
+    const mergedValues = {
+      ...values,
+      imageIds: images.map((img) => img.id),
+      attachmentIds: attachments.map((att) => att.id),
+    };
+
+    let payload: CreateListingRequest | UpdateListingRequest;
+
+    if (initialListing) {
+      let statusOverride: 'DRAFT' | 'OPEN' | undefined = undefined;
+      if (action === 'DRAFT') {
+        statusOverride = 'DRAFT';
+      } else if (initialListing.status === 'DRAFT') {
+        statusOverride = 'OPEN';
+      }
+      payload = formValuesToUpdatePayload(mergedValues, statusOverride);
+    } else {
+      payload = formValuesToApiPayload(mergedValues, action === 'DRAFT' ? 'DRAFT' : 'OPEN');
+    }
 
     try {
       await onSubmit(payload);
@@ -145,7 +179,7 @@ export function ListingForm({ initialListing, onSubmit, isLoading = false }: Lis
       noValidate
       className="space-y-8"
       onSubmit={(e) => {
-        void handleSubmit((values) => handleFormSubmit(values, 'OPEN'))(e);
+        void handleSubmit((values) => handleFormSubmit(values, 'PUBLISH'))(e);
       }}
     >
       {serverError && (
@@ -321,7 +355,7 @@ export function ListingForm({ initialListing, onSubmit, isLoading = false }: Lis
           {watchedPriceType === 'FIXED' && (
             <FormField
               id="listing-price-fixed"
-              label="Price ($)"
+              label={`Price (${currencySymbol})`}
               required
               error={errors.priceMin?.message}
               hint="Major units (e.g. 50.00)"
@@ -341,7 +375,7 @@ export function ListingForm({ initialListing, onSubmit, isLoading = false }: Lis
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <FormField
               id="listing-price-min"
-              label="Min Price ($)"
+              label={`Min Price (${currencySymbol})`}
               required
               error={errors.priceMin?.message}
               hint="Major units"
@@ -357,7 +391,7 @@ export function ListingForm({ initialListing, onSubmit, isLoading = false }: Lis
 
             <FormField
               id="listing-price-max"
-              label="Max Price ($)"
+              label={`Max Price (${currencySymbol})`}
               required
               error={errors.priceMax?.message}
               hint="Major units"
@@ -436,7 +470,7 @@ export function ListingForm({ initialListing, onSubmit, isLoading = false }: Lis
         hint="Optional date when this listing will stop accepting bids."
       >
         <div className="relative">
-          <Input type="date" {...register('expiresAt')} className="pl-10" />
+          <Input type="date" min={todayStr} {...register('expiresAt')} className="pl-10" />
           <Calendar className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
         </div>
       </FormField>
@@ -451,6 +485,7 @@ export function ListingForm({ initialListing, onSubmit, isLoading = false }: Lis
           purpose="LISTING_IMAGE"
           maxFiles={10}
           value={images}
+          onUploadStateChange={setImageUploadState}
           onChange={(newImages) => {
             setImages(newImages);
             setValue(
@@ -472,6 +507,7 @@ export function ListingForm({ initialListing, onSubmit, isLoading = false }: Lis
           purpose="LISTING_ATTACHMENT"
           maxFiles={10}
           value={attachments}
+          onUploadStateChange={setDocUploadState}
           onChange={(newAttachments) => {
             setAttachments(newAttachments);
             setValue(
@@ -483,12 +519,26 @@ export function ListingForm({ initialListing, onSubmit, isLoading = false }: Lis
         />
       </div>
 
+      {/* Upload alerts */}
+      {(hasInFlightUploads || hasUploadErrors) && (
+        <div className="flex flex-col gap-1 text-xs text-right">
+          {hasInFlightUploads && (
+            <p className="text-muted-foreground">Please wait for file uploads to complete.</p>
+          )}
+          {hasUploadErrors && (
+            <p className="text-destructive font-medium">
+              Please resolve or remove failed uploads before submitting.
+            </p>
+          )}
+        </div>
+      )}
+
       {/* Action Buttons */}
       <div className="flex flex-col-reverse sm:flex-row items-center justify-end gap-3 pt-6 border-t border-border">
         <Button
           type="button"
           variant="outline"
-          disabled={isLoading}
+          disabled={isSubmitBlocked}
           onClick={(e) => {
             void handleSubmit((values) => handleFormSubmit(values, 'DRAFT'))(e);
           }}
@@ -499,11 +549,15 @@ export function ListingForm({ initialListing, onSubmit, isLoading = false }: Lis
 
         <Button
           type="submit"
-          disabled={isLoading}
+          disabled={isSubmitBlocked}
           isLoading={isLoading}
           className="w-full sm:w-auto"
         >
-          {initialListing ? 'Save Changes' : 'Publish Listing'}
+          {initialListing
+            ? initialListing.status === 'DRAFT'
+              ? 'Publish Listing'
+              : 'Save Changes'
+            : 'Publish Listing'}
         </Button>
       </div>
     </form>

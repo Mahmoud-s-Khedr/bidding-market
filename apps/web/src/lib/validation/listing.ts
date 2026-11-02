@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { listingCreateSchema, type ListingCreateInput } from '@market/shared';
+import type { UpdateListingRequest } from '@/lib/api/types';
 
 const {
   priceMinCents: _priceMinCents,
@@ -86,6 +87,31 @@ export const listingFormSchema = z
         path: ['deliveryDays'],
       });
     }
+
+    if (data.expiresAt) {
+      const expDate = new Date(data.expiresAt);
+      if (Number.isNaN(expDate.getTime())) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Invalid expiration date',
+          path: ['expiresAt'],
+        });
+      } else {
+        const isPast =
+          expDate.getTime() <= Date.now() &&
+          !(
+            data.expiresAt.length === 10 &&
+            new Date(`${data.expiresAt}T23:59:59.999Z`).getTime() > Date.now()
+          );
+        if (isPast) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'Expiration date must be in the future',
+            path: ['expiresAt'],
+          });
+        }
+      }
+    }
   });
 
 export type ListingFormValues = z.input<typeof listingFormSchema>;
@@ -102,7 +128,7 @@ export function formValuesToApiPayload(
   if (values.priceType === 'FIXED') {
     if (values.priceMin !== undefined && !Number.isNaN(values.priceMin)) {
       priceMinCents = Math.round(values.priceMin * 100);
-      priceMaxCents = priceMinCents;
+      priceMaxCents = undefined;
     }
   } else if (values.priceType === 'RANGE') {
     if (values.priceMin !== undefined && !Number.isNaN(values.priceMin)) {
@@ -139,4 +165,64 @@ export function formValuesToApiPayload(
     expiresAt: formattedExpiresAt,
     status: statusOverride ?? values.status ?? 'OPEN',
   };
+}
+
+export function formValuesToUpdatePayload(
+  values: Partial<ListingFormOutput> &
+    Pick<ListingFormOutput, 'kind' | 'title' | 'description' | 'categoryId' | 'priceType'>,
+  statusOverride?: 'DRAFT' | 'OPEN',
+): UpdateListingRequest {
+  let priceMinCents: number | null | undefined = undefined;
+  let priceMaxCents: number | null | undefined = undefined;
+
+  if (values.priceType === 'FIXED') {
+    priceMinCents =
+      values.priceMin !== undefined && !Number.isNaN(values.priceMin)
+        ? Math.round(values.priceMin * 100)
+        : null;
+    priceMaxCents = null;
+  } else if (values.priceType === 'RANGE') {
+    priceMinCents =
+      values.priceMin !== undefined && !Number.isNaN(values.priceMin)
+        ? Math.round(values.priceMin * 100)
+        : null;
+    priceMaxCents =
+      values.priceMax !== undefined && !Number.isNaN(values.priceMax)
+        ? Math.round(values.priceMax * 100)
+        : null;
+  } else if (values.priceType === 'NEGOTIABLE') {
+    priceMinCents = null;
+    priceMaxCents = null;
+  }
+
+  let formattedExpiresAt: string | null = null;
+  if (values.expiresAt) {
+    const d = new Date(values.expiresAt);
+    if (!Number.isNaN(d.getTime())) {
+      formattedExpiresAt = d.toISOString();
+    }
+  }
+
+  const payload: UpdateListingRequest = {
+    kind: values.kind,
+    title: values.title?.trim(),
+    description: values.description?.trim(),
+    categoryId: values.categoryId,
+    priceType: values.priceType,
+    priceMinCents,
+    priceMaxCents,
+    currency: values.currency || 'USD',
+    deliveryDays: values.deliveryDays ?? null,
+    location: values.location?.trim() ? values.location.trim() : null,
+    tags: values.tags ?? [],
+    imageIds: values.imageIds ?? [],
+    attachmentIds: values.attachmentIds ?? [],
+    expiresAt: formattedExpiresAt,
+  };
+
+  if (statusOverride !== undefined) {
+    payload.status = statusOverride;
+  }
+
+  return payload;
 }

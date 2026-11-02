@@ -129,6 +129,84 @@ describe('Listing Detail Page', () => {
     expect(screen.getByRole('button', { name: /delete/i })).toBeInTheDocument();
   });
 
+  it('gates useListing on !authLoading and passes viewerId (Finding 8)', () => {
+    vi.spyOn(authContext, 'useAuth').mockReturnValue({
+      user: {
+        id: 'owner-viewer-1',
+        email: 'owner@test.com',
+        displayName: 'Owner',
+        role: 'USER',
+        isBusiness: false,
+        createdAt: '2026-01-01T00:00:00Z',
+      },
+      token: 'jwt-token',
+      isLoading: true, // Auth is loading
+      isAuthenticated: true,
+      isAdmin: false,
+      login: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+      refresh: vi.fn(),
+    });
+
+    const useListingSpy = vi.spyOn(listingsApi, 'useListing').mockReturnValue({
+      data: undefined,
+      isLoading: true,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof listingsApi.useListing>);
+
+    renderWithToast(<ListingDetailPage />);
+
+    // When auth is loading, useListing query is disabled to prevent anonymous 404 for DRAFT
+    expect(useListingSpy).toHaveBeenCalledWith(
+      'listing-123',
+      expect.objectContaining({
+        enabled: false,
+        viewerId: 'owner-viewer-1',
+      }),
+    );
+  });
+
+  it('does not show Edit button for non-editable statuses (Finding 5)', () => {
+    vi.spyOn(authContext, 'useAuth').mockReturnValue({
+      user: {
+        id: 'user-owner',
+        email: 'owner@test.com',
+        displayName: 'Creative Studio',
+        role: 'USER',
+        isBusiness: true,
+        createdAt: '2026-01-01T00:00:00Z',
+      },
+      token: 'jwt-owner',
+      isLoading: false,
+      isAuthenticated: true,
+      isAdmin: false,
+      login: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+      refresh: vi.fn(),
+    });
+
+    const closedListing: ListingDetail = {
+      ...mockListing,
+      status: 'CLOSED',
+    };
+
+    vi.spyOn(listingsApi, 'useListing').mockReturnValue({
+      data: closedListing,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof listingsApi.useListing>);
+
+    renderWithToast(<ListingDetailPage />);
+
+    expect(screen.queryByRole('link', { name: /edit/i })).not.toBeInTheDocument();
+  });
+
   it('shows action buttons for non-owner', () => {
     vi.spyOn(authContext, 'useAuth').mockReturnValue({
       user: {

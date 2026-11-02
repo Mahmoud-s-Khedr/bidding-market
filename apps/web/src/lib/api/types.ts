@@ -88,8 +88,14 @@ export interface PresignUploadRequest {
   sizeBytes: number;
 }
 
-export type PresignUploadResponse = {
-  upload: {
+export interface PresignUploadResponse {
+  uploadId: string;
+  url: string;
+  headers?: Record<string, string>;
+  key?: string;
+  expiresAt?: string;
+  // Optional legacy fields for backward compatibility
+  upload?: {
     id: string;
     key: string;
     fileName: string;
@@ -100,9 +106,8 @@ export type PresignUploadResponse = {
     createdAt: Date | string;
     completedAt: Date | string | null;
   };
-  uploadUrl: string;
-  headers?: Record<string, string>;
-};
+  uploadUrl?: string;
+}
 
 export interface PresignedGetUrlResponse {
   url: string;
@@ -111,8 +116,17 @@ export interface PresignedGetUrlResponse {
 
 export type Category = SharedCategory;
 
-export type ListingFilters = SharedListingFilters;
-export type ListingSort = SharedListingSort;
+export type ListingFilters = Omit<SharedListingFilters, 'sort'> & {
+  sort?: ListingSort;
+};
+export type ListingSort =
+  | SharedListingSort
+  | 'relevance'
+  | 'newest'
+  | 'price_asc'
+  | 'price_desc'
+  | 'ending_soon'
+  | 'most_bids';
 
 export type ListingSummary = Omit<
   SharedListingSummary,
@@ -124,16 +138,8 @@ export type ListingSummary = Omit<
   priceMinCents?: number | null;
   priceMaxCents?: number | null;
   owner: PublicUser;
-  category?: {
-    id: string;
-    name: string;
-    slug: string;
-  };
-  images?: Attachment[];
-  tags?: string[];
-  description?: string;
-  deliveryDays?: number | null;
-  updatedAt?: Date | string;
+  thumbnailUrl?: string | null;
+  categoryName?: string;
 };
 
 export type ListingDetail = Omit<
@@ -168,7 +174,16 @@ export type ListingDetail = Omit<
 };
 
 export type CreateListingRequest = ListingCreateInput;
-export type UpdateListingRequest = ListingUpdateInput;
+export type UpdateListingRequest = Omit<
+  ListingUpdateInput,
+  'priceMinCents' | 'priceMaxCents' | 'deliveryDays' | 'location' | 'expiresAt'
+> & {
+  priceMinCents?: number | null;
+  priceMaxCents?: number | null;
+  deliveryDays?: number | null;
+  location?: string | null;
+  expiresAt?: string | null;
+};
 
 export type ReviewItem = Omit<SharedReviewItem, 'createdAt' | 'author' | 'comment'> & {
   createdAt: Date | string;

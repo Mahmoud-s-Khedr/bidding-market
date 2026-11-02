@@ -37,18 +37,15 @@ describe('User Profile Page', () => {
     status: 'OPEN',
     priceType: 'FIXED',
     priceMinCents: 80000,
-    priceMaxCents: 80000,
+    priceMaxCents: null,
     currency: 'USD',
-    deliveryDays: 5,
     location: 'Remote',
-    tags: ['figma', 'ui'],
     categoryId: 'c-design',
-    category: { id: 'c-design', name: 'Design', slug: 'design' },
+    categoryName: 'Design',
+    thumbnailUrl: null,
     owner: mockUser,
-    images: [],
     bidCount: 4,
     createdAt: '2026-10-01T00:00:00Z',
-    updatedAt: '2026-10-01T00:00:00Z',
   };
 
   const mockReview: ReviewItem = {

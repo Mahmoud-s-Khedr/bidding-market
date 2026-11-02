@@ -1,6 +1,6 @@
 import * as React from 'react';
 import Link from 'next/link';
-import { Clock, MapPin, MessageSquare, Tag } from 'lucide-react';
+import { MapPin, MessageSquare, Tag } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -15,7 +15,7 @@ export interface ListingCardProps {
 
 export function ListingCard({ listing, className }: ListingCardProps) {
   const isRequest = listing.kind === 'REQUEST';
-  const firstImage = listing.images && listing.images.length > 0 ? listing.images[0] : null;
+  const categoryName = listing.categoryName;
 
   return (
     <div
@@ -31,9 +31,9 @@ export function ListingCard({ listing, className }: ListingCardProps) {
         tabIndex={-1}
         aria-hidden="true"
       >
-        {firstImage ? (
+        {listing.thumbnailUrl ? (
           <img
-            src={firstImage.url}
+            src={listing.thumbnailUrl}
             alt=""
             className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
           />
@@ -64,17 +64,12 @@ export function ListingCard({ listing, className }: ListingCardProps) {
       <div className="flex flex-1 flex-col p-4">
         {/* Category & Location */}
         <div className="flex items-center justify-between text-xs text-muted-foreground mb-1.5">
-          {listing.category ? (
-            <Link
-              href={`/categories/${listing.category.slug}`}
-              className="truncate hover:text-primary transition-colors font-medium"
-            >
-              {listing.category.name}
-            </Link>
-          ) : (
-            <span className="truncate font-medium text-muted-foreground/80">
-              {listing.categoryId}
+          {categoryName ? (
+            <span className="truncate hover:text-primary transition-colors font-medium">
+              {categoryName}
             </span>
+          ) : (
+            <span />
           )}
 
           {listing.location && (
@@ -143,15 +138,6 @@ export function ListingCard({ listing, className }: ListingCardProps) {
             </span>
           </div>
         </div>
-
-        {listing.deliveryDays ? (
-          <div className="flex items-center gap-1 text-[11px] text-muted-foreground mt-2">
-            <Clock className="h-3 w-3" />
-            <span>
-              Delivery: {listing.deliveryDays} {listing.deliveryDays === 1 ? 'day' : 'days'}
-            </span>
-          </div>
-        ) : null}
       </div>
     </div>
   );

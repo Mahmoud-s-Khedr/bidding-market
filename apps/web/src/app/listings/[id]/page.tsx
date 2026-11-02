@@ -39,10 +39,21 @@ export default function ListingDetailPage() {
   const router = useRouter();
   const id = (params?.id as string) || '';
 
-  const { user } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
   const { toast } = useToast();
 
-  const { data: listing, isLoading, isError, error, refetch } = useListing(id);
+  const {
+    data: listing,
+    isLoading: isListingLoading,
+    isError,
+    error,
+    refetch,
+  } = useListing(id, {
+    enabled: Boolean(id) && !authLoading,
+    viewerId: user?.id ?? null,
+  });
+
+  const isLoading = authLoading || (isListingLoading && !listing);
 
   const closeMutation = useCloseListing();
   const deleteMutation = useDeleteListing();
@@ -189,12 +200,14 @@ export default function ListingDetailPage() {
         {/* Owner Action Buttons */}
         {isOwner ? (
           <div className="flex items-center gap-2 w-full sm:w-auto">
-            <Button variant="outline" size="sm" asChild>
-              <Link href={`/listings/${listing.id}/edit`}>
-                <Edit3 className="h-3.5 w-3.5 mr-1.5" />
-                Edit
-              </Link>
-            </Button>
+            {(listing.status === 'DRAFT' || listing.status === 'OPEN') && (
+              <Button variant="outline" size="sm" asChild>
+                <Link href={`/listings/${listing.id}/edit`}>
+                  <Edit3 className="h-3.5 w-3.5 mr-1.5" />
+                  Edit
+                </Link>
+              </Button>
+            )}
 
             {listing.status === 'OPEN' && (
               <Button variant="outline" size="sm" onClick={() => setCloseDialogOpen(true)}>

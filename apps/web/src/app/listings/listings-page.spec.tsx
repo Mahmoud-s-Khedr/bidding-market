@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ListingsContent } from './page';
 import * as listingsApi from '@/lib/api/listings';
@@ -8,11 +8,13 @@ import * as categoriesApi from '@/lib/api/categories';
 import type { ListingSummary } from '@/lib/api/types';
 
 const mockPush = vi.fn();
+const mockReplace = vi.fn();
 let mockSearchParams = new URLSearchParams();
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({
     push: mockPush,
+    replace: mockReplace,
   }),
   usePathname: () => '/listings',
   useSearchParams: () => mockSearchParams,
@@ -22,6 +24,7 @@ describe('Listings Browse Page', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     mockPush.mockReset();
+    mockReplace.mockReset();
     mockSearchParams = new URLSearchParams();
 
     vi.spyOn(categoriesApi, 'useCategories').mockReturnValue({
@@ -37,13 +40,12 @@ describe('Listings Browse Page', () => {
     status: 'OPEN',
     priceType: 'FIXED',
     priceMinCents: 50000,
-    priceMaxCents: 50000,
+    priceMaxCents: null,
     currency: 'USD',
-    deliveryDays: 7,
     location: 'Remote',
-    tags: ['react'],
     categoryId: 'cat-1',
-    category: { id: 'cat-1', name: 'Tech', slug: 'tech' },
+    categoryName: 'Tech',
+    thumbnailUrl: 'https://cdn.example.com/thumb.jpg',
     owner: {
       id: 'u-1',
       displayName: 'Alice',
@@ -53,10 +55,8 @@ describe('Listings Browse Page', () => {
       completedCount: 2,
       createdAt: '2026-01-01T00:00:00Z',
     },
-    images: [],
     bidCount: 2,
     createdAt: '2026-10-01T00:00:00Z',
-    updatedAt: '2026-10-01T00:00:00Z',
   };
 
   it('renders listings items returned from useListings', () => {
@@ -79,7 +79,7 @@ describe('Listings Browse Page', () => {
     expect(screen.getByText('Fullstack Next.js Developer')).toBeInTheDocument();
   });
 
-  it('updates search query in URL when search input is submitted', async () => {
+  it('updates search query in URL via router.replace when search input is submitted', async () => {
     const user = userEvent.setup();
 
     vi.spyOn(listingsApi, 'useListings').mockReturnValue({
@@ -97,7 +97,58 @@ describe('Listings Browse Page', () => {
     const searchInput = screen.getByLabelText(/search listings/i);
     await user.type(searchInput, 'frontend{enter}');
 
-    expect(mockPush).toHaveBeenCalledWith('/listings?q=frontend');
+    expect(mockReplace).toHaveBeenCalledWith('/listings?q=frontend');
+  });
+
+  it('defaults to relevance sort when q is provided in searchParams (Non-blocking item 1)', () => {
+    mockSearchParams = new URLSearchParams('q=typescript');
+    const useListingsSpy = vi.spyOn(listingsApi, 'useListings').mockReturnValue({
+      data: { pages: [{ items: [], nextCursor: null }], pageParams: [null] },
+      isLoading: false,
+      isError: false,
+      hasNextPage: false,
+      isFetchingNextPage: false,
+      fetchNextPage: vi.fn(),
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof listingsApi.useListings>);
+
+    render(<ListingsContent />);
+
+    expect(useListingsSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        q: 'typescript',
+        sort: 'relevance',
+      }),
+    );
+  });
+
+  it('debounces text filter changes (300 ms) and uses router.replace (Non-blocking item 2)', () => {
+    vi.useFakeTimers();
+
+    vi.spyOn(listingsApi, 'useListings').mockReturnValue({
+      data: { pages: [{ items: [], nextCursor: null }], pageParams: [null] },
+      isLoading: false,
+      isError: false,
+      hasNextPage: false,
+      isFetchingNextPage: false,
+      fetchNextPage: vi.fn(),
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof listingsApi.useListings>);
+
+    render(<ListingsContent />);
+
+    const locationInput = screen.getByPlaceholderText(/city, region, or remote/i);
+    fireEvent.change(locationInput, { target: { value: 'Berlin' } });
+
+    // Not yet called immediately
+    expect(mockReplace).not.toHaveBeenCalled();
+
+    // Advance 300ms
+    vi.advanceTimersByTime(300);
+
+    expect(mockReplace).toHaveBeenCalledWith('/listings?location=Berlin');
+
+    vi.useRealTimers();
   });
 
   it('renders empty state when no listings match filters', () => {

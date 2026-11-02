@@ -112,8 +112,113 @@ describe('FileDropzone component', () => {
     fireEvent.change(input, { target: { files: [file] } });
 
     await waitFor(() => {
-      expect(screen.getByText('File exceeds max size')).toBeInTheDocument();
+      const alert = screen.getByRole('alert');
+      expect(alert).toHaveTextContent('File exceeds max size');
     });
+  });
+
+  it('handles concurrent uploads of multiple files without losing files (Finding 6)', async () => {
+    const onChange = vi.fn();
+    const att1: Attachment = {
+      id: 'att-1',
+      key: 'key-1',
+      fileName: 'file1.png',
+      mimeType: 'image/png',
+      sizeBytes: 100,
+    };
+    const att2: Attachment = {
+      id: 'att-2',
+      key: 'key-2',
+      fileName: 'file2.png',
+      mimeType: 'image/png',
+      sizeBytes: 200,
+    };
+
+    let callCount = 0;
+    vi.spyOn(uploadModule, 'uploadFile').mockImplementation((file) => {
+      callCount++;
+      if (file.name === 'file1.png') {
+        return Promise.resolve(att1);
+      }
+      return Promise.resolve(att2);
+    });
+
+    const { container } = render(
+      <FileDropzone purpose="LISTING_IMAGE" value={[]} onChange={onChange} />,
+    );
+
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const file1 = new File(['1'], 'file1.png', { type: 'image/png' });
+    const file2 = new File(['2'], 'file2.png', { type: 'image/png' });
+
+    fireEvent.change(input, { target: { files: [file1, file2] } });
+
+    await waitFor(() => {
+      expect(callCount).toBe(2);
+      expect(onChange).toHaveBeenLastCalledWith([att1, att2]);
+    });
+  });
+
+  it('renders progress bar with progressbar role and aria values (Non-blocking item 4)', async () => {
+    let progressCallback: ((percent: number) => void) | undefined;
+    vi.spyOn(uploadModule, 'uploadFile').mockImplementation((_file, _purpose, options) => {
+      progressCallback = options?.onProgress;
+      return new Promise(() => {}); // never resolves to keep in-flight
+    });
+
+    const { container } = render(<FileDropzone purpose="LISTING_IMAGE" value={[]} />);
+
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['img'], 'progress.png', { type: 'image/png' });
+
+    fireEvent.change(input, { target: { files: [file] } });
+
+    await waitFor(() => {
+      expect(progressCallback).toBeDefined();
+    });
+
+    progressCallback?.(65);
+
+    await waitFor(() => {
+      const progressbar = screen.getByRole('progressbar');
+      expect(progressbar).toBeInTheDocument();
+      expect(progressbar).toHaveAttribute('aria-valuenow', '65');
+      expect(progressbar).toHaveAttribute('aria-valuemin', '0');
+      expect(progressbar).toHaveAttribute('aria-valuemax', '100');
+    });
+  });
+
+  it('cancels in-flight upload without adding file to onChange (Finding 9)', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    let aborted = false;
+
+    vi.spyOn(uploadModule, 'uploadFile').mockImplementation((_file, _purpose, options) => {
+      options?.signal?.addEventListener('abort', () => {
+        aborted = true;
+      });
+      return new Promise(() => {}); // pending
+    });
+
+    const { container } = render(
+      <FileDropzone purpose="LISTING_IMAGE" value={[]} onChange={onChange} />,
+    );
+
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['test'], 'cancel-me.png', { type: 'image/png' });
+
+    fireEvent.change(input, { target: { files: [file] } });
+
+    await waitFor(() => {
+      expect(screen.getByText('cancel-me.png')).toBeInTheDocument();
+    });
+
+    const cancelBtn = screen.getByRole('button', { name: /cancel upload of cancel-me\.png/i });
+    await user.click(cancelBtn);
+
+    expect(aborted).toBe(true);
+    expect(screen.queryByText('cancel-me.png')).not.toBeInTheDocument();
+    expect(onChange).not.toHaveBeenCalled();
   });
 
   it('triggers input click on Enter or Space key', () => {

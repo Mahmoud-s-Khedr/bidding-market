@@ -7,7 +7,8 @@ export const queryKeys = {
     list: (filters?: ListingFilters) => ['listings', 'list', filters] as const,
     infinite: (filters?: ListingFilters) => ['listings', 'infinite', filters] as const,
     details: () => ['listings', 'detail'] as const,
-    detail: (id: string) => ['listings', 'detail', id] as const,
+    detail: (id: string, viewerId?: string | null) =>
+      ['listings', 'detail', id, viewerId ?? 'anon'] as const,
   },
   categories: {
     all: ['categories'] as const,

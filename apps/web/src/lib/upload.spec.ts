@@ -22,6 +22,13 @@ describe('Upload utilities', () => {
       expect(res.error).toContain('not permitted');
     });
 
+    it('rejects files with empty MIME type client-side', () => {
+      const file = new File(['bytes'], 'photo.png', { type: '' });
+      const res = validateFileForPurpose(file, 'LISTING_IMAGE');
+      expect(res.valid).toBe(false);
+      expect(res.error).toBe('File must have a valid MIME type.');
+    });
+
     it('rejects images exceeding 10 MB limit', () => {
       const largeFile = new File([''], 'big.jpg', { type: 'image/jpeg' });
       Object.defineProperty(largeFile, 'size', { value: 11 * 1024 * 1024 });
@@ -48,26 +55,18 @@ describe('Upload utilities', () => {
   });
 
   describe('uploadFile', () => {
-    it('performs presign -> PUT/XHR upload -> complete flow', async () => {
+    it('performs presign -> PUT/XHR upload -> complete flow using real API presign shape', async () => {
       const mockFile = new File(['content'], 'test.png', { type: 'image/png' });
       const mockPresign = {
-        upload: {
-          id: 'up-123',
-          key: 'uploads/test.png',
-          fileName: 'test.png',
-          mimeType: 'image/png',
-          sizeBytes: 7,
-          purpose: 'LISTING_IMAGE' as const,
-          status: 'PENDING' as const,
-          createdAt: new Date(),
-          completedAt: null,
-        },
-        uploadUrl: 'https://s3.example/upload',
-        headers: { 'x-amz-acl': 'private' },
+        uploadId: 'up-123',
+        url: 'https://s3.example/upload',
+        headers: { 'content-type': 'image/png', 'x-amz-acl': 'private' },
+        key: 'listing_image/u-1/up-123/test.png',
+        expiresAt: '2026-11-03T01:00:00Z',
       };
       const mockAttachment = {
         id: 'att-123',
-        key: 'uploads/test.png',
+        key: 'listing_image/u-1/up-123/test.png',
         url: 'https://cdn.example/test.png',
         fileName: 'test.png',
         mimeType: 'image/png',
@@ -75,9 +74,9 @@ describe('Upload utilities', () => {
       };
 
       vi.spyOn(uploadsApi, 'presignUpload').mockResolvedValue(mockPresign);
-      vi.spyOn(uploadsApi, 'completeUpload').mockResolvedValue(mockAttachment);
+      const completeSpy = vi.spyOn(uploadsApi, 'completeUpload').mockResolvedValue(mockAttachment);
 
-      // Mock XMLHttpRequest
+      const setHeaderCalls: [string, string][] = [];
       const mockXHR = {
         open: vi.fn(),
         send: vi.fn(function (this: {
@@ -93,7 +92,9 @@ describe('Upload utilities', () => {
           this.status = 200;
           this.onload?.();
         }),
-        setRequestHeader: vi.fn(),
+        setRequestHeader: vi.fn((key: string, val: string) => {
+          setHeaderCalls.push([key, val]);
+        }),
         abort: vi.fn(),
         status: 200,
         upload: {
@@ -117,30 +118,73 @@ describe('Upload utilities', () => {
         sizeBytes: mockFile.size,
       });
 
-      expect(mockXHR.open).toHaveBeenCalledWith('PUT', mockPresign.uploadUrl);
+      expect(mockXHR.open).toHaveBeenCalledWith('PUT', mockPresign.url);
       expect(onProgress).toHaveBeenCalledWith(50);
       expect(onProgress).toHaveBeenCalledWith(100);
-      expect(uploadsApi.completeUpload).toHaveBeenCalledWith('up-123');
+      expect(completeSpy).toHaveBeenCalledWith('up-123');
       expect(result).toEqual(mockAttachment);
+
+      // Verify no Authorization header is sent to the storage URL
+      const hasAuthHeader = setHeaderCalls.some(([k]) => k.toLowerCase() === 'authorization');
+      expect(hasAuthHeader).toBe(false);
     });
 
-    it('supports cancellation via AbortSignal', async () => {
+    it('sets content-type header only once when API returns lowercase content-type', async () => {
+      const mockFile = new File(['content'], 'test.png', { type: 'image/png' });
+      vi.spyOn(uploadsApi, 'presignUpload').mockResolvedValue({
+        uploadId: 'up-case',
+        url: 'https://s3.example/case',
+        headers: {
+          'content-type': 'image/png',
+        },
+        key: 'key',
+        expiresAt: '2026-11-03T01:00:00Z',
+      });
+      vi.spyOn(uploadsApi, 'completeUpload').mockResolvedValue({
+        id: 'att-case',
+        key: 'key',
+        fileName: 'test.png',
+        mimeType: 'image/png',
+        sizeBytes: 7,
+      });
+
+      const setHeaderCalls: [string, string][] = [];
+      const mockXHR = {
+        open: vi.fn(),
+        send: vi.fn(function (this: { onload?: () => void; status: number }) {
+          this.status = 200;
+          this.onload?.();
+        }),
+        setRequestHeader: vi.fn((key: string, val: string) => {
+          setHeaderCalls.push([key, val]);
+        }),
+        abort: vi.fn(),
+        status: 200,
+        upload: { onprogress: null },
+      };
+
+      vi.stubGlobal('XMLHttpRequest', function () {
+        return mockXHR;
+      });
+
+      await uploadFile(mockFile, 'LISTING_IMAGE');
+
+      // Filter headers for content-type case-insensitively
+      const contentTypeCalls = setHeaderCalls.filter(([k]) => k.toLowerCase() === 'content-type');
+      expect(contentTypeCalls).toHaveLength(1);
+      expect(contentTypeCalls[0]![1]).toBe('image/png');
+    });
+
+    it('supports cancellation via AbortSignal and does not call completeUpload', async () => {
       const mockFile = new File(['data'], 'test.png', { type: 'image/png' });
       vi.spyOn(uploadsApi, 'presignUpload').mockResolvedValue({
-        upload: {
-          id: 'up-cancel',
-          key: 'key',
-          fileName: 'test.png',
-          mimeType: 'image/png',
-          sizeBytes: 4,
-          purpose: 'LISTING_IMAGE',
-          status: 'PENDING',
-          createdAt: new Date(),
-          completedAt: null,
-        },
-        uploadUrl: 'https://s3.example/cancel',
+        uploadId: 'up-cancel',
+        url: 'https://s3.example/cancel',
         headers: {},
+        key: 'key',
+        expiresAt: '2026-11-03T01:00:00Z',
       });
+      const completeSpy = vi.spyOn(uploadsApi, 'completeUpload');
 
       const abortController = new AbortController();
 
@@ -157,35 +201,43 @@ describe('Upload utilities', () => {
         upload: { onprogress: null },
       };
 
-      function MockXHR3() {
+      vi.stubGlobal('XMLHttpRequest', function () {
         return mockXHR;
-      }
-
-      vi.stubGlobal('XMLHttpRequest', MockXHR3);
+      });
 
       await expect(
         uploadFile(mockFile, 'LISTING_IMAGE', { signal: abortController.signal }),
       ).rejects.toThrow();
       expect(mockXHR.abort).toHaveBeenCalled();
+      expect(completeSpy).not.toHaveBeenCalled();
     });
 
-    it('rejects when HTTP status is not 2xx', async () => {
+    it('aborts before or during presign when signal is already aborted', async () => {
+      const mockFile = new File(['data'], 'test.png', { type: 'image/png' });
+      const presignSpy = vi.spyOn(uploadsApi, 'presignUpload');
+      const completeSpy = vi.spyOn(uploadsApi, 'completeUpload');
+
+      const controller = new AbortController();
+      controller.abort();
+
+      await expect(
+        uploadFile(mockFile, 'LISTING_IMAGE', { signal: controller.signal }),
+      ).rejects.toThrow();
+
+      expect(presignSpy).not.toHaveBeenCalled();
+      expect(completeSpy).not.toHaveBeenCalled();
+    });
+
+    it('rejects when HTTP status is not 2xx and does not call completeUpload', async () => {
       const mockFile = new File(['data'], 'test.png', { type: 'image/png' });
       vi.spyOn(uploadsApi, 'presignUpload').mockResolvedValue({
-        upload: {
-          id: 'up-err',
-          key: 'key',
-          fileName: 'test.png',
-          mimeType: 'image/png',
-          sizeBytes: 4,
-          purpose: 'LISTING_IMAGE',
-          status: 'PENDING',
-          createdAt: new Date(),
-          completedAt: null,
-        },
-        uploadUrl: 'https://s3.example/err',
+        uploadId: 'up-err',
+        url: 'https://s3.example/err',
         headers: {},
+        key: 'key',
+        expiresAt: '2026-11-03T01:00:00Z',
       });
+      const completeSpy = vi.spyOn(uploadsApi, 'completeUpload');
 
       const mockXHR = {
         open: vi.fn(),
@@ -199,15 +251,14 @@ describe('Upload utilities', () => {
         upload: { onprogress: null },
       };
 
-      function MockXHR4() {
+      vi.stubGlobal('XMLHttpRequest', function () {
         return mockXHR;
-      }
-
-      vi.stubGlobal('XMLHttpRequest', MockXHR4);
+      });
 
       await expect(uploadFile(mockFile, 'LISTING_IMAGE')).rejects.toThrow(
         'Upload failed with HTTP status 500',
       );
+      expect(completeSpy).not.toHaveBeenCalled();
     });
   });
 });

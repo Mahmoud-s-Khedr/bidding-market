@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { ListingForm } from './listing-form';
 import { ApiError } from '@/lib/api/client';
 import * as categoriesApi from '@/lib/api/categories';
-import type { Category, CreateListingRequest } from '@/lib/api/types';
+import type { Category, CreateListingRequest, UpdateListingRequest } from '@/lib/api/types';
 
 describe('ListingForm component', () => {
   beforeEach(() => {
@@ -58,7 +58,7 @@ describe('ListingForm component', () => {
   it('correctly converts major units to cents for FIXED price on submit', async () => {
     const user = userEvent.setup();
     const onSubmit = vi
-      .fn<(data: CreateListingRequest) => Promise<void>>()
+      .fn<(data: CreateListingRequest | UpdateListingRequest) => Promise<void>>()
       .mockResolvedValue(undefined);
 
     const initialListing = {
@@ -109,15 +109,17 @@ describe('ListingForm component', () => {
 
     const payload = onSubmit.mock.calls[0]![0];
     expect(payload.priceMinCents).toBe(20050);
-    expect(payload.priceMaxCents).toBe(20050);
+    // Finding 3 & 4: FIXED edit sets priceMinCents and clears priceMaxCents to null
+    expect(payload.priceMaxCents).toBeNull();
     expect(payload.title).toBe('Senior Frontend Engineer needed');
-    expect(payload.status).toBe('OPEN');
+    // Finding 5: Do not send status on edit of an OPEN listing
+    expect(payload.status).toBeUndefined();
   });
 
   it('submits with status DRAFT when Save Draft button is clicked', async () => {
     const user = userEvent.setup();
     const onSubmit = vi
-      .fn<(data: CreateListingRequest) => Promise<void>>()
+      .fn<(data: CreateListingRequest | UpdateListingRequest) => Promise<void>>()
       .mockResolvedValue(undefined);
 
     const initialListing = {
@@ -156,8 +158,89 @@ describe('ListingForm component', () => {
 
     const payload = onSubmit.mock.calls[0]![0];
     expect(payload.status).toBe('DRAFT');
-    expect(payload.priceMinCents).toBeUndefined();
-    expect(payload.priceMaxCents).toBeUndefined();
+    expect(payload.priceMinCents).toBeNull();
+    expect(payload.priceMaxCents).toBeNull();
+  });
+
+  it('sends status OPEN when publishing a DRAFT listing', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi
+      .fn<(data: CreateListingRequest | UpdateListingRequest) => Promise<void>>()
+      .mockResolvedValue(undefined);
+
+    const initialDraftListing = {
+      id: 'l-draft-publish',
+      title: 'Draft Proposal to Publish',
+      description: 'Long enough description text for testing publication of a draft listing.',
+      kind: 'OFFER' as const,
+      status: 'DRAFT' as const,
+      priceType: 'FIXED' as const,
+      priceMinCents: 10000,
+      priceMaxCents: null,
+      currency: 'USD',
+      tags: [],
+      categoryId: 'cat-1',
+      category: { id: 'cat-1', name: 'Design', slug: 'design' },
+      ownerId: 'u-1',
+      owner: {
+        id: 'u-1',
+        displayName: 'Bob',
+        isBusiness: false,
+        createdAt: '2026-01-01T00:00:00Z',
+      },
+      images: [],
+      attachments: [],
+      bidCount: 0,
+      createdAt: '2026-10-01T00:00:00Z',
+      updatedAt: '2026-10-01T00:00:00Z',
+    };
+
+    render(<ListingForm initialListing={initialDraftListing} onSubmit={onSubmit} />);
+
+    const publishBtn = screen.getByRole('button', { name: /publish listing/i });
+    await user.click(publishBtn);
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledTimes(1);
+    });
+
+    const payload = onSubmit.mock.calls[0]![0];
+    expect(payload.status).toBe('OPEN');
+    expect(payload.priceMinCents).toBe(10000);
+    expect(payload.priceMaxCents).toBeNull();
+  });
+
+  it('displays the currency symbol from the selected currency', () => {
+    const initialListing = {
+      id: 'l-eur',
+      title: 'European Consulting Service',
+      description: 'Comprehensive business consulting services in Europe.',
+      kind: 'OFFER' as const,
+      status: 'OPEN' as const,
+      priceType: 'FIXED' as const,
+      priceMinCents: 5000,
+      priceMaxCents: null,
+      currency: 'EUR',
+      tags: [],
+      categoryId: 'cat-1',
+      category: { id: 'cat-1', name: 'Design', slug: 'design' },
+      ownerId: 'u-1',
+      owner: {
+        id: 'u-1',
+        displayName: 'Alice',
+        isBusiness: false,
+        createdAt: '2026-01-01T00:00:00Z',
+      },
+      images: [],
+      attachments: [],
+      bidCount: 0,
+      createdAt: '2026-10-01T00:00:00Z',
+      updatedAt: '2026-10-01T00:00:00Z',
+    };
+
+    render(<ListingForm initialListing={initialListing} onSubmit={vi.fn()} />);
+
+    expect(screen.getByLabelText(/price \(€\)/i)).toBeInTheDocument();
   });
 
   it('maps server VALIDATION_ERROR details to form field errors', async () => {

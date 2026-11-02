@@ -47,7 +47,13 @@ describe('Centralized Query Keys', () => {
       { q: 'test' },
     ]);
     expect(queryKeys.listings.details()).toEqual(['listings', 'detail']);
-    expect(queryKeys.listings.detail('id-1')).toEqual(['listings', 'detail', 'id-1']);
+    expect(queryKeys.listings.detail('id-1')).toEqual(['listings', 'detail', 'id-1', 'anon']);
+    expect(queryKeys.listings.detail('id-1', 'user-123')).toEqual([
+      'listings',
+      'detail',
+      'id-1',
+      'user-123',
+    ]);
 
     expect(queryKeys.categories.all).toEqual(['categories']);
     expect(queryKeys.categories.list()).toEqual(['categories', 'list']);
@@ -117,6 +123,37 @@ describe('Listings API & Hooks', () => {
     });
 
     expect(result.current.data?.pages[0]?.items).toEqual([{ id: 'l-1' }]);
+  });
+
+  it('filter change resets the infinite query to fetch new initial page (Non-blocking item)', async () => {
+    const getSpy = vi
+      .spyOn(api, 'get')
+      .mockResolvedValueOnce({ items: [{ id: 'l-filter1' }], nextCursor: 'cur-2' })
+      .mockResolvedValueOnce({ items: [{ id: 'l-filter2' }], nextCursor: null });
+
+    const wrapper = createWrapper();
+    const { result, rerender } = renderHook(
+      ({ filters }: { filters: { q?: string } }) => useListings(filters),
+      {
+        wrapper,
+        initialProps: { filters: { q: 'first' } },
+      },
+    );
+
+    await waitFor(() => {
+      expect(result.current.isSuccess).toBe(true);
+    });
+    expect(result.current.data?.pages[0]?.items).toEqual([{ id: 'l-filter1' }]);
+
+    // Changing filter param resets infinite query to initial page with new queryKey
+    rerender({ filters: { q: 'second' } });
+
+    await waitFor(() => {
+      expect(result.current.data?.pages[0]?.items).toEqual([{ id: 'l-filter2' }]);
+    });
+    expect(getSpy).toHaveBeenCalledWith('/listings', {
+      params: { q: 'second', cursor: undefined },
+    });
   });
 
   it('useListing query hook fetches detail', async () => {

@@ -50,19 +50,93 @@ export function ListingsContent({ initialCategorySlug }: ListingsViewProps) {
   const minPriceParam = searchParams.get('minPrice') || '';
   const maxPriceParam = searchParams.get('maxPrice') || '';
   const locationParam = searchParams.get('location') || '';
-  const sortParam = (searchParams.get('sort') as ListingSort) || 'newest';
+  const rawSortParam = searchParams.get('sort') as ListingSort | null;
 
-  // Local draft search query
+  // Relevance is default sort when q is set; newest is default otherwise
+  const defaultSort: ListingSort = qParam.trim() ? 'relevance' : 'newest';
+  const effectiveSort: ListingSort = rawSortParam || defaultSort;
+
+  // URL updating helper using router.replace to avoid flooding history
+  const updateUrl = React.useCallback(
+    (updates: Record<string, string | null>) => {
+      const params = new URLSearchParams(searchParams.toString());
+      for (const [key, value] of Object.entries(updates)) {
+        if (value === null || value === '' || value === undefined) {
+          params.delete(key);
+        } else {
+          params.set(key, value);
+        }
+      }
+      const qs = params.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname);
+    },
+    [searchParams, pathname, router],
+  );
+
+  // Local draft states for debounced text inputs
   const [searchInput, setSearchInput] = React.useState(qParam);
+  const [locationInput, setLocationInput] = React.useState(locationParam);
+  const [minPriceInput, setMinPriceInput] = React.useState(minPriceParam);
+  const [maxPriceInput, setMaxPriceInput] = React.useState(maxPriceParam);
 
+  // Sync inputs when URL params change externally
   React.useEffect(() => {
     setSearchInput(qParam);
   }, [qParam]);
+  React.useEffect(() => {
+    setLocationInput(locationParam);
+  }, [locationParam]);
+  React.useEffect(() => {
+    setMinPriceInput(minPriceParam);
+  }, [minPriceParam]);
+  React.useEffect(() => {
+    setMaxPriceInput(maxPriceParam);
+  }, [maxPriceParam]);
+
+  // Debounce search query (300 ms)
+  React.useEffect(() => {
+    const timer = setTimeout(() => {
+      if (searchInput.trim() !== qParam) {
+        updateUrl({ q: searchInput.trim() || null });
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchInput, qParam, updateUrl]);
+
+  // Debounce location query (300 ms)
+  React.useEffect(() => {
+    const timer = setTimeout(() => {
+      if (locationInput.trim() !== locationParam) {
+        updateUrl({ location: locationInput.trim() || null });
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [locationInput, locationParam, updateUrl]);
+
+  // Debounce min price (300 ms)
+  React.useEffect(() => {
+    const timer = setTimeout(() => {
+      if (minPriceInput !== minPriceParam) {
+        updateUrl({ minPrice: minPriceInput || null });
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [minPriceInput, minPriceParam, updateUrl]);
+
+  // Debounce max price (300 ms)
+  React.useEffect(() => {
+    const timer = setTimeout(() => {
+      if (maxPriceInput !== maxPriceParam) {
+        updateUrl({ maxPrice: maxPriceInput || null });
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [maxPriceInput, maxPriceParam, updateUrl]);
 
   // Construct API filter object
   const activeFilters = React.useMemo<ListingFilters>(() => {
     const filters: ListingFilters = {
-      sort: sortParam,
+      sort: effectiveSort,
       status: 'OPEN',
     };
     if (qParam.trim()) filters.q = qParam.trim();
@@ -83,7 +157,7 @@ export function ListingsContent({ initialCategorySlug }: ListingsViewProps) {
     minPriceParam,
     maxPriceParam,
     locationParam,
-    sortParam,
+    effectiveSort,
   ]);
 
   const {
@@ -108,7 +182,7 @@ export function ListingsContent({ initialCategorySlug }: ListingsViewProps) {
     if (minPriceParam) count++;
     if (maxPriceParam) count++;
     if (locationParam) count++;
-    if (sortParam !== 'newest') count++;
+    if (rawSortParam && rawSortParam !== defaultSort) count++;
     return count;
   }, [
     qParam,
@@ -118,31 +192,21 @@ export function ListingsContent({ initialCategorySlug }: ListingsViewProps) {
     minPriceParam,
     maxPriceParam,
     locationParam,
-    sortParam,
+    rawSortParam,
+    defaultSort,
   ]);
-
-  // URL updating helper
-  const updateUrl = (updates: Record<string, string | null>) => {
-    const params = new URLSearchParams(searchParams.toString());
-    for (const [key, value] of Object.entries(updates)) {
-      if (value === null || value === '' || value === undefined) {
-        params.delete(key);
-      } else {
-        params.set(key, value);
-      }
-    }
-    const qs = params.toString();
-    router.push(qs ? `${pathname}?${qs}` : pathname);
-  };
 
   const handleClearFilters = () => {
     setSearchInput('');
+    setLocationInput('');
+    setMinPriceInput('');
+    setMaxPriceInput('');
     const params = new URLSearchParams();
     if (initialCategorySlug) {
       params.set('categorySlug', initialCategorySlug);
     }
     const qs = params.toString();
-    router.push(qs ? `${pathname}?${qs}` : pathname);
+    router.replace(qs ? `${pathname}?${qs}` : pathname);
   };
 
   // IntersectionObserver for infinite scrolling
@@ -215,21 +279,21 @@ export function ListingsContent({ initialCategorySlug }: ListingsViewProps) {
       {/* Price Range */}
       <div className="space-y-2">
         <span className="text-xs font-semibold text-foreground uppercase tracking-wider block">
-          Budget / Price ($)
+          Budget / Price
         </span>
         <div className="grid grid-cols-2 gap-2">
           <Input
             type="number"
             placeholder="Min"
-            value={minPriceParam}
-            onChange={(e) => updateUrl({ minPrice: e.target.value || null })}
+            value={minPriceInput}
+            onChange={(e) => setMinPriceInput(e.target.value)}
             className="h-9 text-sm"
           />
           <Input
             type="number"
             placeholder="Max"
-            value={maxPriceParam}
-            onChange={(e) => updateUrl({ maxPrice: e.target.value || null })}
+            value={maxPriceInput}
+            onChange={(e) => setMaxPriceInput(e.target.value)}
             className="h-9 text-sm"
           />
         </div>
@@ -243,8 +307,8 @@ export function ListingsContent({ initialCategorySlug }: ListingsViewProps) {
         <Input
           type="text"
           placeholder="City, region, or remote"
-          value={locationParam}
-          onChange={(e) => updateUrl({ location: e.target.value || null })}
+          value={locationInput}
+          onChange={(e) => setLocationInput(e.target.value)}
           className="h-9 text-sm"
         />
       </div>
@@ -328,11 +392,15 @@ export function ListingsContent({ initialCategorySlug }: ListingsViewProps) {
             <span className="text-xs text-muted-foreground hidden sm:inline whitespace-nowrap">
               Sort by:
             </span>
-            <Select value={sortParam} onValueChange={(val) => updateUrl({ sort: val })}>
+            <Select
+              value={effectiveSort}
+              onValueChange={(val) => updateUrl({ sort: val === defaultSort ? null : val })}
+            >
               <SelectTrigger className="w-[160px] h-10 text-sm">
                 <SelectValue placeholder="Sort by" />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="relevance">Relevance</SelectItem>
                 <SelectItem value="newest">Newest First</SelectItem>
                 <SelectItem value="price_asc">Price: Low to High</SelectItem>
                 <SelectItem value="price_desc">Price: High to Low</SelectItem>

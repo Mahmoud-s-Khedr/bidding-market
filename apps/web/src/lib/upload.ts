@@ -13,28 +13,23 @@ export function validateFileForPurpose(file: File, purpose: UploadPurpose): File
     return { valid: false, error: `Invalid upload purpose: ${purpose}` };
   }
 
+  // Reject empty MIME types client-side
+  if (!file.type || !file.type.trim()) {
+    return {
+      valid: false,
+      error: 'File must have a valid MIME type.',
+    };
+  }
+
   const allowedMimes = config.mimeTypes as readonly string[];
   const maxBytes = config.maxSizeBytes;
 
-  // Extension fallback check if MIME type is generic or empty
-  const fileExt = `.${file.name.split('.').pop()?.toLowerCase() || ''}`;
-  const validExtensionForImage = ['.jpg', '.jpeg', '.png', '.webp', '.gif'].includes(fileExt);
-  const validExtensionForDoc = ['.pdf', '.docx', '.xlsx', '.txt', '.zip'].includes(fileExt);
-
-  let isMimeValid = allowedMimes.includes(file.type);
-  if (!isMimeValid && !file.type) {
-    if (purpose === 'LISTING_IMAGE' || purpose === 'AVATAR') {
-      isMimeValid = validExtensionForImage;
-    } else {
-      isMimeValid = validExtensionForDoc;
-    }
-  }
-
+  const isMimeValid = allowedMimes.includes(file.type);
   if (!isMimeValid) {
     const readablePurpose = purpose.toLowerCase().replace(/_/g, ' ');
     return {
       valid: false,
-      error: `File type "${file.type || fileExt}" is not permitted for ${readablePurpose}.`,
+      error: `File type "${file.type}" is not permitted for ${readablePurpose}.`,
     };
   }
 
@@ -65,6 +60,10 @@ export async function uploadFile(
     throw new Error(validation.error || 'Invalid file');
   }
 
+  if (options.signal?.aborted) {
+    throw new DOMException('Upload aborted', 'AbortError');
+  }
+
   const presign = await presignUpload({
     purpose,
     fileName: file.name,
@@ -72,8 +71,16 @@ export async function uploadFile(
     sizeBytes: file.size,
   });
 
-  const uploadUrl = presign.uploadUrl;
-  const uploadId = presign.upload.id;
+  if (options.signal?.aborted) {
+    throw new DOMException('Upload aborted', 'AbortError');
+  }
+
+  const uploadUrl = presign.url || presign.uploadUrl;
+  const uploadId = presign.uploadId || presign.upload?.id;
+
+  if (!uploadUrl || !uploadId) {
+    throw new Error('Invalid presign response: missing upload URL or upload ID');
+  }
 
   await new Promise<void>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -128,16 +135,25 @@ export async function uploadFile(
     };
 
     xhr.open('PUT', uploadUrl);
+
+    let hasContentType = false;
     if (presign.headers) {
       for (const [key, value] of Object.entries(presign.headers)) {
         xhr.setRequestHeader(key, value);
+        if (key.toLowerCase() === 'content-type') {
+          hasContentType = true;
+        }
       }
     }
-    if (!presign.headers || !presign.headers['Content-Type']) {
+    if (!hasContentType) {
       xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
     }
     xhr.send(file);
   });
+
+  if (options.signal?.aborted) {
+    throw new DOMException('Upload aborted', 'AbortError');
+  }
 
   return completeUpload(uploadId);
 }

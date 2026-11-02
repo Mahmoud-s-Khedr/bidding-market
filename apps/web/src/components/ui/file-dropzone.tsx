@@ -9,6 +9,7 @@ export interface FileDropzoneProps {
   purpose: UploadPurpose;
   value?: Attachment[];
   onChange?: (attachments: Attachment[]) => void;
+  onUploadStateChange?: (state: { inFlightCount: number; hasErrors: boolean }) => void;
   maxFiles?: number;
   accept?: string;
   disabled?: boolean;
@@ -30,6 +31,7 @@ export function FileDropzone({
   purpose,
   value = [],
   onChange,
+  onUploadStateChange,
   maxFiles = 10,
   accept,
   disabled = false,
@@ -40,6 +42,17 @@ export function FileDropzone({
   const [inFlight, setInFlight] = React.useState<InFlightUpload[]>([]);
   const [isDragOver, setIsDragOver] = React.useState(false);
   const inputRef = React.useRef<HTMLInputElement>(null);
+
+  const committedAttachmentsRef = React.useRef<Attachment[]>(value);
+  React.useEffect(() => {
+    committedAttachmentsRef.current = value;
+  }, [value]);
+
+  React.useEffect(() => {
+    const inFlightCount = inFlight.filter((u) => !u.error).length;
+    const hasErrors = inFlight.some((u) => Boolean(u.error));
+    onUploadStateChange?.({ inFlightCount, hasErrors });
+  }, [inFlight, onUploadStateChange]);
 
   const isImagePurpose = purpose === 'LISTING_IMAGE' || purpose === 'AVATAR';
   const resolvedAccept =
@@ -83,9 +96,16 @@ export function FileDropzone({
         },
       })
         .then((attachment) => {
+          if (item.controller.signal.aborted) {
+            setInFlight((prev) => prev.filter((u) => u.id !== item.id));
+            if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+            return;
+          }
           setInFlight((prev) => prev.filter((u) => u.id !== item.id));
           if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
-          onChange?.([...value, attachment]);
+          const next = [...committedAttachmentsRef.current, attachment];
+          committedAttachmentsRef.current = next;
+          onChange?.(next);
         })
         .catch((err: unknown) => {
           if (item.controller.signal.aborted) {
@@ -111,7 +131,9 @@ export function FileDropzone({
   };
 
   const handleRemoveExisting = (attachmentId: string) => {
-    onChange?.(value.filter((a) => a.id !== attachmentId));
+    const next = value.filter((a) => a.id !== attachmentId);
+    committedAttachmentsRef.current = next;
+    onChange?.(next);
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -299,13 +321,20 @@ export function FileDropzone({
               </div>
 
               {item.error ? (
-                <div className="flex items-center gap-1.5 text-xs text-destructive">
+                <div role="alert" className="flex items-center gap-1.5 text-xs text-destructive">
                   <AlertCircle className="h-3.5 w-3.5 shrink-0" />
                   <span>{item.error}</span>
                 </div>
               ) : (
                 <div className="space-y-1">
-                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-secondary">
+                  <div
+                    role="progressbar"
+                    aria-valuenow={item.progress}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-label={`Upload progress for ${item.file.name}`}
+                    className="h-1.5 w-full overflow-hidden rounded-full bg-secondary"
+                  >
                     <div
                       className="h-full bg-primary transition-all duration-200"
                       style={{ width: `${item.progress}%` }}

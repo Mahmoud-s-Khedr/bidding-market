@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formValuesToApiPayload, listingFormSchema } from './listing';
+import { formValuesToApiPayload, formValuesToUpdatePayload, listingFormSchema } from './listing';
 
 describe('Listing Validation Schemas', () => {
   const validBase = {
@@ -103,7 +103,30 @@ describe('Listing Validation Schemas', () => {
     expect(negative.success).toBe(false);
   });
 
-  it('formValuesToApiPayload converts values to cents correctly', () => {
+  it('validates that expiresAt must be in the future', () => {
+    const pastDate = new Date(Date.now() - 24 * 3600 * 1000).toISOString().split('T')[0]!;
+    const pastRes = listingFormSchema.safeParse({
+      ...validBase,
+      priceType: 'FIXED',
+      priceMin: 20,
+      expiresAt: pastDate,
+    });
+    expect(pastRes.success).toBe(false);
+    if (!pastRes.success) {
+      expect(pastRes.error.issues[0]?.message).toBe('Expiration date must be in the future');
+    }
+
+    const futureDate = new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString().split('T')[0]!;
+    const futureRes = listingFormSchema.safeParse({
+      ...validBase,
+      priceType: 'FIXED',
+      priceMin: 20,
+      expiresAt: futureDate,
+    });
+    expect(futureRes.success).toBe(true);
+  });
+
+  it('formValuesToApiPayload converts values to cents correctly and does not send priceMaxCents for FIXED', () => {
     const fixedPayload = formValuesToApiPayload({
       ...validBase,
       priceType: 'FIXED',
@@ -114,7 +137,16 @@ describe('Listing Validation Schemas', () => {
       status: 'OPEN',
     });
     expect(fixedPayload.priceMinCents).toBe(5525);
-    expect(fixedPayload.priceMaxCents).toBe(5525);
+    expect(fixedPayload.priceMaxCents).toBeUndefined();
+
+    // 19.99 -> 1999 test
+    const decimalPayload = formValuesToApiPayload({
+      ...validBase,
+      priceType: 'FIXED',
+      priceMin: 19.99,
+    });
+    expect(decimalPayload.priceMinCents).toBe(1999);
+    expect(decimalPayload.priceMaxCents).toBeUndefined();
 
     const rangePayload = formValuesToApiPayload({
       ...validBase,
@@ -139,5 +171,76 @@ describe('Listing Validation Schemas', () => {
     });
     expect(negPayload.priceMinCents).toBeUndefined();
     expect(negPayload.priceMaxCents).toBeUndefined();
+  });
+
+  describe('formValuesToUpdatePayload (Finding 4)', () => {
+    it('clears priceMaxCents when switching to FIXED or clears both when switching to NEGOTIABLE', () => {
+      // Switching to FIXED sends priceMaxCents: null
+      const fixedUpdate = formValuesToUpdatePayload({
+        ...validBase,
+        priceType: 'FIXED',
+        priceMin: 19.99,
+      });
+      expect(fixedUpdate.priceMinCents).toBe(1999);
+      expect(fixedUpdate.priceMaxCents).toBeNull();
+
+      // Switching to NEGOTIABLE sends null for both
+      const negUpdate = formValuesToUpdatePayload({
+        ...validBase,
+        priceType: 'NEGOTIABLE',
+      });
+      expect(negUpdate.priceMinCents).toBeNull();
+      expect(negUpdate.priceMaxCents).toBeNull();
+
+      // RANGE sets both
+      const rangeUpdate = formValuesToUpdatePayload({
+        ...validBase,
+        priceType: 'RANGE',
+        priceMin: 25.5,
+        priceMax: 75.0,
+      });
+      expect(rangeUpdate.priceMinCents).toBe(2550);
+      expect(rangeUpdate.priceMaxCents).toBe(7500);
+    });
+
+    it('sends empty arrays for emptied collections and null for cleared scalars', () => {
+      const updatePayload = formValuesToUpdatePayload({
+        ...validBase,
+        priceType: 'NEGOTIABLE',
+        tags: [],
+        imageIds: [],
+        attachmentIds: [],
+        location: '',
+        deliveryDays: undefined,
+        expiresAt: undefined,
+      });
+
+      expect(updatePayload.tags).toEqual([]);
+      expect(updatePayload.imageIds).toEqual([]);
+      expect(updatePayload.attachmentIds).toEqual([]);
+      expect(updatePayload.location).toBeNull();
+      expect(updatePayload.deliveryDays).toBeNull();
+      expect(updatePayload.expiresAt).toBeNull();
+    });
+
+    it('does not include status unless statusOverride is explicitly provided', () => {
+      const updateWithoutStatus = formValuesToUpdatePayload({
+        ...validBase,
+        priceType: 'FIXED',
+        priceMin: 10,
+        status: 'OPEN',
+      });
+      expect(updateWithoutStatus.status).toBeUndefined();
+
+      const updateWithStatus = formValuesToUpdatePayload(
+        {
+          ...validBase,
+          priceType: 'FIXED',
+          priceMin: 10,
+        },
+        'DRAFT',
+      );
+      expect(updateWithStatus.status).toBe('DRAFT');
+    });
   });
 });

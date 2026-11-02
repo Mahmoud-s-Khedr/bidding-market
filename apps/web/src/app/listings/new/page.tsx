@@ -7,15 +7,15 @@ import { Spinner } from '@/components/ui/spinner';
 import { ListingForm } from '@/components/listings/listing-form';
 import { useCreateListing } from '@/lib/api/listings';
 import { useToast } from '@/components/ui/toast';
-import type { CreateListingRequest } from '@/lib/api/types';
+import type { CreateListingRequest, UpdateListingRequest } from '@/lib/api/types';
 
 function NewListingContent() {
   const router = useRouter();
   const { toast } = useToast();
   const createMutation = useCreateListing();
 
-  const handleSubmit = async (data: CreateListingRequest) => {
-    const created = await createMutation.mutateAsync(data);
+  const handleSubmit = async (data: CreateListingRequest | UpdateListingRequest) => {
+    const created = await createMutation.mutateAsync(data as CreateListingRequest);
     toast({
       title: data.status === 'DRAFT' ? 'Draft saved' : 'Listing published',
       description:

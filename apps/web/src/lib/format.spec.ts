@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatDate, formatMoney, formatRelativeTime } from './format';
+import { formatDate, formatMoney, formatRelativeTime, getCurrencySymbol } from './format';
 
 describe('Format utilities', () => {
   describe('formatMoney', () => {
@@ -17,6 +17,18 @@ describe('Format utilities', () => {
 
     it('handles negative cents', () => {
       expect(formatMoney(-500, 'USD')).toBe('-$5');
+    });
+  });
+
+  describe('getCurrencySymbol', () => {
+    it('returns standard symbols for common currencies', () => {
+      expect(getCurrencySymbol('USD')).toBe('$');
+      expect(getCurrencySymbol('EUR')).toBe('€');
+      expect(getCurrencySymbol('GBP')).toBe('£');
+    });
+
+    it('falls back to currency code for unknown currencies', () => {
+      expect(getCurrencySymbol('XYZ')).toBe('XYZ');
     });
   });
 

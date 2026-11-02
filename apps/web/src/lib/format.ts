@@ -8,7 +8,21 @@ export function formatMoney(amountCents: number, currency = 'USD'): string {
       maximumFractionDigits: 2,
     }).format(major);
   } catch {
-    return `$${major.toFixed(2)}`;
+    return `${currency} ${major.toFixed(2)}`;
+  }
+}
+
+export function getCurrencySymbol(currency = 'USD'): string {
+  try {
+    const parts = new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: (currency || 'USD').toUpperCase(),
+      currencyDisplay: 'symbol',
+    }).formatToParts(0);
+    const sym = parts.find((p) => p.type === 'currency')?.value;
+    return sym || currency;
+  } catch {
+    return currency;
   }
 }
 

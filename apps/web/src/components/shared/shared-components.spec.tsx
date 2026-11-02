@@ -202,13 +202,12 @@ describe('Shared Components', () => {
       status: 'OPEN',
       priceType: 'FIXED',
       priceMinCents: 50000,
-      priceMaxCents: 50000,
+      priceMaxCents: null,
       currency: 'USD',
-      deliveryDays: 14,
       location: 'Remote',
-      tags: ['react', 'nextjs'],
       categoryId: 'c-web',
-      category: { id: 'c-web', name: 'Web Development', slug: 'web-dev' },
+      categoryName: 'Web Development',
+      thumbnailUrl: 'https://ex.com/hero.jpg',
       owner: {
         id: 'u-alice',
         displayName: 'Alice Cooper',
@@ -218,23 +217,12 @@ describe('Shared Components', () => {
         completedCount: 10,
         createdAt: '2026-01-01T00:00:00Z',
       },
-      images: [
-        {
-          id: 'img-1',
-          key: 'key-1',
-          url: 'https://ex.com/hero.jpg',
-          fileName: 'hero.jpg',
-          mimeType: 'image/jpeg',
-          sizeBytes: 1024,
-        },
-      ],
       bidCount: 3,
       createdAt: '2026-10-01T00:00:00Z',
-      updatedAt: '2026-10-01T00:00:00Z',
     };
 
-    it('renders listing card with title, kind, price, category, and owner details', () => {
-      render(<ListingCard listing={mockListing} />);
+    it('renders listing card with title, kind, price, category, and owner details (Finding 7)', () => {
+      const { container } = render(<ListingCard listing={mockListing} />);
 
       expect(screen.getByText('Fullstack Next.js Developer needed')).toBeInTheDocument();
       expect(screen.getByText('Request')).toBeInTheDocument();
@@ -242,7 +230,21 @@ describe('Shared Components', () => {
       expect(screen.getByText('$500')).toBeInTheDocument();
       expect(screen.getByText('Alice Cooper')).toBeInTheDocument();
       expect(screen.getByText('3')).toBeInTheDocument();
-      expect(screen.getByText(/Delivery: 14 days/)).toBeInTheDocument();
+      // Thumbnail rendered
+      const img = container.querySelector('img[src="https://ex.com/hero.jpg"]');
+      expect(img).toBeInTheDocument();
+    });
+
+    it('hides category label and does not render raw cuid when categoryName is absent (Finding 7)', () => {
+      const listingWithoutCategoryName: ListingSummary = {
+        ...mockListing,
+        categoryId: 'c-design',
+        categoryName: undefined,
+        thumbnailUrl: null,
+      };
+
+      const { container } = render(<ListingCard listing={listingWithoutCategoryName} />);
+      expect(container).not.toHaveTextContent('c-design');
     });
   });
 });

@@ -12,21 +12,31 @@ import { ListingForm } from '@/components/listings/listing-form';
 import { useAuth } from '@/components/auth/auth-provider';
 import { useListing, useUpdateListing } from '@/lib/api/listings';
 import { useToast } from '@/components/ui/toast';
-import type { CreateListingRequest } from '@/lib/api/types';
+import type { CreateListingRequest, UpdateListingRequest } from '@/lib/api/types';
 
 function EditListingContent() {
   const params = useParams();
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
   const { toast } = useToast();
   const id = (params?.id as string) || '';
 
-  const { data: listing, isLoading, isError, error, refetch } = useListing(id);
+  const {
+    data: listing,
+    isLoading: isListingLoading,
+    isError,
+    error,
+    refetch,
+  } = useListing(id, {
+    enabled: Boolean(id) && !authLoading,
+    viewerId: user?.id ?? null,
+  });
   const updateMutation = useUpdateListing();
 
   const isOwner = Boolean(user && listing && user.id === listing.owner.id);
+  const isLoading = authLoading || (isListingLoading && !listing);
 
-  const handleSubmit = async (data: CreateListingRequest) => {
+  const handleSubmit = async (data: CreateListingRequest | UpdateListingRequest) => {
     await updateMutation.mutateAsync({ id, data });
     toast({
       title: 'Listing updated',
@@ -61,6 +71,22 @@ function EditListingContent() {
         <EmptyState
           title="Access Denied"
           description="You do not have permission to edit this listing because you are not the owner."
+          action={
+            <Button asChild>
+              <Link href={`/listings/${id}`}>Return to Listing</Link>
+            </Button>
+          }
+        />
+      </div>
+    );
+  }
+
+  if (listing.status !== 'DRAFT' && listing.status !== 'OPEN') {
+    return (
+      <div className="container mx-auto px-4 py-16 sm:px-6 max-w-md text-center">
+        <EmptyState
+          title="Listing Cannot Be Edited"
+          description={`Listings in ${listing.status} status cannot be edited.`}
           action={
             <Button asChild>
               <Link href={`/listings/${id}`}>Return to Listing</Link>

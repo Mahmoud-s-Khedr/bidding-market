@@ -238,6 +238,24 @@ describe('API Client', () => {
     expect(getAccessToken()).toBeNull();
   });
 
+  it('does not send Authorization header to external storage URLs (Non-blocking item)', async () => {
+    setAccessToken('secret-token');
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: () => Promise.resolve({ ok: true }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await request('https://storage.example-s3.com/bucket/object.png');
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const callOptions = fetchMock.mock.calls[0]![1];
+    expect(callOptions.headers['Authorization']).toBeUndefined();
+  });
+
   it('coalesces multiple concurrent 401s into a single refresh request', async () => {
     setAccessToken('expired-token');
     let refreshCallCount = 0;

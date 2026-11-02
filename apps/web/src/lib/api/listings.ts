@@ -50,9 +50,9 @@ export function useListings(filters?: ListingFilters) {
   });
 }
 
-export function useListing(id: string, options?: { enabled?: boolean }) {
+export function useListing(id: string, options?: { enabled?: boolean; viewerId?: string | null }) {
   return useQuery({
-    queryKey: queryKeys.listings.detail(id),
+    queryKey: queryKeys.listings.detail(id, options?.viewerId),
     queryFn: () => getListing(id),
     enabled: options?.enabled ?? Boolean(id),
   });
