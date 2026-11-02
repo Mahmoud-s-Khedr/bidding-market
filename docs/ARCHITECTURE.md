@@ -22,8 +22,6 @@ packages/
 - Validation: zod schemas from `@market/shared` via a `ZodValidationPipe`.
 - `JwtAuthGuard` is global and endpoints explicitly opt out with `@Public()`. The one-active-bid-per-user/listing rule and conversation participant/listing dedup are enforced transactionally in their services because they cannot be represented as portable plain unique constraints. Agreements retain historical rows, so a listing may be re-listed after cancellation rather than being permanently limited to one agreement.
 - Refresh tokens are opaque high-entropy values stored as HMAC-SHA256 lookups, allowing constant-time database lookup and family reuse detection.
-- REST controllers use an opt-in authentication pattern: endpoints are public unless they explicitly
-  apply `JwtAuthGuard`; role-restricted endpoints also apply `RolesGuard` with `@Roles('ADMIN')`.
 - Config: env validated by zod at boot.
 - Module layout: `src/modules/<feature>/{<feature>.module.ts, .controller.ts, .service.ts, *.spec.ts}`.
 - Tests: **Vitest** (with `unplugin-swc` for decorators). Unit: `*.spec.ts` next to code.
