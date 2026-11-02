@@ -9,7 +9,7 @@ const context = (request: {
   switchToHttp: () => ({ getRequest: () => request }),
 });
 describe('JwtAuthGuard', () => {
-  it('rejects missing and invalid tokens', () => {
+  it('rejects missing and invalid tokens', async () => {
     const reflector = { getAllAndOverride: vi.fn().mockReturnValue(false) };
     const jwt = {
       verify: vi.fn(() => {
@@ -17,12 +17,12 @@ describe('JwtAuthGuard', () => {
       }),
     };
     const guard = new JwtAuthGuard(reflector as never, jwt as never);
-    expect(() => guard.canActivate(context({ headers: {} }) as never)).toThrow();
-    expect(() =>
+    await expect(guard.canActivate(context({ headers: {} }) as never)).rejects.toThrow();
+    await expect(
       guard.canActivate(context({ headers: { authorization: 'Bearer x' } }) as never),
-    ).toThrow();
+    ).rejects.toThrow();
   });
-  it('accepts valid token', () => {
+  it('accepts valid token', async () => {
     const guard = new JwtAuthGuard(
       { getAllAndOverride: vi.fn().mockReturnValue(false) } as never,
       { verify: vi.fn().mockReturnValue({ sub: 'u', role: 'ADMIN' }) } as never,
@@ -31,8 +31,8 @@ describe('JwtAuthGuard', () => {
       headers: { authorization?: string };
       user?: { id: string; role: 'USER' | 'ADMIN' };
     };
-    expect(guard.canActivate(context(req) as never)).toBe(true);
-    expect(req.user).toEqual({ id: 'u', role: 'ADMIN' });
+    await expect(guard.canActivate(context(req) as never)).resolves.toBe(true);
+    expect(req.user).toEqual({ id: 'u', role: 'USER' });
   });
 });
 describe('RolesGuard', () => {

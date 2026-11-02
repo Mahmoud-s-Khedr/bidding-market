@@ -3,6 +3,7 @@ import {
   Catch,
   HttpException,
   HttpStatus,
+  Logger,
   type ExceptionFilter,
 } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client.js';
@@ -10,6 +11,7 @@ import { ZodError } from 'zod';
 import type { Response } from 'express';
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
+  private readonly logger = new Logger(HttpExceptionFilter.name);
   catch(exception: unknown, host: ArgumentsHost): void {
     const response = host.switchToHttp().getResponse<Response>();
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
@@ -60,6 +62,8 @@ export class HttpExceptionFilter implements ExceptionFilter {
                     ? 'RATE_LIMITED'
                     : 'INTERNAL';
     }
+    if (Number(status) >= 500)
+      this.logger.error(message, exception instanceof Error ? exception.stack : undefined);
     response
       .status(status)
       .json({ error: { code, message, ...(details === undefined ? {} : { details }) } });

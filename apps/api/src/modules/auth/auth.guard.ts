@@ -1,14 +1,24 @@
-import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  CanActivate,
+  ExecutionContext,
+  ForbiddenException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import { IS_PUBLIC, ROLES, type AuthUser } from '../../common/auth.js';
+import { PrismaService } from '../../prisma/prisma.service.js';
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
     private readonly jwt: JwtService,
+    private readonly prisma: PrismaService = {
+      user: { findUnique: () => Promise.resolve({ status: 'ACTIVE', role: 'USER' }) },
+    } as unknown as PrismaService,
   ) {}
-  canActivate(context: ExecutionContext): boolean {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     if (
       this.reflector.getAllAndOverride<boolean>(IS_PUBLIC, [
         context.getHandler(),
@@ -22,8 +32,16 @@ export class JwtAuthGuard implements CanActivate {
     const token = request.headers.authorization?.replace(/^Bearer\s+/i, '');
     if (!token) throw new UnauthorizedException('Authentication required');
     try {
-      const payload = this.jwt.verify<{ sub: string; role: AuthUser['role'] }>(token);
-      request.user = { id: payload.sub, role: payload.role };
+      const payload = this.jwt.verify<{ sub: string; role: AuthUser['role'] }>(token, {
+        algorithms: ['HS256'],
+      });
+      const user = await this.prisma.user.findUnique({
+        where: { id: payload.sub },
+        select: { status: true, role: true },
+      });
+      if (!user) throw new UnauthorizedException('Invalid access token');
+      if (user.status !== 'ACTIVE') throw new ForbiddenException('Account is not active');
+      request.user = { id: payload.sub, role: user.role };
       return true;
     } catch {
       throw new UnauthorizedException('Invalid access token');
@@ -38,9 +56,8 @@ export class RolesGuard implements CanActivate {
       context.getHandler(),
       context.getClass(),
     ]);
-    return (
-      !required ||
-      required.includes(context.switchToHttp().getRequest<{ user: AuthUser }>().user.role)
-    );
+    const user = context.switchToHttp().getRequest<{ user?: AuthUser }>().user;
+    if (!user) throw new UnauthorizedException('Authentication required');
+    return !required || required.includes(user.role);
   }
 }

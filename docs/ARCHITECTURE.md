@@ -20,6 +20,8 @@ packages/
 - Auth: JWT access token (Bearer, 15m) + rotating refresh token (httpOnly, Secure in prod,
   SameSite=Lax cookie `refresh_token`, hashed in DB). argon2 password hashing.
 - Validation: zod schemas from `@market/shared` via a `ZodValidationPipe`.
+- `JwtAuthGuard` is global and endpoints explicitly opt out with `@Public()`. The one-active-bid-per-user/listing rule and conversation participant/listing dedup are enforced transactionally in their services because they cannot be represented as portable plain unique constraints.
+- Refresh tokens are opaque high-entropy values stored as HMAC-SHA256 lookups, allowing constant-time database lookup and family reuse detection.
 - REST controllers use an opt-in authentication pattern: endpoints are public unless they explicitly
   apply `JwtAuthGuard`; role-restricted endpoints also apply `RolesGuard` with `@Roles('ADMIN')`.
 - Config: env validated by zod at boot.

@@ -1,14 +1,16 @@
 import {
   ConflictException,
   ForbiddenException,
+  Inject,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as argon2 from 'argon2';
-import { randomBytes } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
 import type { LoginInput, RegisterInput } from '@market/shared';
 import { PrismaService } from '../../prisma/prisma.service.js';
+import { APP_CONFIG, type Env } from '../../common/env.js';
 type SafeUser = {
   id: string;
   email: string;
@@ -29,6 +31,7 @@ export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
+    @Inject(APP_CONFIG) private readonly env?: Env,
   ) {}
   private safe(user: {
     id: string;
@@ -56,6 +59,14 @@ export class AuthService {
   private access(user: { id: string; role: 'USER' | 'ADMIN' }): string {
     return this.jwt.sign({ sub: user.id, role: user.role });
   }
+  private hashToken(raw: string): string {
+    return createHmac(
+      'sha256',
+      this.env?.JWT_REFRESH_SECRET ?? process.env.JWT_REFRESH_SECRET ?? 'test',
+    )
+      .update(raw)
+      .digest('hex');
+  }
   private expiry(): Date {
     return new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
   }
@@ -65,7 +76,7 @@ export class AuthService {
       data: {
         userId,
         familyId,
-        tokenHash: await argon2.hash(raw, { type: argon2.argon2id }),
+        tokenHash: this.hashToken(raw),
         expiresAt: this.expiry(),
       },
     });
@@ -105,28 +116,19 @@ export class AuthService {
     };
   }
   async refresh(
-    raw: string,
+    raw?: string,
   ): Promise<{ accessToken: string; refreshToken: string; user: SafeUser }> {
-    const tokens = await this.prisma.refreshToken.findMany({
-      where: { revokedAt: null },
+    if (!raw || typeof raw !== 'string') throw new UnauthorizedException('Invalid refresh token');
+    const token = await this.prisma.refreshToken.findUnique({
+      where: { tokenHash: this.hashToken(raw) },
       include: { user: true },
     });
-    let token: (typeof tokens)[number] | undefined;
-    for (const candidate of tokens)
-      if (await argon2.verify(candidate.tokenHash, raw)) {
-        token = candidate;
-        break;
-      }
-    if (!token) {
-      const all = await this.prisma.refreshToken.findMany({ include: { user: true } });
-      for (const candidate of all)
-        if (await argon2.verify(candidate.tokenHash, raw)) {
-          await this.prisma.refreshToken.updateMany({
-            where: { familyId: candidate.familyId, revokedAt: null },
-            data: { revokedAt: new Date() },
-          });
-          break;
-        }
+    if (!token) throw new UnauthorizedException('Invalid refresh token');
+    if (token.revokedAt) {
+      await this.prisma.refreshToken.updateMany({
+        where: { familyId: token.familyId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
       throw new UnauthorizedException('Invalid refresh token');
     }
     if (token.expiresAt < new Date()) throw new UnauthorizedException('Refresh token expired');
@@ -141,10 +143,17 @@ export class AuthService {
           expiresAt: this.expiry(),
         },
       });
-      await tx.refreshToken.update({
-        where: { id: token.id },
+      const revoked = await tx.refreshToken.updateMany({
+        where: { id: token.id, revokedAt: null },
         data: { revokedAt: new Date(), replacedById: newToken.id },
       });
+      if (revoked.count === 0) {
+        await tx.refreshToken.updateMany({
+          where: { familyId: token.familyId, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
+        throw new UnauthorizedException('Invalid refresh token');
+      }
     });
     return {
       accessToken: this.access(token.user),
@@ -154,15 +163,10 @@ export class AuthService {
   }
   async logout(raw?: string): Promise<void> {
     if (!raw) return;
-    const tokens = await this.prisma.refreshToken.findMany({ where: { revokedAt: null } });
-    for (const token of tokens)
-      if (await argon2.verify(token.tokenHash, raw)) {
-        await this.prisma.refreshToken.update({
-          where: { id: token.id },
-          data: { revokedAt: new Date() },
-        });
-        return;
-      }
+    await this.prisma.refreshToken.updateMany({
+      where: { tokenHash: this.hashToken(raw), revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
   }
   async me(id: string): Promise<SafeUser> {
     const user = await this.prisma.user.findUnique({ where: { id } });

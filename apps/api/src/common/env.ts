@@ -16,6 +16,7 @@ const envSchema = z.object({
   S3_SECRET_KEY: z.string(),
 });
 export type Env = z.infer<typeof envSchema>;
+export const APP_CONFIG = Symbol('APP_CONFIG');
 export function parseEnv(input: NodeJS.ProcessEnv): Env {
   return envSchema.parse(input);
 }

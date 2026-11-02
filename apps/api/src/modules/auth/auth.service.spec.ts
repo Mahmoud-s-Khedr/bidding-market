@@ -26,11 +26,21 @@ const user = {
 };
 const base = () => ({
   user: { findUnique: vi.fn(), create: vi.fn() },
-  refreshToken: { create: vi.fn(), findMany: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
+  refreshToken: {
+    create: vi.fn(),
+    findUnique: vi.fn(),
+    findMany: vi.fn(),
+    update: vi.fn(),
+    updateMany: vi.fn(),
+  },
   $transaction: vi.fn(
     async (fn: (tx: unknown) => Promise<unknown>) =>
       await fn({
-        refreshToken: { create: vi.fn().mockResolvedValue({ id: 'new' }), update: vi.fn() },
+        refreshToken: {
+          create: vi.fn().mockResolvedValue({ id: 'new' }),
+          update: vi.fn(),
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        },
       }),
   ),
 });
@@ -73,23 +83,22 @@ describe('AuthService', () => {
   });
   it('rotates and revokes reused refresh tokens', async () => {
     const p = base();
-    p.refreshToken.findMany
-      .mockResolvedValueOnce([
-        {
-          id: 'old',
-          userId: 'u',
-          familyId: 'f',
-          tokenHash: 'h',
-          expiresAt: new Date(Date.now() + 10000),
-          user,
-        },
-      ])
-      .mockResolvedValueOnce([{ id: 'old', familyId: 'f', tokenHash: 'h', user }])
-      .mockResolvedValueOnce([{ id: 'old', familyId: 'f', tokenHash: 'h', user }]);
-    vi.mocked(argon2.verify)
-      .mockResolvedValueOnce(true)
-      .mockResolvedValueOnce(false)
-      .mockResolvedValueOnce(true);
+    p.refreshToken.findUnique
+      .mockResolvedValueOnce({
+        id: 'old',
+        userId: 'u',
+        familyId: 'f',
+        tokenHash: 'h',
+        expiresAt: new Date(Date.now() + 10000),
+        user,
+      })
+      .mockResolvedValueOnce({
+        id: 'old',
+        familyId: 'f',
+        tokenHash: 'h',
+        revokedAt: new Date(),
+        user,
+      });
     const s = new AuthService(p as never, { sign: vi.fn().mockReturnValue('access') } as never);
     await expect(s.refresh('raw')).resolves.toMatchObject({ accessToken: 'access' });
     await expect(s.refresh('old')).rejects.toBeInstanceOf(UnauthorizedException);
@@ -97,10 +106,8 @@ describe('AuthService', () => {
   });
   it('revokes on logout', async () => {
     const p = base();
-    p.refreshToken.findMany.mockResolvedValue([{ id: 't', tokenHash: 'h' }]);
-    vi.mocked(argon2.verify).mockResolvedValue(true);
     await new AuthService(p as never, { sign: vi.fn() } as never).logout('raw');
-    expect(p.refreshToken.update).toHaveBeenCalled();
+    expect(p.refreshToken.updateMany).toHaveBeenCalled();
   });
   it('returns me and rejects missing user', async () => {
     const p = base();

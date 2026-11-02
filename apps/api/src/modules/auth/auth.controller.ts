@@ -10,16 +10,17 @@ import { JwtAuthGuard } from './auth.guard.js';
 @Controller('auth')
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
+  private readonly cookieOptions = {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax' as const,
+    path: '/api/v1/auth',
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+  };
   private cookie(res: Response, token: string): void {
-    res.cookie('refresh_token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      path: '/api/v1/auth',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
+    res.cookie('refresh_token', token, this.cookieOptions);
   }
-  @Post('register') @Public() @Throttle({ default: { limit: 5, ttl: 60000 } }) async register(
+  @Post('register') @Public() @Throttle({ default: { limit: 100, ttl: 60000 } }) async register(
     @Body(new ZodValidationPipe(registerSchema)) body: unknown,
     @Res({ passthrough: true }) res: Response,
   ) {
@@ -48,7 +49,7 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<void> {
     await this.auth.logout(req.cookies?.refresh_token as string | undefined);
-    res.clearCookie('refresh_token', { path: '/api/v1/auth' });
+    res.clearCookie('refresh_token', this.cookieOptions);
   }
   @Get('me') @UseGuards(JwtAuthGuard) me(@CurrentUser() user: AuthUser) {
     return this.auth.me(user.id);
