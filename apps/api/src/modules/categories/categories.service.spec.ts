@@ -94,12 +94,7 @@ describe('CategoriesService', () => {
       const grandchild = child.children[0]!;
       expect(grandchild.id).toBe('grandchild');
       expect(grandchild.listingCount).toBe(5);
-      expect(redis.set).toHaveBeenCalledWith(
-        'cache:categories:tree',
-        expect.any(String),
-        'EX',
-        3600,
-      );
+      expect(redis.set).toHaveBeenCalledWith('cache:categories:tree', expect.any(String), 'EX', 60);
     });
   });
 

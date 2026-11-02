@@ -144,6 +144,12 @@ describe('Uploads endpoints', () => {
       const inDb = await prisma.upload.findUnique({ where: { id: uploadId } });
       expect(inDb?.status).toBe('READY');
       expect(inDb?.completedAt).not.toBeNull();
+
+      // Calling complete on already-READY upload -> 409
+      await request(server)
+        .post(`/api/v1/uploads/${uploadId}/complete`)
+        .set('Authorization', `Bearer ${user1Token}`)
+        .expect(409);
     });
 
     it('returns 400 when uploaded size does not match presigned size', async () => {

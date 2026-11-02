@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { INestApplication } from '@nestjs/common';
 import type { Server } from 'node:http';
 import request from 'supertest';
+import { encodeCursor } from '../src/modules/listings/listings.cursor.js';
 import { createTestApp } from './helpers/app.js';
 import { createAdmin, createUser, signToken } from './helpers/auth.js';
 import { prisma, resetDb } from './helpers/db.js';
@@ -304,6 +305,161 @@ describe('Listings endpoints', () => {
           .send({ title: 'New Title' })
           .expect(409);
       }
+    });
+
+    it('returns 409 when attempting to reopen a CLOSED listing', async () => {
+      const listing = await prisma.listing.create({
+        data: {
+          ownerId: user1Id,
+          categoryId,
+          kind: 'REQUEST',
+          status: 'CLOSED',
+          title: 'Closed listing',
+          description: 'A sufficiently long description for testing',
+          priceType: 'NEGOTIABLE',
+        },
+      });
+
+      await request(server)
+        .patch(`/api/v1/listings/${listing.id}`)
+        .set('Authorization', `Bearer ${user1Token}`)
+        .send({ status: 'OPEN' })
+        .expect(409);
+    });
+
+    it('returns 409 when owner attempts to revert OPEN listing with bids to DRAFT', async () => {
+      const listing = await prisma.listing.create({
+        data: {
+          ownerId: user1Id,
+          categoryId,
+          kind: 'REQUEST',
+          status: 'OPEN',
+          title: 'Open with bids to revert',
+          description: 'A sufficiently long description for testing',
+          priceType: 'NEGOTIABLE',
+        },
+      });
+      await prisma.bid.create({
+        data: {
+          listingId: listing.id,
+          bidderId: user2Id,
+          amountCents: 1500,
+          currency: 'USD',
+          deliveryDays: 3,
+          message: 'Active bid',
+          status: 'PENDING',
+        },
+      });
+
+      await request(server)
+        .patch(`/api/v1/listings/${listing.id}`)
+        .set('Authorization', `Bearer ${user1Token}`)
+        .send({ status: 'DRAFT' })
+        .expect(409);
+    });
+
+    it('allows admin to PATCH someone elses listing and validates uploads against the listing owner', async () => {
+      const listing = await prisma.listing.create({
+        data: {
+          ownerId: user1Id,
+          categoryId,
+          kind: 'REQUEST',
+          status: 'OPEN',
+          title: 'User 1 Listing to edit',
+          description: 'A sufficiently long description for testing',
+          priceType: 'NEGOTIABLE',
+        },
+      });
+
+      // Upload owned by user1
+      const upload = await prisma.upload.create({
+        data: {
+          uploaderId: user1Id,
+          purpose: 'LISTING_IMAGE',
+          status: 'READY',
+          key: `listing_image/${user1Id}/cuid-u1-img/img.jpg`,
+          fileName: 'img.jpg',
+          mimeType: 'image/jpeg',
+          sizeBytes: 100,
+        },
+      });
+
+      const res = await request(server)
+        .patch(`/api/v1/listings/${listing.id}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          title: 'Admin Edited Title',
+          imageIds: [upload.id],
+        })
+        .expect(200);
+
+      expect(res.body.title).toBe('Admin Edited Title');
+      expect(res.body.images).toHaveLength(1);
+      expect(res.body.images[0].id).toBe(upload.id);
+    });
+
+    it('returns 409 when attempting to attach an upload already attached to another listing', async () => {
+      const upload = await prisma.upload.create({
+        data: {
+          uploaderId: user1Id,
+          purpose: 'LISTING_IMAGE',
+          status: 'READY',
+          key: `listing_image/${user1Id}/cuid-shared-img/img.jpg`,
+          fileName: 'img.jpg',
+          mimeType: 'image/jpeg',
+          sizeBytes: 100,
+        },
+      });
+
+      // Listing 1 has the upload
+      await prisma.listing.create({
+        data: {
+          ownerId: user1Id,
+          categoryId,
+          kind: 'REQUEST',
+          status: 'OPEN',
+          title: 'Listing 1 With Upload',
+          description: 'A sufficiently long description for testing',
+          priceType: 'NEGOTIABLE',
+          images: {
+            create: { uploadId: upload.id, position: 0 },
+          },
+        },
+      });
+
+      // Listing 2 tries to attach the same upload on creation -> 409
+      await request(server)
+        .post('/api/v1/listings')
+        .set('Authorization', `Bearer ${user1Token}`)
+        .send({
+          categoryId,
+          kind: 'REQUEST',
+          title: 'Listing 2 Duplicate Upload',
+          description: 'A sufficiently long description for testing',
+          priceType: 'NEGOTIABLE',
+          currency: 'USD',
+          imageIds: [upload.id],
+        })
+        .expect(409);
+
+      // Listing 3 created without upload, then patched with the same upload -> 409
+      const listing3 = await prisma.listing.create({
+        data: {
+          ownerId: user1Id,
+          categoryId,
+          kind: 'REQUEST',
+          status: 'OPEN',
+          title: 'Listing 3 Initially Clean',
+          description: 'A sufficiently long description for testing',
+          priceType: 'NEGOTIABLE',
+        },
+      });
+
+      await request(server)
+        .patch(`/api/v1/listings/${listing3.id}`)
+        .set('Authorization', `Bearer ${user1Token}`)
+        .send({ imageIds: [upload.id] })
+        .expect(409);
     });
   });
 
@@ -783,6 +939,28 @@ describe('Listings endpoints', () => {
           priceType: 'NEGOTIABLE',
         },
       });
+      await prisma.listing.create({
+        data: {
+          ownerId: user1Id,
+          categoryId,
+          kind: 'REQUEST',
+          status: 'OPEN',
+          title: 'My open listing',
+          description: 'A sufficiently long description for testing',
+          priceType: 'NEGOTIABLE',
+        },
+      });
+      await prisma.listing.create({
+        data: {
+          ownerId: user1Id,
+          categoryId,
+          kind: 'REQUEST',
+          status: 'CLOSED',
+          title: 'My closed listing',
+          description: 'A sufficiently long description for testing',
+          priceType: 'NEGOTIABLE',
+        },
+      });
 
       // Querying DRAFT without ownerId=me as non-admin -> 403
       await request(server)
@@ -790,17 +968,88 @@ describe('Listings endpoints', () => {
         .set('Authorization', `Bearer ${user1Token}`)
         .expect(403);
 
-      // Querying with ownerId=me as owner -> 200
-      const resMe = await request(server)
+      // ownerId=me without explicit status returns ALL caller's listings regardless of status
+      const resAllMe = await request(server)
+        .get('/api/v1/listings?ownerId=me')
+        .set('Authorization', `Bearer ${user1Token}`)
+        .expect(200);
+      const allMeBody = resAllMe.body as { items: Array<{ id: string; status: string }> };
+      expect(allMeBody.items).toHaveLength(3);
+      const statuses = allMeBody.items.map((it) => it.status);
+      expect(statuses).toContain('DRAFT');
+      expect(statuses).toContain('OPEN');
+      expect(statuses).toContain('CLOSED');
+
+      // Querying with ownerId=me and explicit status=DRAFT -> returns only DRAFT
+      const resMeDraft = await request(server)
         .get('/api/v1/listings?ownerId=me&status=DRAFT')
         .set('Authorization', `Bearer ${user1Token}`)
         .expect(200);
-      expect(resMe.body.items).toHaveLength(1);
-      expect(resMe.body.items[0].title).toBe('My draft listing');
+      expect(resMeDraft.body.items).toHaveLength(1);
+      expect(resMeDraft.body.items[0].title).toBe('My draft listing');
     });
 
-    it('paginates stably with compound cursors across >= 2 pages for all sorts without skips or duplicates', async () => {
-      // Create 5 listings with distinct and duplicate values
+    it('returns 400 for malformed, tampered, or mismatched pagination cursors', async () => {
+      // 1. Raw cuid / string id fallback is dropped -> 400
+      await request(server).get('/api/v1/listings?sort=newest&cursor=cuid1234567890').expect(400);
+
+      // 2. Malformed base64
+      await request(server).get('/api/v1/listings?sort=newest&cursor=!!!not-base64!!!').expect(400);
+
+      // 3. Tampered cursor with invalid date string for newest -> 400 (not 500)
+      const tamperedGarbageDate = Buffer.from(
+        JSON.stringify({ s: 'newest', v: 'garbage', id: 'x' }),
+      ).toString('base64url');
+      await request(server)
+        .get(`/api/v1/listings?sort=newest&cursor=${tamperedGarbageDate}`)
+        .expect(400);
+
+      const tamperedOverflowDate = Buffer.from(
+        JSON.stringify({ s: 'newest', v: '99999-99-99', id: 'x' }),
+      ).toString('base64url');
+      await request(server)
+        .get(`/api/v1/listings?sort=newest&cursor=${tamperedOverflowDate}`)
+        .expect(400);
+
+      // 4. Tampered cursor with invalid date for ending_soon -> 400 (not 500)
+      const tamperedEndingSoon = Buffer.from(
+        JSON.stringify({ s: 'ending_soon', v: 'garbage', id: 'x' }),
+      ).toString('base64url');
+      await request(server)
+        .get(`/api/v1/listings?sort=ending_soon&cursor=${tamperedEndingSoon}`)
+        .expect(400);
+
+      // 5. Wrong type of v for price_asc, most_bids, and relevance
+      const tamperedPrice = Buffer.from(
+        JSON.stringify({ s: 'price_asc', v: 'not-an-int', id: 'x' }),
+      ).toString('base64url');
+      await request(server)
+        .get(`/api/v1/listings?sort=price_asc&cursor=${tamperedPrice}`)
+        .expect(400);
+
+      const tamperedBids = Buffer.from(
+        JSON.stringify({ s: 'most_bids', v: 'not-an-int', id: 'x' }),
+      ).toString('base64url');
+      await request(server)
+        .get(`/api/v1/listings?sort=most_bids&cursor=${tamperedBids}`)
+        .expect(400);
+
+      const tamperedRel = Buffer.from(
+        JSON.stringify({ s: 'relevance', v: 'not-a-number', id: 'x' }),
+      ).toString('base64url');
+      await request(server)
+        .get(`/api/v1/listings?q=test&sort=relevance&cursor=${tamperedRel}`)
+        .expect(400);
+
+      // 6. Cursor encoded for a different sort is rejected -> 400
+      const cursorForNewest = encodeCursor('newest', new Date().toISOString(), 'x');
+      await request(server)
+        .get(`/api/v1/listings?sort=price_asc&cursor=${cursorForNewest}`)
+        .expect(400);
+    });
+
+    it('paginates stably across >= 2 pages for all sorts with ties without skips or duplicates', async () => {
+      // Create 5 listings with ties in price, expiresAt, and creation time
       const prices = [1000, 2000, 2000, 3000, 4000];
       const createdListings = [];
 
@@ -859,6 +1108,196 @@ describe('Listings endpoints', () => {
 
         expect(new Set(allIds).size).toBe(5);
       }
+    });
+
+    it('paginates stably for ending_soon with a mix of NULL and non-NULL expiresAt and ties', async () => {
+      const now = Date.now();
+      // 5 listings: 2 with non-null tied expiresAt, 1 distinct non-null, 2 with NULL expiresAt
+      const expires = [
+        new Date(now + 100000), // +100s
+        new Date(now + 200000), // +200s (tied with next)
+        new Date(now + 200000), // +200s (tied with previous)
+        null, // null (tied with next)
+        null, // null (tied with previous)
+      ];
+
+      for (let i = 0; i < 5; i++) {
+        await prisma.listing.create({
+          data: {
+            ownerId: user1Id,
+            categoryId,
+            kind: 'REQUEST',
+            status: 'OPEN',
+            title: `Ending Item ${i + 1}`,
+            description: 'A sufficiently long description for testing ending_soon',
+            priceType: 'NEGOTIABLE',
+            expiresAt: expires[i],
+          },
+        });
+      }
+
+      // Page 1 (limit=2)
+      const p1 = await request(server).get('/api/v1/listings?sort=ending_soon&limit=2').expect(200);
+      expect(p1.body.items).toHaveLength(2);
+      expect(p1.body.nextCursor).toBeDefined();
+
+      // Page 2 (limit=2)
+      const p2 = await request(server)
+        .get(`/api/v1/listings?sort=ending_soon&limit=2&cursor=${p1.body.nextCursor}`)
+        .expect(200);
+      expect(p2.body.items).toHaveLength(2);
+      expect(p2.body.nextCursor).toBeDefined();
+
+      // Page 3 (limit=2)
+      const p3 = await request(server)
+        .get(`/api/v1/listings?sort=ending_soon&limit=2&cursor=${p2.body.nextCursor}`)
+        .expect(200);
+      expect(p3.body.items).toHaveLength(1);
+      expect(p3.body.nextCursor).toBeNull();
+
+      const b1Ending = p1.body as { items: Array<{ id: string }> };
+      const b2Ending = p2.body as { items: Array<{ id: string }> };
+      const b3Ending = p3.body as { items: Array<{ id: string }> };
+      const allIds = [
+        ...b1Ending.items.map((it) => it.id),
+        ...b2Ending.items.map((it) => it.id),
+        ...b3Ending.items.map((it) => it.id),
+      ];
+      expect(new Set(allIds).size).toBe(5);
+    });
+
+    it('paginates stably for most_bids with equal bid counts and ties across pages', async () => {
+      // Create 5 listings with tied bid counts: 3 bids, 2 bids (tied), 2 bids (tied), 0 bids (tied), 0 bids (tied)
+      const listings = [];
+      for (let i = 0; i < 5; i++) {
+        const item = await prisma.listing.create({
+          data: {
+            ownerId: user1Id,
+            categoryId,
+            kind: 'REQUEST',
+            status: 'OPEN',
+            title: `Bid Item ${i + 1}`,
+            description: 'A sufficiently long description for testing most_bids',
+            priceType: 'NEGOTIABLE',
+          },
+        });
+        listings.push(item);
+      }
+
+      // Add bids: item 0 gets 3 bids, items 1 & 2 get 2 bids each, items 3 & 4 get 0 bids
+      const bidCounts = [3, 2, 2, 0, 0];
+      for (let i = 0; i < 5; i++) {
+        const count = bidCounts[i] ?? 0;
+        const targetListing = listings[i]!;
+        for (let b = 0; b < count; b++) {
+          await prisma.bid.create({
+            data: {
+              listingId: targetListing.id,
+              bidderId: user2Id,
+              amountCents: 1000 + b * 100,
+              currency: 'USD',
+              deliveryDays: 3,
+              message: `Bid ${b} on item ${i}`,
+              status: 'PENDING',
+            },
+          });
+        }
+      }
+
+      // Page 1 (limit=2)
+      const p1 = await request(server).get('/api/v1/listings?sort=most_bids&limit=2').expect(200);
+      expect(p1.body.items).toHaveLength(2);
+      expect(p1.body.items[0].bidCount).toBe(3);
+      expect(p1.body.items[1].bidCount).toBe(2);
+      expect(p1.body.nextCursor).toBeDefined();
+
+      // Page 2 (limit=2)
+      const p2 = await request(server)
+        .get(`/api/v1/listings?sort=most_bids&limit=2&cursor=${p1.body.nextCursor}`)
+        .expect(200);
+      expect(p2.body.items).toHaveLength(2);
+      expect(p2.body.items[0].bidCount).toBe(2);
+      expect(p2.body.items[1].bidCount).toBe(0);
+      expect(p2.body.nextCursor).toBeDefined();
+
+      // Page 3 (limit=2)
+      const p3 = await request(server)
+        .get(`/api/v1/listings?sort=most_bids&limit=2&cursor=${p2.body.nextCursor}`)
+        .expect(200);
+      expect(p3.body.items).toHaveLength(1);
+      expect(p3.body.items[0].bidCount).toBe(0);
+      expect(p3.body.nextCursor).toBeNull();
+
+      const b1Bids = p1.body as { items: Array<{ id: string }> };
+      const b2Bids = p2.body as { items: Array<{ id: string }> };
+      const b3Bids = p3.body as { items: Array<{ id: string }> };
+      const allIds = [
+        ...b1Bids.items.map((it) => it.id),
+        ...b2Bids.items.map((it) => it.id),
+        ...b3Bids.items.map((it) => it.id),
+      ];
+      expect(new Set(allIds).size).toBe(5);
+    });
+
+    it('paginates stably for relevance with tied ranks across pages (Finding 1 fix)', async () => {
+      // Create 3 listings with identical rank for search term 'design'
+      const l1 = await prisma.listing.create({
+        data: {
+          ownerId: user1Id,
+          categoryId,
+          kind: 'REQUEST',
+          status: 'OPEN',
+          title: 'Design Specialist Alpha',
+          description: 'Top notch design service for clients',
+          priceType: 'NEGOTIABLE',
+        },
+      });
+      const l2 = await prisma.listing.create({
+        data: {
+          ownerId: user1Id,
+          categoryId,
+          kind: 'REQUEST',
+          status: 'OPEN',
+          title: 'Design Specialist Beta',
+          description: 'Top notch design service for clients',
+          priceType: 'NEGOTIABLE',
+        },
+      });
+      const l3 = await prisma.listing.create({
+        data: {
+          ownerId: user1Id,
+          categoryId,
+          kind: 'REQUEST',
+          status: 'OPEN',
+          title: 'Design Specialist Gamma',
+          description: 'Top notch design service for clients',
+          priceType: 'NEGOTIABLE',
+        },
+      });
+
+      // Page 1 (limit=2)
+      const p1 = await request(server)
+        .get('/api/v1/listings?q=design&sort=relevance&limit=2')
+        .expect(200);
+
+      expect(p1.body.items).toHaveLength(2);
+      expect(p1.body.nextCursor).toBeDefined();
+
+      // Page 2 (limit=2) - must return the 3rd item with tied rank, NOT skip it
+      const p2 = await request(server)
+        .get(`/api/v1/listings?q=design&sort=relevance&limit=2&cursor=${p1.body.nextCursor}`)
+        .expect(200);
+
+      expect(p2.body.items).toHaveLength(1);
+      expect(p2.body.nextCursor).toBeNull();
+
+      const b1Rel = p1.body as { items: Array<{ id: string }> };
+      const b2Rel = p2.body as { items: Array<{ id: string }> };
+      const returnedIds = [...b1Rel.items.map((it) => it.id), ...b2Rel.items.map((it) => it.id)];
+      expect(new Set(returnedIds).size).toBe(3);
+      expect(returnedIds).toContain(l1.id);
+      expect(returnedIds).toContain(l2.id);
+      expect(returnedIds).toContain(l3.id);
     });
   });
 });

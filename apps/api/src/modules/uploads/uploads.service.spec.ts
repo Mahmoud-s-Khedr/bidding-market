@@ -1,4 +1,9 @@
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { UploadsController } from './uploads.controller.js';
 import { UploadsService } from './uploads.service.js';
@@ -97,6 +102,28 @@ describe('UploadsService', () => {
     it('throws 403 when user is not the uploader', async () => {
       prisma.upload.findUnique.mockResolvedValueOnce({ id: 'up1', uploaderId: 'other' });
       await expect(service.complete('u1', 'up1')).rejects.toThrow(ForbiddenException);
+    });
+
+    it('throws 409 when upload is already READY', async () => {
+      prisma.upload.findUnique.mockResolvedValueOnce({
+        id: 'up1',
+        uploaderId: 'u1',
+        status: 'READY',
+      });
+      await expect(service.complete('u1', 'up1')).rejects.toThrow(ConflictException);
+    });
+
+    it('throws 400 when storage HEAD response is missing ContentType', async () => {
+      prisma.upload.findUnique.mockResolvedValueOnce({
+        id: 'up1',
+        uploaderId: 'u1',
+        status: 'PENDING',
+        key: 'k',
+        sizeBytes: 100,
+        mimeType: 'image/jpeg',
+      });
+      storage.headObject.mockResolvedValueOnce({ ContentLength: 100, ContentType: undefined });
+      await expect(service.complete('u1', 'up1')).rejects.toThrow(BadRequestException);
     });
 
     it('throws 400 when file not found in storage', async () => {

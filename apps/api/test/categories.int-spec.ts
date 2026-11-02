@@ -128,6 +128,88 @@ describe('Categories endpoints', () => {
       const cachedRes = await request(server).get('/api/v1/categories').expect(200);
       expect(cachedRes.body).toEqual(res.body);
     });
+
+    it('invalidates cache when listing is created, closed, or deleted, updating listingCount immediately', async () => {
+      const catRes = await request(server)
+        .post('/api/v1/admin/categories')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ name: 'Cache Test Cat', slug: 'cache-cat' })
+        .expect(201);
+      const catId = catRes.body.id;
+
+      // Prime cache
+      const initial = await request(server).get('/api/v1/categories').expect(200);
+      const catNode1 = (initial.body as CategoryTreeNode[]).find((c) => c.slug === 'cache-cat');
+      expect(catNode1?.listingCount).toBe(0);
+
+      // Create an OPEN listing via API
+      const listing1Res = await request(server)
+        .post('/api/v1/listings')
+        .set('Authorization', `Bearer ${userToken}`)
+        .send({
+          categoryId: catId,
+          kind: 'REQUEST',
+          status: 'OPEN',
+          title: 'First Listing',
+          description: 'A sufficiently long description for testing cache invalidation',
+          priceType: 'FIXED',
+          priceMinCents: 1000,
+          currency: 'USD',
+        })
+        .expect(201);
+
+      const afterCreate1Tree = await request(server).get('/api/v1/categories').expect(200);
+      const catNode2 = (afterCreate1Tree.body as CategoryTreeNode[]).find(
+        (c) => c.slug === 'cache-cat',
+      );
+      expect(catNode2?.listingCount).toBe(1);
+
+      // Create a second OPEN listing
+      const listing2Res = await request(server)
+        .post('/api/v1/listings')
+        .set('Authorization', `Bearer ${userToken}`)
+        .send({
+          categoryId: catId,
+          kind: 'REQUEST',
+          status: 'OPEN',
+          title: 'Second Listing',
+          description: 'A sufficiently long description for testing cache invalidation',
+          priceType: 'FIXED',
+          priceMinCents: 2000,
+          currency: 'USD',
+        })
+        .expect(201);
+
+      const afterCreate2Tree = await request(server).get('/api/v1/categories').expect(200);
+      const catNode3 = (afterCreate2Tree.body as CategoryTreeNode[]).find(
+        (c) => c.slug === 'cache-cat',
+      );
+      expect(catNode3?.listingCount).toBe(2);
+
+      // Close second listing
+      await request(server)
+        .post(`/api/v1/listings/${listing2Res.body.id}/close`)
+        .set('Authorization', `Bearer ${userToken}`)
+        .expect(201);
+
+      const afterCloseTree = await request(server).get('/api/v1/categories').expect(200);
+      const catNode4 = (afterCloseTree.body as CategoryTreeNode[]).find(
+        (c) => c.slug === 'cache-cat',
+      );
+      expect(catNode4?.listingCount).toBe(1);
+
+      // Delete first listing
+      await request(server)
+        .delete(`/api/v1/listings/${listing1Res.body.id}`)
+        .set('Authorization', `Bearer ${userToken}`)
+        .expect(204);
+
+      const afterDeleteTree = await request(server).get('/api/v1/categories').expect(200);
+      const catNode5 = (afterDeleteTree.body as CategoryTreeNode[]).find(
+        (c) => c.slug === 'cache-cat',
+      );
+      expect(catNode5?.listingCount).toBe(0);
+    });
   });
 
   describe('POST /api/v1/admin/categories', () => {

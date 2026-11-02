@@ -13,35 +13,83 @@ import { ListingsService, validatePriceRules } from './listings.service.js';
 
 describe('listings.cursor', () => {
   it('encodes and decodes cursors with different sort values', () => {
-    const c1 = encodeCursor('2026-01-01T00:00:00.000Z', 'list-1');
-    expect(decodeCursor(c1)).toEqual({
+    const c1 = encodeCursor('newest', '2026-01-01T00:00:00.000Z', 'list-1');
+    expect(decodeCursor(c1, 'newest')).toEqual({
       sortValue: '2026-01-01T00:00:00.000Z',
       id: 'list-1',
     });
 
-    const c2 = encodeCursor(5000, 'list-2');
-    expect(decodeCursor(c2)).toEqual({
+    const c2 = encodeCursor('price_asc', 5000, 'list-2');
+    expect(decodeCursor(c2, 'price_asc')).toEqual({
       sortValue: 5000,
       id: 'list-2',
     });
 
-    const c3 = encodeCursor(null, 'list-3');
-    expect(decodeCursor(c3)).toEqual({
+    const c3 = encodeCursor('ending_soon', null, 'list-3');
+    expect(decodeCursor(c3, 'ending_soon')).toEqual({
       sortValue: null,
       id: 'list-3',
     });
-  });
 
-  it('handles plain string IDs as fallback and rejects invalid cursors', () => {
-    expect(decodeCursor('cuid1234567890')).toEqual({
-      sortValue: null,
-      id: 'cuid1234567890',
+    const c4 = encodeCursor('most_bids', 3, 'list-4');
+    expect(decodeCursor(c4, 'most_bids')).toEqual({
+      sortValue: 3,
+      id: 'list-4',
     });
 
-    expect(() => decodeCursor('!!!not-valid-cursor!!!')).toThrow(BadRequestException);
+    const c5 = encodeCursor('relevance', 0.125, 'list-5');
+    expect(decodeCursor(c5, 'relevance')).toEqual({
+      sortValue: 0.125,
+      id: 'list-5',
+    });
+  });
+
+  it('rejects tampered and invalid cursors and does not fall back to plain IDs', () => {
+    // Plain string id is rejected (no fallback)
+    expect(() => decodeCursor('cuid1234567890', 'newest')).toThrow(BadRequestException);
+    expect(() => decodeCursor('!!!not-valid-cursor!!!', 'newest')).toThrow(BadRequestException);
+
+    // Missing id
     expect(() =>
-      decodeCursor(Buffer.from(JSON.stringify({ v: 'test' })).toString('base64url')),
+      decodeCursor(
+        Buffer.from(JSON.stringify({ s: 'newest', v: '2026-01-01T00:00:00.000Z' })).toString(
+          'base64url',
+        ),
+        'newest',
+      ),
     ).toThrow(BadRequestException);
+
+    // Sort mismatch
+    const cursorNewest = encodeCursor('newest', '2026-01-01T00:00:00.000Z', 'l1');
+    expect(() => decodeCursor(cursorNewest, 'price_asc')).toThrow(BadRequestException);
+
+    // Invalid ISO date for newest
+    const cursorGarbageDate = Buffer.from(
+      JSON.stringify({ s: 'newest', v: 'garbage', id: 'l1' }),
+    ).toString('base64url');
+    expect(() => decodeCursor(cursorGarbageDate, 'newest')).toThrow(BadRequestException);
+
+    const cursorYearOverflow = Buffer.from(
+      JSON.stringify({ s: 'newest', v: '99999-99-99', id: 'l1' }),
+    ).toString('base64url');
+    expect(() => decodeCursor(cursorYearOverflow, 'newest')).toThrow(BadRequestException);
+
+    // Invalid types for price / most_bids
+    const cursorBadPrice = Buffer.from(
+      JSON.stringify({ s: 'price_asc', v: 'string-price', id: 'l1' }),
+    ).toString('base64url');
+    expect(() => decodeCursor(cursorBadPrice, 'price_asc')).toThrow(BadRequestException);
+
+    const cursorBadBids = Buffer.from(JSON.stringify({ s: 'most_bids', v: -5, id: 'l1' })).toString(
+      'base64url',
+    );
+    expect(() => decodeCursor(cursorBadBids, 'most_bids')).toThrow(BadRequestException);
+
+    // Invalid number for relevance
+    const cursorBadRel = Buffer.from(
+      JSON.stringify({ s: 'relevance', v: 'nan', id: 'l1' }),
+    ).toString('base64url');
+    expect(() => decodeCursor(cursorBadRel, 'relevance')).toThrow(BadRequestException);
   });
 });
 
@@ -73,7 +121,9 @@ describe('ListingsService', () => {
       findUnique: ReturnType<typeof vi.fn>;
       create: ReturnType<typeof vi.fn>;
       update: ReturnType<typeof vi.fn>;
+      updateMany: ReturnType<typeof vi.fn>;
       delete: ReturnType<typeof vi.fn>;
+      deleteMany: ReturnType<typeof vi.fn>;
     };
     category: {
       findUnique: ReturnType<typeof vi.fn>;
@@ -89,10 +139,12 @@ describe('ListingsService', () => {
     };
     listingImage: {
       create: ReturnType<typeof vi.fn>;
+      findFirst: ReturnType<typeof vi.fn>;
       deleteMany: ReturnType<typeof vi.fn>;
     };
     listingAttachment: {
       create: ReturnType<typeof vi.fn>;
+      findFirst: ReturnType<typeof vi.fn>;
       deleteMany: ReturnType<typeof vi.fn>;
     };
     $queryRaw: ReturnType<typeof vi.fn>;
@@ -103,6 +155,7 @@ describe('ListingsService', () => {
   };
   let categoriesService: {
     getDescendantCategoryIds: ReturnType<typeof vi.fn>;
+    invalidateCache: ReturnType<typeof vi.fn>;
   };
 
   const mockUser = { id: 'u1', role: 'USER' as const };
@@ -114,22 +167,26 @@ describe('ListingsService', () => {
         findUnique: vi.fn(),
         create: vi.fn(),
         update: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         delete: vi.fn(),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       category: { findUnique: vi.fn() },
       upload: { findMany: vi.fn() },
       bid: {
         count: vi.fn(),
         findFirst: vi.fn(),
-        updateMany: vi.fn(),
-        deleteMany: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       listingImage: {
         create: vi.fn(),
+        findFirst: vi.fn().mockResolvedValue(null),
         deleteMany: vi.fn(),
       },
       listingAttachment: {
         create: vi.fn(),
+        findFirst: vi.fn().mockResolvedValue(null),
         deleteMany: vi.fn(),
       },
       $queryRaw: vi.fn(),
@@ -140,6 +197,7 @@ describe('ListingsService', () => {
     };
     categoriesService = {
       getDescendantCategoryIds: vi.fn().mockResolvedValue([]),
+      invalidateCache: vi.fn().mockResolvedValue(undefined),
     };
 
     service = new ListingsService(prisma as never, storage as never, categoriesService as never);
@@ -285,6 +343,77 @@ describe('ListingsService', () => {
         BadRequestException,
       );
     });
+
+    it('throws 409 when attempting to reopen a CLOSED listing', async () => {
+      prisma.listing.findUnique.mockResolvedValueOnce({
+        id: 'l1',
+        ownerId: 'u1',
+        status: 'CLOSED',
+      });
+      await expect(service.update(mockUser, 'l1', { status: 'OPEN' })).rejects.toThrow(
+        ConflictException,
+      );
+    });
+
+    it('throws 409 when reverting an OPEN listing with bids to DRAFT', async () => {
+      prisma.listing.findUnique.mockResolvedValueOnce({
+        id: 'l1',
+        ownerId: 'u1',
+        status: 'OPEN',
+      });
+      prisma.bid.count.mockResolvedValueOnce(2);
+
+      await expect(service.update(mockUser, 'l1', { status: 'DRAFT' })).rejects.toThrow(
+        ConflictException,
+      );
+    });
+
+    it('admin PATCH of someone else listing validates uploads against listing owner', async () => {
+      prisma.listing.findUnique.mockResolvedValueOnce({
+        id: 'l1',
+        ownerId: 'other-user',
+        status: 'OPEN',
+        priceType: 'FIXED',
+        priceMinCents: 1000,
+        priceMaxCents: null,
+      });
+      // Upload belongs to other-user, not mockAdmin
+      prisma.upload.findMany.mockResolvedValueOnce([
+        { id: 'up1', uploaderId: 'other-user', status: 'READY', purpose: 'LISTING_IMAGE' },
+      ]);
+      vi.spyOn(service, 'getById').mockResolvedValueOnce({
+        id: 'l1',
+        title: 'Admin Edit',
+      } as never);
+
+      await expect(
+        service.update(mockAdmin, 'l1', {
+          imageIds: ['up1'],
+        }),
+      ).resolves.toBeDefined();
+    });
+
+    it('throws 409 when an upload is already attached to another listing', async () => {
+      prisma.listing.findUnique.mockResolvedValueOnce({
+        id: 'l1',
+        ownerId: 'u1',
+        status: 'OPEN',
+        priceType: 'FIXED',
+        priceMinCents: 1000,
+      });
+      prisma.upload.findMany.mockResolvedValueOnce([
+        { id: 'up1', uploaderId: 'u1', status: 'READY', purpose: 'LISTING_IMAGE' },
+      ]);
+      prisma.listingImage.findFirst.mockResolvedValueOnce({
+        id: 'li2',
+        listingId: 'other-listing',
+        uploadId: 'up1',
+      });
+
+      await expect(service.update(mockUser, 'l1', { imageIds: ['up1'] })).rejects.toThrow(
+        ConflictException,
+      );
+    });
   });
 
   describe('close', () => {
@@ -307,8 +436,8 @@ describe('ListingsService', () => {
 
       const res = await service.close(mockUser, 'l1');
       expect(res.status).toBe('CLOSED');
-      expect(prisma.listing.update).toHaveBeenCalledWith({
-        where: { id: 'l1' },
+      expect(prisma.listing.updateMany).toHaveBeenCalledWith({
+        where: { id: 'l1', status: 'OPEN' },
         data: { status: 'CLOSED' },
       });
       expect(prisma.bid.updateMany).toHaveBeenCalledWith({
@@ -318,6 +447,18 @@ describe('ListingsService', () => {
         },
         data: { status: 'DECLINED' },
       });
+      expect(categoriesService.invalidateCache).toHaveBeenCalled();
+    });
+
+    it('throws 409 if listing status changed concurrently during close', async () => {
+      prisma.listing.findUnique.mockResolvedValueOnce({
+        id: 'l1',
+        ownerId: 'u1',
+        status: 'OPEN',
+      });
+      prisma.listing.updateMany.mockResolvedValueOnce({ count: 0 });
+
+      await expect(service.close(mockUser, 'l1')).rejects.toThrow(ConflictException);
     });
   });
 
@@ -333,17 +474,21 @@ describe('ListingsService', () => {
       await expect(service.delete(mockUser, 'l1')).rejects.toThrow(ConflictException);
     });
 
-    it('allows deleting DRAFT listing even if it had bids', async () => {
+    it('allows deleting DRAFT listing and deletes bids and invalidates cache', async () => {
       prisma.listing.findUnique.mockResolvedValueOnce({
         id: 'l1',
         ownerId: 'u1',
         status: 'DRAFT',
       });
       await service.delete(mockUser, 'l1');
-      expect(prisma.listing.delete).toHaveBeenCalledWith({ where: { id: 'l1' } });
+      expect(prisma.bid.deleteMany).toHaveBeenCalledWith({ where: { listingId: 'l1' } });
+      expect(prisma.listing.deleteMany).toHaveBeenCalledWith({
+        where: { id: 'l1', status: 'DRAFT' },
+      });
+      expect(categoriesService.invalidateCache).toHaveBeenCalled();
     });
 
-    it('allows deleting OPEN listing with 0 bids', async () => {
+    it('allows deleting OPEN listing with 0 bids and NEVER calls bid.deleteMany', async () => {
       prisma.listing.findUnique.mockResolvedValueOnce({
         id: 'l1',
         ownerId: 'u1',
@@ -352,7 +497,23 @@ describe('ListingsService', () => {
       prisma.bid.count.mockResolvedValueOnce(0);
 
       await service.delete(mockUser, 'l1');
-      expect(prisma.listing.delete).toHaveBeenCalledWith({ where: { id: 'l1' } });
+      expect(prisma.bid.deleteMany).not.toHaveBeenCalled();
+      expect(prisma.listing.deleteMany).toHaveBeenCalledWith({
+        where: { id: 'l1', status: 'OPEN' },
+      });
+      expect(categoriesService.invalidateCache).toHaveBeenCalled();
+    });
+
+    it('throws 409 when listing status changed concurrently during delete', async () => {
+      prisma.listing.findUnique.mockResolvedValueOnce({
+        id: 'l1',
+        ownerId: 'u1',
+        status: 'OPEN',
+      });
+      prisma.bid.count.mockResolvedValueOnce(0);
+      prisma.listing.deleteMany.mockResolvedValueOnce({ count: 0 });
+
+      await expect(service.delete(mockUser, 'l1')).rejects.toThrow(ConflictException);
     });
   });
 
@@ -522,7 +683,7 @@ describe('ListingsService', () => {
     });
 
     it('handles price_asc sort and cursor', async () => {
-      const cursor = encodeCursor(1000, 'l0');
+      const cursor = encodeCursor('price_asc', 1000, 'l0');
       prisma.$queryRaw.mockResolvedValueOnce([
         {
           id: 'l1',
@@ -590,20 +751,20 @@ describe('ListingsService', () => {
     it('handles price_desc, ending_soon, most_bids, and relevance sorts with cursors', async () => {
       prisma.$queryRaw.mockResolvedValue([]);
 
-      const cDesc = encodeCursor(5000, 'l1');
+      const cDesc = encodeCursor('price_desc', 5000, 'l1');
       await service.list(
         listingQuerySchema.parse({ sort: 'price_desc', cursor: cDesc, limit: 10 }),
       );
 
-      const cEnding = encodeCursor(new Date().toISOString(), 'l1');
+      const cEnding = encodeCursor('ending_soon', new Date().toISOString(), 'l1');
       await service.list(
         listingQuerySchema.parse({ sort: 'ending_soon', cursor: cEnding, limit: 10 }),
       );
 
-      const cBids = encodeCursor(4, 'l1');
+      const cBids = encodeCursor('most_bids', 4, 'l1');
       await service.list(listingQuerySchema.parse({ sort: 'most_bids', cursor: cBids, limit: 10 }));
 
-      const cRel = encodeCursor(0.5, 'l1');
+      const cRel = encodeCursor('relevance', 0.5, 'l1');
       await service.list(
         listingQuerySchema.parse({ q: 'market', sort: 'relevance', cursor: cRel, limit: 10 }),
       );
