@@ -24,9 +24,7 @@ function EditListingContent() {
   const { data: listing, isLoading, isError, error, refetch } = useListing(id);
   const updateMutation = useUpdateListing();
 
-  const isOwner = Boolean(
-    user && listing && (user.id === listing.owner.id || user.id === listing.ownerId),
-  );
+  const isOwner = Boolean(user && listing && user.id === listing.owner.id);
 
   const handleSubmit = async (data: CreateListingRequest) => {
     await updateMutation.mutateAsync({ id, data });

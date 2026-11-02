@@ -47,7 +47,6 @@ describe('Listing Detail Page', () => {
     tags: ['branding', 'design'],
     categoryId: 'c-design',
     category: { id: 'c-design', name: 'Design', slug: 'design' },
-    ownerId: 'user-owner',
     owner: {
       id: 'user-owner',
       displayName: 'Creative Studio',

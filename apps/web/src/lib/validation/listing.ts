@@ -1,23 +1,16 @@
 import { z } from 'zod';
-import type { CreateListingRequest } from '@/lib/api/types';
+import { listingCreateSchema, type ListingCreateInput } from '@market/shared';
+
+const {
+  priceMinCents: _priceMinCents,
+  priceMaxCents: _priceMaxCents,
+  ...sharedFields
+} = listingCreateSchema.shape;
 
 export const listingFormSchema = z
   .object({
-    kind: z.enum(['REQUEST', 'OFFER'], {
-      message: 'Please select whether this is a request or an offer',
-    }),
-    title: z
-      .string()
-      .trim()
-      .min(5, 'Title must be at least 5 characters')
-      .max(120, 'Title cannot exceed 120 characters'),
-    description: z
-      .string()
-      .trim()
-      .min(20, 'Description must be at least 20 characters')
-      .max(10000, 'Description cannot exceed 10,000 characters'),
+    ...sharedFields,
     categoryId: z.string().min(1, 'Please select a category'),
-    priceType: z.enum(['FIXED', 'RANGE', 'NEGOTIABLE']),
     priceMin: z
       .union([z.number(), z.string()])
       .optional()
@@ -30,16 +23,14 @@ export const listingFormSchema = z
       .transform((val) =>
         val === '' || val === undefined || val === null ? undefined : Number(val),
       ),
-    currency: z.string().min(3).max(3).default('USD'),
     deliveryDays: z
       .union([z.number(), z.string()])
       .optional()
       .transform((val) =>
         val === '' || val === undefined || val === null ? undefined : Number(val),
       ),
-    location: z.string().trim().max(120).optional(),
-    tags: z.array(z.string().trim().min(1)).max(10, 'Maximum 10 tags allowed').default([]),
-    imageIds: z.array(z.string()).max(10, 'Maximum 10 images allowed').default([]),
+    tags: z.array(z.string().trim().min(1).max(40)).max(10).default([]),
+    imageIds: z.array(z.string()).default([]),
     attachmentIds: z.array(z.string()).default([]),
     expiresAt: z.string().optional(),
     status: z.enum(['DRAFT', 'OPEN']).default('OPEN'),
@@ -104,9 +95,9 @@ export function formValuesToApiPayload(
   values: Partial<ListingFormOutput> &
     Pick<ListingFormOutput, 'kind' | 'title' | 'description' | 'categoryId' | 'priceType'>,
   statusOverride?: 'DRAFT' | 'OPEN',
-): CreateListingRequest {
-  let priceMinCents: number | null | undefined = undefined;
-  let priceMaxCents: number | null | undefined = undefined;
+): ListingCreateInput {
+  let priceMinCents: number | undefined = undefined;
+  let priceMaxCents: number | undefined = undefined;
 
   if (values.priceType === 'FIXED') {
     if (values.priceMin !== undefined && !Number.isNaN(values.priceMin)) {
@@ -120,9 +111,14 @@ export function formValuesToApiPayload(
     if (values.priceMax !== undefined && !Number.isNaN(values.priceMax)) {
       priceMaxCents = Math.round(values.priceMax * 100);
     }
-  } else {
-    priceMinCents = null;
-    priceMaxCents = null;
+  }
+
+  let formattedExpiresAt: string | undefined = undefined;
+  if (values.expiresAt) {
+    const d = new Date(values.expiresAt);
+    if (!Number.isNaN(d.getTime())) {
+      formattedExpiresAt = d.toISOString();
+    }
   }
 
   return {
@@ -135,11 +131,12 @@ export function formValuesToApiPayload(
     priceMaxCents,
     currency: values.currency || 'USD',
     deliveryDays: values.deliveryDays,
-    location: values.location?.trim() || null,
-    tags: values.tags,
-    imageIds: values.imageIds,
-    attachmentIds: values.attachmentIds,
-    expiresAt: values.expiresAt || null,
+    location: values.location?.trim() || undefined,
+    tags: values.tags && values.tags.length > 0 ? values.tags : undefined,
+    imageIds: values.imageIds && values.imageIds.length > 0 ? values.imageIds : undefined,
+    attachmentIds:
+      values.attachmentIds && values.attachmentIds.length > 0 ? values.attachmentIds : undefined,
+    expiresAt: formattedExpiresAt,
     status: statusOverride ?? values.status ?? 'OPEN',
   };
 }

@@ -1,29 +1,27 @@
+import {
+  loginSchema,
+  registerSchema as sharedRegisterSchema,
+  passwordSchema,
+  type LoginInput,
+  type RegisterInput,
+} from '@market/shared';
 import { z } from 'zod';
 
-export const loginSchema = z.object({
-  email: z.string().trim().email('Please enter a valid email address'),
-  password: z.string().min(1, 'Password is required'),
-});
-
-export type LoginInput = z.infer<typeof loginSchema>;
+export { loginSchema, passwordSchema, type LoginInput, type RegisterInput };
 
 export const registerSchema = z
   .object({
-    email: z.string().trim().email('Please enter a valid email address'),
-    password: z.string().min(8, 'Password must be at least 8 characters'),
-    displayName: z.string().trim().min(2, 'Display name must be at least 2 characters'),
-    isBusiness: z.boolean().default(false),
-    companyName: z.string().trim().optional(),
+    ...sharedRegisterSchema.shape,
+    companyName: z
+      .string()
+      .trim()
+      .max(120)
+      .optional()
+      .transform((v) => (v === '' ? undefined : v)),
   })
-  .superRefine((data, ctx) => {
-    if (data.isBusiness && (!data.companyName || data.companyName.trim().length === 0)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Company name is required for business accounts',
-        path: ['companyName'],
-      });
-    }
+  .refine((v) => !v.isBusiness || (typeof v.companyName === 'string' && v.companyName.length > 0), {
+    message: 'companyName is required for businesses',
+    path: ['companyName'],
   });
 
-export type RegisterInput = z.infer<typeof registerSchema>;
 export type RegisterFormInput = z.input<typeof registerSchema>;

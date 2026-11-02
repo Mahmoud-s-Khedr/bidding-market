@@ -543,8 +543,55 @@ export const errorSchema = z.object({
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
-export type ListingCreateInput = z.infer<typeof listingCreateSchema>;
-export type BidCreateInput = z.infer<typeof bidCreateSchema>;
-export type MessageCreateInput = z.infer<typeof messageCreateSchema>;
-export type PaginationInput = z.infer<typeof paginationSchema>;
+export type ListingCreateInput = z.input<typeof listingCreateSchema>;
+export type ListingCreateOutput = z.output<typeof listingCreateSchema>;
+export type ListingUpdateInput = Partial<ListingCreateInput>;
+export type BidCreateInput = z.input<typeof bidCreateSchema>;
+export type MessageCreateInput = z.input<typeof messageCreateSchema>;
+export type PaginationInput = z.input<typeof paginationSchema>;
 export type ApiError = z.infer<typeof errorSchema>;
+export type Attachment = z.infer<typeof attachmentSchema>;
+export type Upload = z.infer<typeof uploadSchema>;
+export type UploadPresignRequest = z.input<typeof uploadPresignSchema>;
+export type UploadPresignResponse = z.infer<typeof uploadPresignResponseSchema>;
+export type Role = z.infer<typeof Role>;
+export type UserStatus = z.infer<typeof UserStatus>;
+export type ListingKind = z.infer<typeof ListingKind>;
+export type ListingStatus = z.infer<typeof ListingStatus>;
+export type PriceType = z.infer<typeof PriceType>;
+export type BidStatus = z.infer<typeof BidStatus>;
+export type MessageType = z.infer<typeof MessageType>;
+export type AgreementStatus = z.infer<typeof AgreementStatus>;
+export type MilestoneStatus = z.infer<typeof MilestoneStatus>;
+export type UploadPurpose = z.infer<typeof UploadPurpose>;
+export type NotificationType = z.infer<typeof NotificationType>;
+export type ReportTargetType = z.infer<typeof ReportTargetType>;
+export type ReportReason = z.infer<typeof ReportReason>;
+export type ReportStatus = z.infer<typeof ReportStatus>;
+export type AuthResponse = z.infer<typeof authResponseSchema>;
+export type ListingFilters = z.input<typeof listingQuerySchema>;
+export type ListingSort = NonNullable<z.input<typeof listingQuerySchema>['sort']>;
+export type CategoryInput = z.infer<typeof categorySchema>;
+export type PaginatedResponse<T> = { items: T[]; nextCursor: string | null };
+export type ReviewItem = z.infer<typeof reviewItemSchema>;
+
+export type Category = {
+  id: string;
+  name: string;
+  slug: string;
+  parentId: string | null;
+  children?: Category[];
+  listingCount?: number;
+  description?: string | null;
+};
+export const categoryTreeSchema: z.ZodType<Category> = z.lazy(() =>
+  z.object({
+    id: z.string(),
+    name: z.string(),
+    slug: z.string(),
+    parentId: z.string().nullable(),
+    children: z.array(categoryTreeSchema).optional(),
+    listingCount: z.number().int().optional(),
+    description: z.string().nullable().optional(),
+  }),
+);

@@ -64,12 +64,18 @@ export function ListingCard({ listing, className }: ListingCardProps) {
       <div className="flex flex-1 flex-col p-4">
         {/* Category & Location */}
         <div className="flex items-center justify-between text-xs text-muted-foreground mb-1.5">
-          <Link
-            href={`/categories/${listing.category.slug}`}
-            className="truncate hover:text-primary transition-colors font-medium"
-          >
-            {listing.category.name}
-          </Link>
+          {listing.category ? (
+            <Link
+              href={`/categories/${listing.category.slug}`}
+              className="truncate hover:text-primary transition-colors font-medium"
+            >
+              {listing.category.name}
+            </Link>
+          ) : (
+            <span className="truncate font-medium text-muted-foreground/80">
+              {listing.categoryId}
+            </span>
+          )}
 
           {listing.location && (
             <span className="flex items-center gap-1 shrink-0 ml-2">

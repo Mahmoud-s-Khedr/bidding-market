@@ -209,7 +209,6 @@ describe('Shared Components', () => {
       tags: ['react', 'nextjs'],
       categoryId: 'c-web',
       category: { id: 'c-web', name: 'Web Development', slug: 'web-dev' },
-      ownerId: 'u-alice',
       owner: {
         id: 'u-alice',
         displayName: 'Alice Cooper',

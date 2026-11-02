@@ -31,8 +31,8 @@ test.describe('Smoke tests', () => {
     await expect(submitBtn).toBeVisible();
     await submitBtn.click();
 
-    await expect(page.getByText('Please enter a valid email address')).toBeVisible();
-    await expect(page.getByText('Password is required')).toBeVisible();
+    await expect(page.getByText(/invalid email address/i)).toBeVisible();
+    await expect(page.getByText(/expected string to have >=1 characters/i)).toBeVisible();
   });
 
   test('browse listings page renders search and filter controls', async ({ page }) => {

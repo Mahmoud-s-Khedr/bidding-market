@@ -51,9 +51,7 @@ export default function ListingDetailPage() {
   const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
   const [placeholderDialogOpen, setPlaceholderDialogOpen] = React.useState<string | null>(null);
 
-  const isOwner = Boolean(
-    user && listing && (user.id === listing.owner.id || user.id === listing.ownerId),
-  );
+  const isOwner = Boolean(user && listing && user.id === listing.owner.id);
 
   const handleDownloadAttachment = async (attachment: Attachment) => {
     try {
@@ -175,13 +173,17 @@ export default function ListingDetailPage() {
           <Link href="/listings" className="hover:text-foreground transition-colors">
             Listings
           </Link>
-          <span>/</span>
-          <Link
-            href={`/categories/${listing.category.slug}`}
-            className="hover:text-foreground transition-colors font-medium"
-          >
-            {listing.category.name}
-          </Link>
+          {listing.category ? (
+            <>
+              <span>/</span>
+              <Link
+                href={`/categories/${listing.category.slug}`}
+                className="hover:text-foreground transition-colors font-medium"
+              >
+                {listing.category.name}
+              </Link>
+            </>
+          ) : null}
         </div>
 
         {/* Owner Action Buttons */}

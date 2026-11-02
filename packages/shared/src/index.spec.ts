@@ -92,3 +92,14 @@ it('enforces upload purpose limits', () => {
     }).success,
   ).toBe(true);
 });
+
+it('validates paginated and category tree schemas', async () => {
+  const { paginated, categoryTreeSchema } = await import('./index.js');
+  const p = paginated(categoryTreeSchema);
+  expect(
+    p.safeParse({
+      items: [{ id: '1', name: 'Tech', slug: 'tech', parentId: null, children: [] }],
+      nextCursor: null,
+    }).success,
+  ).toBe(true);
+});

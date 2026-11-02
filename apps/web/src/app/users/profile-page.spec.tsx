@@ -44,7 +44,6 @@ describe('User Profile Page', () => {
     tags: ['figma', 'ui'],
     categoryId: 'c-design',
     category: { id: 'c-design', name: 'Design', slug: 'design' },
-    ownerId: 'user-profile-1',
     owner: mockUser,
     images: [],
     bidCount: 4,
@@ -54,6 +53,7 @@ describe('User Profile Page', () => {
 
   const mockReview: ReviewItem = {
     id: 'rev-1',
+    agreementId: 'agr-1',
     rating: 5,
     comment: 'Exceptional quality of work and prompt delivery!',
     createdAt: '2026-09-10T00:00:00Z',

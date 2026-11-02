@@ -51,10 +51,19 @@ describe('Upload utilities', () => {
     it('performs presign -> PUT/XHR upload -> complete flow', async () => {
       const mockFile = new File(['content'], 'test.png', { type: 'image/png' });
       const mockPresign = {
-        uploadId: 'up-123',
-        url: 'https://s3.example/upload',
-        key: 'uploads/test.png',
-        expiresAt: '2026-11-03T00:00:00Z',
+        upload: {
+          id: 'up-123',
+          key: 'uploads/test.png',
+          fileName: 'test.png',
+          mimeType: 'image/png',
+          sizeBytes: 7,
+          purpose: 'LISTING_IMAGE' as const,
+          status: 'PENDING' as const,
+          createdAt: new Date(),
+          completedAt: null,
+        },
+        uploadUrl: 'https://s3.example/upload',
+        headers: { 'x-amz-acl': 'private' },
       };
       const mockAttachment = {
         id: 'att-123',
@@ -108,67 +117,29 @@ describe('Upload utilities', () => {
         sizeBytes: mockFile.size,
       });
 
-      expect(mockXHR.open).toHaveBeenCalledWith('PUT', mockPresign.url);
+      expect(mockXHR.open).toHaveBeenCalledWith('PUT', mockPresign.uploadUrl);
       expect(onProgress).toHaveBeenCalledWith(50);
       expect(onProgress).toHaveBeenCalledWith(100);
       expect(uploadsApi.completeUpload).toHaveBeenCalledWith('up-123');
       expect(result).toEqual(mockAttachment);
     });
 
-    it('supports S3 POST multipart presigned uploads when fields are present', async () => {
-      const mockFile = new File(['doc-bytes'], 'spec.pdf', { type: 'application/pdf' });
-      const mockPresign = {
-        uploadId: 'up-456',
-        url: 'https://s3.example/bucket',
-        key: 'uploads/spec.pdf',
-        fields: {
-          key: 'uploads/spec.pdf',
-          bucket: 'market-bucket',
-        },
-        expiresAt: '2026-11-03T00:00:00Z',
-      };
-      const mockAttachment = {
-        id: 'att-456',
-        key: 'uploads/spec.pdf',
-        url: 'https://cdn.example/spec.pdf',
-        fileName: 'spec.pdf',
-        mimeType: 'application/pdf',
-        sizeBytes: 9,
-      };
-
-      vi.spyOn(uploadsApi, 'presignUpload').mockResolvedValue(mockPresign);
-      vi.spyOn(uploadsApi, 'completeUpload').mockResolvedValue(mockAttachment);
-
-      const mockXHR = {
-        open: vi.fn(),
-        send: vi.fn(function (this: { onload?: () => void; status: number }) {
-          this.status = 204;
-          this.onload?.();
-        }),
-        setRequestHeader: vi.fn(),
-        abort: vi.fn(),
-        status: 204,
-        upload: { onprogress: null },
-      };
-
-      function MockXHR2() {
-        return mockXHR;
-      }
-
-      vi.stubGlobal('XMLHttpRequest', MockXHR2);
-
-      const result = await uploadFile(mockFile, 'LISTING_ATTACHMENT');
-      expect(mockXHR.open).toHaveBeenCalledWith('POST', mockPresign.url);
-      expect(result).toEqual(mockAttachment);
-    });
-
     it('supports cancellation via AbortSignal', async () => {
       const mockFile = new File(['data'], 'test.png', { type: 'image/png' });
       vi.spyOn(uploadsApi, 'presignUpload').mockResolvedValue({
-        uploadId: 'up-cancel',
-        url: 'https://s3.example/cancel',
-        key: 'key',
-        expiresAt: '2026-11-03T00:00:00Z',
+        upload: {
+          id: 'up-cancel',
+          key: 'key',
+          fileName: 'test.png',
+          mimeType: 'image/png',
+          sizeBytes: 4,
+          purpose: 'LISTING_IMAGE',
+          status: 'PENDING',
+          createdAt: new Date(),
+          completedAt: null,
+        },
+        uploadUrl: 'https://s3.example/cancel',
+        headers: {},
       });
 
       const abortController = new AbortController();
@@ -201,10 +172,19 @@ describe('Upload utilities', () => {
     it('rejects when HTTP status is not 2xx', async () => {
       const mockFile = new File(['data'], 'test.png', { type: 'image/png' });
       vi.spyOn(uploadsApi, 'presignUpload').mockResolvedValue({
-        uploadId: 'up-err',
-        url: 'https://s3.example/err',
-        key: 'key',
-        expiresAt: '2026-11-03T00:00:00Z',
+        upload: {
+          id: 'up-err',
+          key: 'key',
+          fileName: 'test.png',
+          mimeType: 'image/png',
+          sizeBytes: 4,
+          purpose: 'LISTING_IMAGE',
+          status: 'PENDING',
+          createdAt: new Date(),
+          completedAt: null,
+        },
+        uploadUrl: 'https://s3.example/err',
+        headers: {},
       });
 
       const mockXHR = {

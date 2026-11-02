@@ -30,8 +30,12 @@ describe('ListingForm component', () => {
     await user.click(publishBtn);
 
     await waitFor(() => {
-      expect(screen.getByText('Title must be at least 5 characters')).toBeInTheDocument();
-      expect(screen.getByText('Description must be at least 20 characters')).toBeInTheDocument();
+      expect(
+        screen.getByText(/expected string to have >=5 characters|at least 5 characters/i),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(/expected string to have >=20 characters|at least 20 characters/i),
+      ).toBeInTheDocument();
       expect(screen.getByText('Please select a category')).toBeInTheDocument();
       expect(screen.getByText('Please enter a valid price')).toBeInTheDocument();
     });
@@ -152,8 +156,8 @@ describe('ListingForm component', () => {
 
     const payload = onSubmit.mock.calls[0]![0];
     expect(payload.status).toBe('DRAFT');
-    expect(payload.priceMinCents).toBeNull();
-    expect(payload.priceMaxCents).toBeNull();
+    expect(payload.priceMinCents).toBeUndefined();
+    expect(payload.priceMaxCents).toBeUndefined();
   });
 
   it('maps server VALIDATION_ERROR details to form field errors', async () => {

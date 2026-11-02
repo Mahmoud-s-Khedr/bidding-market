@@ -1,70 +1,85 @@
-export type UserRole = 'USER' | 'ADMIN';
+import type {
+  Attachment as SharedAttachment,
+  Category as SharedCategory,
+  ListingDetail as SharedListingDetail,
+  ListingFilters as SharedListingFilters,
+  ListingSort as SharedListingSort,
+  ListingSummary as SharedListingSummary,
+  PrivateUser,
+  PublicUser as SharedPublicUser,
+  Role,
+  UserStatus,
+  ListingKind,
+  ListingStatus,
+  PriceType,
+  UploadPurpose,
+  AuthResponse as SharedAuthResponse,
+  ListingCreateInput,
+  ListingUpdateInput,
+  PaginatedResponse as SharedPaginatedResponse,
+  ApiError,
+  ReviewItem as SharedReviewItem,
+} from '@market/shared';
 
-export interface User {
-  id: string;
-  email: string;
-  displayName: string;
-  role: UserRole;
+export type UserRole = Role;
+export type { Role, UserStatus, ListingKind, ListingStatus, PriceType, UploadPurpose };
+
+export type PublicUser = Omit<
+  SharedPublicUser,
+  | 'createdAt'
+  | 'avatarUrl'
+  | 'bio'
+  | 'location'
+  | 'companyName'
+  | 'ratingAvg'
+  | 'ratingCount'
+  | 'completedCount'
+> & {
+  createdAt: Date | string;
   avatarUrl?: string | null;
   bio?: string | null;
   location?: string | null;
-  isBusiness: boolean;
   companyName?: string | null;
   ratingAvg?: number;
   ratingCount?: number;
   completedCount?: number;
-  createdAt: string;
-}
+};
 
-export interface AuthResponse {
-  accessToken: string;
+export type PrivateUserType = PrivateUser;
+export type User = Omit<
+  PrivateUser,
+  | 'createdAt'
+  | 'avatarUrl'
+  | 'bio'
+  | 'location'
+  | 'companyName'
+  | 'ratingAvg'
+  | 'ratingCount'
+  | 'completedCount'
+> & {
+  createdAt: Date | string;
+  avatarUrl?: string | null;
+  bio?: string | null;
+  location?: string | null;
+  companyName?: string | null;
+  ratingAvg?: number;
+  ratingCount?: number;
+  completedCount?: number;
+};
+
+export type AuthResponse = Omit<SharedAuthResponse, 'user'> & {
   user: User;
-}
+};
 
-export type ApiErrorCode =
-  | 'VALIDATION_ERROR'
-  | 'UNAUTHORIZED'
-  | 'FORBIDDEN'
-  | 'NOT_FOUND'
-  | 'CONFLICT'
-  | 'RATE_LIMITED'
-  | 'INTERNAL'
-  | (string & {});
+export type ApiErrorCode = ApiError['error']['code'] | (string & {});
 
-export interface ApiErrorPayload {
-  error: {
-    code: ApiErrorCode;
-    message: string;
-    details?: unknown;
-  };
-}
+export type ApiErrorPayload = ApiError;
 
-export interface PaginatedResponse<T> {
-  items: T[];
-  nextCursor: string | null;
-}
+export type PaginatedResponse<T> = SharedPaginatedResponse<T>;
 
-export interface PublicUser {
-  id: string;
-  displayName: string;
-  avatarUrl?: string | null;
-  bio?: string | null;
-  location?: string | null;
-  isBusiness: boolean;
-  companyName?: string | null;
-  ratingAvg?: number;
-  ratingCount?: number;
-  completedCount?: number;
-  createdAt: string;
-}
-
-export type UploadPurpose =
-  | 'LISTING_IMAGE'
-  | 'LISTING_ATTACHMENT'
-  | 'BID_ATTACHMENT'
-  | 'MESSAGE_ATTACHMENT'
-  | 'DELIVERABLE'
-  | 'AVATAR';
+export type Attachment = SharedAttachment & {
+  url?: string;
+};
 
 export interface PresignUploadRequest {
   purpose: UploadPurpose;
@@ -73,119 +88,90 @@ export interface PresignUploadRequest {
   sizeBytes: number;
 }
 
-export interface PresignUploadResponse {
-  uploadId: string;
-  url: string;
-  fields?: Record<string, string>;
+export type PresignUploadResponse = {
+  upload: {
+    id: string;
+    key: string;
+    fileName: string;
+    mimeType: string;
+    sizeBytes: number;
+    purpose: UploadPurpose;
+    status: 'PENDING' | 'READY' | 'FAILED';
+    createdAt: Date | string;
+    completedAt: Date | string | null;
+  };
+  uploadUrl: string;
   headers?: Record<string, string>;
-  key: string;
-  expiresAt: string;
-}
-
-export interface Attachment {
-  id: string;
-  key: string;
-  url: string;
-  fileName: string;
-  mimeType: string;
-  sizeBytes: number;
-}
+};
 
 export interface PresignedGetUrlResponse {
   url: string;
   expiresAt?: string;
 }
 
-export interface Category {
-  id: string;
-  name: string;
-  slug: string;
-  parentId: string | null;
-  children?: Category[];
-  listingCount?: number;
-  description?: string | null;
-}
+export type Category = SharedCategory;
 
-export type ListingKind = 'REQUEST' | 'OFFER';
-export type ListingStatus = 'DRAFT' | 'OPEN' | 'IN_PROGRESS' | 'COMPLETED' | 'CLOSED' | 'REMOVED';
-export type PriceType = 'FIXED' | 'RANGE' | 'NEGOTIABLE';
-export type ListingSort = 'newest' | 'price_asc' | 'price_desc' | 'ending_soon' | 'most_bids';
+export type ListingFilters = SharedListingFilters;
+export type ListingSort = SharedListingSort;
 
-export interface ListingFilters {
-  q?: string;
-  kind?: ListingKind;
-  categoryId?: string;
-  categorySlug?: string;
-  minPrice?: number;
-  maxPrice?: number;
-  currency?: string;
-  location?: string;
-  status?: ListingStatus;
-  ownerId?: string;
-  sort?: ListingSort;
-  cursor?: string;
-  limit?: number;
-}
-
-export interface ListingSummary {
-  id: string;
-  title: string;
-  slug?: string;
-  description?: string;
-  kind: ListingKind;
-  status: ListingStatus;
-  priceType: PriceType;
+export type ListingSummary = Omit<
+  SharedListingSummary,
+  'createdAt' | 'expiresAt' | 'owner' | 'location' | 'priceMinCents' | 'priceMaxCents'
+> & {
+  createdAt: Date | string;
+  expiresAt?: Date | string | null;
+  location?: string | null;
   priceMinCents?: number | null;
   priceMaxCents?: number | null;
-  currency: string;
-  deliveryDays?: number | null;
-  location?: string | null;
-  tags: string[];
-  categoryId: string;
-  category: {
+  owner: PublicUser;
+  category?: {
     id: string;
     name: string;
     slug: string;
   };
-  ownerId: string;
-  owner: PublicUser;
-  images: Attachment[];
-  bidCount: number;
-  expiresAt?: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
+  images?: Attachment[];
+  tags?: string[];
+  description?: string;
+  deliveryDays?: number | null;
+  updatedAt?: Date | string;
+};
 
-export interface ListingDetail extends ListingSummary {
-  description: string;
-  attachments: Attachment[];
-  myBid?: unknown;
-}
-
-export interface CreateListingRequest {
-  kind: ListingKind;
-  title: string;
-  description: string;
-  categoryId: string;
-  priceType: PriceType;
+export type ListingDetail = Omit<
+  SharedListingDetail,
+  | 'createdAt'
+  | 'updatedAt'
+  | 'expiresAt'
+  | 'owner'
+  | 'images'
+  | 'attachments'
+  | 'location'
+  | 'priceMinCents'
+  | 'priceMaxCents'
+  | 'deliveryDays'
+> & {
+  createdAt: Date | string;
+  updatedAt: Date | string;
+  expiresAt?: Date | string | null;
+  location?: string | null;
   priceMinCents?: number | null;
   priceMaxCents?: number | null;
-  currency?: string;
   deliveryDays?: number | null;
-  location?: string | null;
-  tags?: string[];
-  imageIds?: string[];
-  attachmentIds?: string[];
-  expiresAt?: string | null;
-  status?: 'DRAFT' | 'OPEN';
-}
+  owner: PublicUser;
+  images: Attachment[];
+  attachments: Attachment[];
+  category?: {
+    id: string;
+    name: string;
+    slug: string;
+  };
+  myBid?: unknown;
+};
 
-export type UpdateListingRequest = Partial<CreateListingRequest>;
+export type CreateListingRequest = ListingCreateInput;
+export type UpdateListingRequest = ListingUpdateInput;
 
-export interface ReviewItem {
-  id: string;
-  rating: number;
+export type ReviewItem = Omit<SharedReviewItem, 'createdAt' | 'author' | 'comment'> & {
+  createdAt: Date | string;
   comment?: string | null;
-  createdAt: string;
   author: PublicUser;
-}
+};

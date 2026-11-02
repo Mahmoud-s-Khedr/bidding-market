@@ -137,7 +137,7 @@ describe('Listing Validation Schemas', () => {
       attachmentIds: [],
       status: 'OPEN',
     });
-    expect(negPayload.priceMinCents).toBeNull();
-    expect(negPayload.priceMaxCents).toBeNull();
+    expect(negPayload.priceMinCents).toBeUndefined();
+    expect(negPayload.priceMaxCents).toBeUndefined();
   });
 });

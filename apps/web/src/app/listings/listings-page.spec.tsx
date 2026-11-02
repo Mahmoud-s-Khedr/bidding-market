@@ -44,7 +44,6 @@ describe('Listings Browse Page', () => {
     tags: ['react'],
     categoryId: 'cat-1',
     category: { id: 'cat-1', name: 'Tech', slug: 'tech' },
-    ownerId: 'u-1',
     owner: {
       id: 'u-1',
       displayName: 'Alice',

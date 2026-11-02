@@ -1,79 +1,25 @@
 import { completeUpload, presignUpload } from './api/uploads';
-import type { Attachment, UploadPurpose } from './api/types';
+import type { Attachment } from './api/types';
+import { uploadLimits, type UploadPurpose } from '@market/shared';
 
 export interface FileValidationResult {
   valid: boolean;
   error?: string;
 }
 
-export const UPLOAD_LIMITS = {
-  IMAGE_MAX_BYTES: 10 * 1024 * 1024, // 10 MB
-  DOC_MAX_BYTES: 25 * 1024 * 1024, // 25 MB
-  VOICE_MAX_BYTES: 10 * 1024 * 1024, // 10 MB
-};
-
-export const ALLOWED_MIME_TYPES: Record<UploadPurpose, string[]> = {
-  LISTING_IMAGE: ['image/jpeg', 'image/png', 'image/webp', 'image/gif'],
-  AVATAR: ['image/jpeg', 'image/png', 'image/webp', 'image/gif'],
-  LISTING_ATTACHMENT: [
-    'application/pdf',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    'application/msword',
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    'application/vnd.ms-excel',
-    'text/plain',
-    'application/zip',
-    'application/x-zip-compressed',
-  ],
-  BID_ATTACHMENT: [
-    'application/pdf',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    'application/msword',
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    'application/vnd.ms-excel',
-    'text/plain',
-    'application/zip',
-    'application/x-zip-compressed',
-  ],
-  DELIVERABLE: [
-    'application/pdf',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    'application/msword',
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    'application/vnd.ms-excel',
-    'text/plain',
-    'application/zip',
-    'application/x-zip-compressed',
-  ],
-  MESSAGE_ATTACHMENT: [
-    'image/jpeg',
-    'image/png',
-    'image/webp',
-    'image/gif',
-    'application/pdf',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    'application/msword',
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    'application/vnd.ms-excel',
-    'text/plain',
-    'application/zip',
-    'application/x-zip-compressed',
-    'audio/webm',
-    'audio/ogg',
-    'audio/mp4',
-    'audio/mpeg',
-  ],
-};
-
 export function validateFileForPurpose(file: File, purpose: UploadPurpose): FileValidationResult {
-  const allowedMimes = ALLOWED_MIME_TYPES[purpose];
+  const config = uploadLimits[purpose];
+  if (!config) {
+    return { valid: false, error: `Invalid upload purpose: ${purpose}` };
+  }
+
+  const allowedMimes = config.mimeTypes as readonly string[];
+  const maxBytes = config.maxSizeBytes;
 
   // Extension fallback check if MIME type is generic or empty
   const fileExt = `.${file.name.split('.').pop()?.toLowerCase() || ''}`;
   const validExtensionForImage = ['.jpg', '.jpeg', '.png', '.webp', '.gif'].includes(fileExt);
-  const validExtensionForDoc = ['.pdf', '.docx', '.doc', '.xlsx', '.xls', '.txt', '.zip'].includes(
-    fileExt,
-  );
+  const validExtensionForDoc = ['.pdf', '.docx', '.xlsx', '.txt', '.zip'].includes(fileExt);
 
   let isMimeValid = allowedMimes.includes(file.type);
   if (!isMimeValid && !file.type) {
@@ -92,14 +38,9 @@ export function validateFileForPurpose(file: File, purpose: UploadPurpose): File
     };
   }
 
-  let maxBytes = UPLOAD_LIMITS.DOC_MAX_BYTES;
-  if (purpose === 'LISTING_IMAGE' || purpose === 'AVATAR') {
-    maxBytes = UPLOAD_LIMITS.IMAGE_MAX_BYTES;
-  }
-
   if (file.size > maxBytes) {
-    const maxMb = Math.round(maxBytes / (1024 * 1024));
-    const fileMb = (file.size / (1024 * 1024)).toFixed(1);
+    const maxMb = Math.round(maxBytes / 1_000_000);
+    const fileMb = (file.size / 1_000_000).toFixed(1);
     return {
       valid: false,
       error: `File size (${fileMb}MB) exceeds the maximum limit of ${maxMb}MB.`,
@@ -130,6 +71,9 @@ export async function uploadFile(
     mimeType: file.type || 'application/octet-stream',
     sizeBytes: file.size,
   });
+
+  const uploadUrl = presign.uploadUrl;
+  const uploadId = presign.upload.id;
 
   await new Promise<void>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -183,27 +127,17 @@ export async function uploadFile(
       reject(new DOMException('Upload aborted', 'AbortError'));
     };
 
-    if (presign.fields && Object.keys(presign.fields).length > 0) {
-      xhr.open('POST', presign.url);
-      const formData = new FormData();
-      for (const [key, value] of Object.entries(presign.fields)) {
-        formData.append(key, value);
+    xhr.open('PUT', uploadUrl);
+    if (presign.headers) {
+      for (const [key, value] of Object.entries(presign.headers)) {
+        xhr.setRequestHeader(key, value);
       }
-      formData.append('file', file);
-      xhr.send(formData);
-    } else {
-      xhr.open('PUT', presign.url);
-      if (presign.headers) {
-        for (const [key, value] of Object.entries(presign.headers)) {
-          xhr.setRequestHeader(key, value);
-        }
-      }
-      if (!presign.headers || !presign.headers['Content-Type']) {
-        xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
-      }
-      xhr.send(file);
     }
+    if (!presign.headers || !presign.headers['Content-Type']) {
+      xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+    }
+    xhr.send(file);
   });
 
-  return completeUpload(presign.uploadId);
+  return completeUpload(uploadId);
 }
