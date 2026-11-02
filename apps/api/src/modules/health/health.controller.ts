@@ -1,12 +1,13 @@
-import { Controller, Get, ServiceUnavailableException } from '@nestjs/common';
+import { Controller, Get, Inject, ServiceUnavailableException } from '@nestjs/common';
 import Redis from 'ioredis';
 import { Public } from '../../common/auth.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
+import { REDIS } from '../../redis/redis.module.js';
 @Controller('health')
 export class HealthController {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly redis: Redis,
+    @Inject(REDIS) private readonly redis: Redis,
   ) {}
   @Get() @Public() async health() {
     try {

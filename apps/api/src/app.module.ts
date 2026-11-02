@@ -4,9 +4,13 @@ import { AuthModule } from './modules/auth/auth.module.js';
 import { HealthModule } from './modules/health/health.module.js';
 import { UsersModule } from './modules/users/users.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
+import { RedisModule } from './redis/redis.module.js';
+import { StorageModule } from './storage/storage.module.js';
 @Module({
   imports: [
     PrismaModule,
+    RedisModule,
+    StorageModule,
     ThrottlerModule.forRoot({ throttlers: [{ ttl: 60000, limit: 100 }] }),
     AuthModule,
     UsersModule,

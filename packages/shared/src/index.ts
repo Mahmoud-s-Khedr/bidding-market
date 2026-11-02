@@ -177,6 +177,94 @@ export const uploadPresignSchema = z.object({
   mimeType: z.string().min(1).max(100),
   sizeBytes: z.number().int().positive(),
 });
+export const uploadLimits = {
+  LISTING_IMAGE: {
+    mimeTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/gif'],
+    maxSizeBytes: 10_000_000,
+  },
+  LISTING_ATTACHMENT: {
+    mimeTypes: [
+      'application/pdf',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'text/plain',
+      'application/zip',
+    ],
+    maxSizeBytes: 25_000_000,
+  },
+  BID_ATTACHMENT: {
+    mimeTypes: ['application/pdf', 'text/plain', 'application/zip'],
+    maxSizeBytes: 25_000_000,
+  },
+  MESSAGE_ATTACHMENT: {
+    mimeTypes: [
+      'image/jpeg',
+      'image/png',
+      'image/webp',
+      'application/pdf',
+      'text/plain',
+      'audio/webm',
+      'audio/ogg',
+      'audio/mpeg',
+      'audio/mp4',
+    ],
+    maxSizeBytes: 25_000_000,
+  },
+  DELIVERABLE: {
+    mimeTypes: ['application/pdf', 'text/plain', 'application/zip'],
+    maxSizeBytes: 25_000_000,
+  },
+  AVATAR: {
+    mimeTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/gif'],
+    maxSizeBytes: 10_000_000,
+  },
+} as const;
+export const bidUpdateSchema = bidCreateSchema.partial();
+export const bidCounterSchema = z.object({
+  amountCents: z.number().int().positive(),
+  deliveryDays: z.number().int().positive(),
+  message: z.string().max(5000),
+});
+export const milestoneSchema = z.object({
+  title: z.string().min(1).max(200),
+  amountCents: z.number().int().nonnegative().optional(),
+  dueDate: z.iso.datetime().optional(),
+  status: MilestoneStatus.optional(),
+});
+export const deliverableSchema = z.object({
+  note: z.string().max(5000),
+  attachmentIds: z.array(z.string()).min(1),
+});
+export const revisionRequestSchema = z.object({ note: z.string().min(1).max(5000) });
+export const notificationQuerySchema = paginationSchema.extend({
+  unread: z.coerce.boolean().optional(),
+});
+export const adminUsersQuerySchema = paginationSchema.extend({
+  q: z.string().optional(),
+  role: Role.optional(),
+  status: UserStatus.optional(),
+});
+export const adminUserUpdateSchema = z.object({
+  role: Role.optional(),
+  status: UserStatus.optional(),
+  reason: z.string().max(2000).optional(),
+});
+export const adminResolveReportSchema = z.object({
+  action: z.enum(['DISMISS', 'REMOVE_CONTENT', 'SUSPEND_USER']),
+  note: z.string().min(1).max(2000),
+});
+export const conversationCreateSchema = z.object({
+  recipientId: z.string(),
+  listingId: z.string().optional(),
+  bidId: z.string().optional(),
+});
+export const readSchema = z.object({ lastMessageId: z.string() });
+export const agreementCancelSchema = z.object({ reason: z.string().min(1).max(2000) });
+export const wsPayloadSchemas = {
+  typing: z.object({ conversationId: z.string(), isTyping: z.boolean() }),
+  conversationJoin: z.object({ conversationId: z.string() }),
+  read: z.object({ conversationId: z.string(), lastMessageId: z.string() }),
+};
 export const categorySchema = z.object({
   name: z.string().trim().min(1).max(80),
   slug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),

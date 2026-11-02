@@ -1,0 +1,50 @@
+import { Injectable, OnModuleInit } from '@nestjs/common';
+import {
+  CreateBucketCommand,
+  DeleteObjectCommand,
+  GetObjectCommand,
+  HeadObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+@Injectable()
+export class StorageService implements OnModuleInit {
+  private readonly bucket = process.env.S3_BUCKET ?? '';
+  private readonly client = new S3Client({
+    endpoint: process.env.S3_ENDPOINT,
+    region: process.env.S3_REGION,
+    forcePathStyle: true,
+    requestChecksumCalculation: 'WHEN_REQUIRED',
+    responseChecksumValidation: 'WHEN_REQUIRED',
+    credentials: {
+      accessKeyId: process.env.S3_ACCESS_KEY ?? '',
+      secretAccessKey: process.env.S3_SECRET_KEY ?? '',
+    },
+  });
+  async onModuleInit(): Promise<void> {
+    try {
+      await this.client.send(new CreateBucketCommand({ Bucket: this.bucket }));
+    } catch (error: unknown) {
+      if (!(error instanceof Error) || !error.name.includes('BucketAlready')) throw error;
+    }
+  }
+  presignPut(key: string, mimeType: string, _sizeBytes: number): Promise<string> {
+    return getSignedUrl(
+      this.client,
+      new PutObjectCommand({ Bucket: this.bucket, Key: key, ContentType: mimeType }),
+      { expiresIn: 300 },
+    );
+  }
+  presignGet(key: string): Promise<string> {
+    return getSignedUrl(this.client, new GetObjectCommand({ Bucket: this.bucket, Key: key }), {
+      expiresIn: 300,
+    });
+  }
+  headObject(key: string) {
+    return this.client.send(new HeadObjectCommand({ Bucket: this.bucket, Key: key }));
+  }
+  deleteObject(key: string) {
+    return this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
+  }
+}
