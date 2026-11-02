@@ -5,6 +5,7 @@
 # usage: scripts/ci-local.sh [--with-db]
 #   --with-db  also run db:check, migrations, integration tests (needs `docker compose up -d`)
 #
+# Local infra is expected under compose project "bidding-market" (override with COMPOSE_PROJECT_NAME).
 # DB-backed steps use a throwaway database `market_ci_<pid>` on the local compose Postgres.
 set -euo pipefail
 ROOT=$(git rev-parse --show-toplevel)
@@ -29,7 +30,7 @@ step "audit";                       pnpm audit --prod --audit-level moderate && 
 
 if [ "$WITH_DB" = "--with-db" ]; then
   DB="market_ci_$$"
-  PSQL=(docker compose -f "$ROOT/docker-compose.yml" exec -T postgres psql -U market -q)
+  PSQL=(docker compose -p "${COMPOSE_PROJECT_NAME:-bidding-market}" -f "$ROOT/docker-compose.yml" exec -T postgres psql -U market -q)
   "${PSQL[@]}" -c "CREATE DATABASE ${DB};" -c "CREATE DATABASE ${DB}_shadow;"
   trap '"${PSQL[@]}" -c "DROP DATABASE IF EXISTS ${DB} WITH (FORCE);" -c "DROP DATABASE IF EXISTS ${DB}_shadow WITH (FORCE);" >/dev/null 2>&1 || true; cleanup' EXIT
   export DATABASE_URL="postgresql://market:market@localhost:5442/${DB}?schema=public"
