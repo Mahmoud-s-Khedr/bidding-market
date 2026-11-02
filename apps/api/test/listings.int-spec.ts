@@ -461,6 +461,66 @@ describe('Listings endpoints', () => {
         .send({ imageIds: [upload.id] })
         .expect(409);
     });
+
+    it('rejects the same upload being used as both image and attachment, including on PATCH against existing rows', async () => {
+      const upImg = await prisma.upload.create({
+        data: {
+          uploaderId: user1Id,
+          purpose: 'LISTING_IMAGE',
+          status: 'READY',
+          key: `listing_image/${user1Id}/up-img/img.jpg`,
+          fileName: 'img.jpg',
+          mimeType: 'image/jpeg',
+          sizeBytes: 100,
+        },
+      });
+      const upAtt = await prisma.upload.create({
+        data: {
+          uploaderId: user1Id,
+          purpose: 'LISTING_ATTACHMENT',
+          status: 'READY',
+          key: `listing_attachment/${user1Id}/up-att/att.pdf`,
+          fileName: 'att.pdf',
+          mimeType: 'application/pdf',
+          sizeBytes: 100,
+        },
+      });
+
+      const listing = await prisma.listing.create({
+        data: {
+          ownerId: user1Id,
+          categoryId,
+          kind: 'REQUEST',
+          status: 'OPEN',
+          title: 'Listing with image and attachment',
+          description: 'A sufficiently long description for testing',
+          priceType: 'NEGOTIABLE',
+          images: { create: { uploadId: upImg.id, position: 0 } },
+          attachments: { create: { uploadId: upAtt.id } },
+        },
+      });
+
+      // 1. PATCH with imageIds containing the existing attachment upload -> 400
+      await request(server)
+        .patch(`/api/v1/listings/${listing.id}`)
+        .set('Authorization', `Bearer ${user1Token}`)
+        .send({ imageIds: [upAtt.id] })
+        .expect(400);
+
+      // 2. PATCH with attachmentIds containing the existing image upload -> 400
+      await request(server)
+        .patch(`/api/v1/listings/${listing.id}`)
+        .set('Authorization', `Bearer ${user1Token}`)
+        .send({ attachmentIds: [upImg.id] })
+        .expect(400);
+
+      // 3. PATCH with same upload in both imageIds and attachmentIds -> 400
+      await request(server)
+        .patch(`/api/v1/listings/${listing.id}`)
+        .set('Authorization', `Bearer ${user1Token}`)
+        .send({ imageIds: [upImg.id], attachmentIds: [upImg.id] })
+        .expect(400);
+    });
   });
 
   describe('POST /api/v1/listings/:id/close', () => {
@@ -1167,6 +1227,18 @@ describe('Listings endpoints', () => {
       await request(server)
         .get(`/api/v1/listings?sort=price_asc&cursor=${cursorForNewest}`)
         .expect(400);
+
+      // 7. Int overflow numeric cursor values capped at 2147483647 -> 400
+      const overflowValues = [99999999999, 9007199254740991];
+      const numericSorts = ['price_asc', 'price_desc', 'most_bids'] as const;
+      for (const sort of numericSorts) {
+        for (const val of overflowValues) {
+          const cursor = Buffer.from(JSON.stringify({ s: sort, v: val, id: 'x' })).toString(
+            'base64url',
+          );
+          await request(server).get(`/api/v1/listings?sort=${sort}&cursor=${cursor}`).expect(400);
+        }
+      }
     });
 
     it('paginates stably across >= 2 pages for all sorts with ties without skips or duplicates', async () => {
@@ -1419,6 +1491,55 @@ describe('Listings endpoints', () => {
       expect(returnedIds).toContain(l1.id);
       expect(returnedIds).toContain(l2.id);
       expect(returnedIds).toContain(l3.id);
+    });
+
+    it('normalizes sort=relevance without q to newest, walks all pages, and terminates', async () => {
+      // Create 5 listings with distinct createdAt
+      const createdIds: string[] = [];
+      for (let i = 0; i < 5; i++) {
+        const l = await prisma.listing.create({
+          data: {
+            ownerId: user1Id,
+            categoryId,
+            kind: 'REQUEST',
+            status: 'OPEN',
+            title: `Listing Walk ${i}`,
+            description:
+              'A sufficiently long description for testing the pagination walk without q',
+            priceType: 'NEGOTIABLE',
+            createdAt: new Date(Date.now() - (i + 1) * 10000),
+          },
+        });
+        createdIds.push(l.id);
+      }
+
+      const collectedIds: string[] = [];
+      let cursor: string | null = null;
+      let pageCount = 0;
+      const maxPages = 10;
+
+      do {
+        pageCount++;
+        expect(pageCount).toBeLessThanOrEqual(maxPages);
+
+        const url: string = cursor
+          ? `/api/v1/listings?sort=relevance&limit=2&cursor=${cursor}`
+          : '/api/v1/listings?sort=relevance&limit=2';
+
+        const res = await request(server).get(url).expect(200);
+        const items = res.body.items as Array<{ id: string }>;
+        for (const item of items) {
+          collectedIds.push(item.id);
+        }
+        cursor = res.body.nextCursor;
+      } while (cursor !== null);
+
+      expect(pageCount).toBe(3); // 5 items with limit=2 -> 3 pages
+      expect(collectedIds).toHaveLength(5);
+      expect(new Set(collectedIds).size).toBe(5);
+      for (const id of createdIds) {
+        expect(collectedIds).toContain(id);
+      }
     });
   });
 });

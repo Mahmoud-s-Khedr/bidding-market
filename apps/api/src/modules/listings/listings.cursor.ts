@@ -8,6 +8,8 @@ export interface DecodedCursor {
   id: string;
 }
 
+export const MAX_INT4 = 2147483647;
+
 const ISO_DATE_REGEX = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?(Z|[+-]\d{2}:?\d{2})?$/;
 
 export function isValidIsoDate(value: unknown): value is string {
@@ -75,14 +77,24 @@ export function decodeCursor(cursor: string, expectedSort: ListingSort): Decoded
     case 'price_desc': {
       if (
         v !== null &&
-        (typeof v !== 'number' || !Number.isInteger(v) || !Number.isFinite(v) || v < 0)
+        (typeof v !== 'number' ||
+          !Number.isInteger(v) ||
+          !Number.isFinite(v) ||
+          v < 0 ||
+          v > MAX_INT4)
       ) {
         throw new BadRequestException('Invalid pagination cursor');
       }
       return { sortValue: v ?? null, id };
     }
     case 'most_bids': {
-      if (typeof v !== 'number' || !Number.isInteger(v) || !Number.isFinite(v) || v < 0) {
+      if (
+        typeof v !== 'number' ||
+        !Number.isInteger(v) ||
+        !Number.isFinite(v) ||
+        v < 0 ||
+        v > MAX_INT4
+      ) {
         throw new BadRequestException('Invalid pagination cursor');
       }
       return { sortValue: v, id };

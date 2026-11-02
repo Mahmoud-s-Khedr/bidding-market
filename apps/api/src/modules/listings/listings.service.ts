@@ -171,52 +171,65 @@ export class ListingsService {
       await this.validateUploads(userId, input.attachmentIds, 'LISTING_ATTACHMENT');
     }
 
-    const listing = await this.prisma.$transaction(async (tx) => {
-      const created = await tx.listing.create({
-        data: {
-          ownerId: userId,
-          categoryId: input.categoryId,
-          kind: input.kind,
-          status: input.status ?? 'OPEN',
-          title: input.title,
-          description: input.description,
-          priceType: input.priceType,
-          priceMinCents: input.priceMinCents ?? null,
-          priceMaxCents: input.priceMaxCents ?? null,
-          currency: input.currency,
-          deliveryDays: input.deliveryDays ?? null,
-          location: input.location ?? null,
-          tags: input.tags ?? [],
-          expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
-        },
+    try {
+      const listing = await this.prisma.$transaction(async (tx) => {
+        const created = await tx.listing.create({
+          data: {
+            ownerId: userId,
+            categoryId: input.categoryId,
+            kind: input.kind,
+            status: input.status ?? 'OPEN',
+            title: input.title,
+            description: input.description,
+            priceType: input.priceType,
+            priceMinCents: input.priceMinCents ?? null,
+            priceMaxCents: input.priceMaxCents ?? null,
+            currency: input.currency,
+            deliveryDays: input.deliveryDays ?? null,
+            location: input.location ?? null,
+            tags: input.tags ?? [],
+            expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
+          },
+        });
+
+        if (input.imageIds && input.imageIds.length > 0) {
+          for (const [position, uploadId] of input.imageIds.entries()) {
+            await tx.listingImage.create({
+              data: { listingId: created.id, uploadId, position },
+            });
+          }
+        }
+
+        if (input.attachmentIds && input.attachmentIds.length > 0) {
+          for (const uploadId of input.attachmentIds) {
+            await tx.listingAttachment.create({
+              data: { listingId: created.id, uploadId },
+            });
+          }
+        }
+
+        return created;
       });
 
-      if (input.imageIds && input.imageIds.length > 0) {
-        for (const [position, uploadId] of input.imageIds.entries()) {
-          await tx.listingImage.create({
-            data: { listingId: created.id, uploadId, position },
-          });
-        }
+      await this.categoriesService.invalidateCache();
+
+      return this.getById(listing.id, { id: userId, role: 'USER' });
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        throw new ConflictException('Upload is already attached to another listing');
       }
-
-      if (input.attachmentIds && input.attachmentIds.length > 0) {
-        for (const uploadId of input.attachmentIds) {
-          await tx.listingAttachment.create({
-            data: { listingId: created.id, uploadId },
-          });
-        }
-      }
-
-      return created;
-    });
-
-    await this.categoriesService.invalidateCache();
-
-    return this.getById(listing.id, { id: userId, role: 'USER' });
+      throw err;
+    }
   }
 
   async update(user: AuthUser, id: string, input: ListingUpdateInput): Promise<ListingDetail> {
-    const listing = await this.prisma.listing.findUnique({ where: { id } });
+    const listing = await this.prisma.listing.findUnique({
+      where: { id },
+      include: {
+        images: { select: { uploadId: true } },
+        attachments: { select: { uploadId: true } },
+      },
+    });
     if (!listing) {
       throw new NotFoundException('Listing not found');
     }
@@ -258,11 +271,18 @@ export class ListingsService {
 
     validatePriceRules(effectivePriceType, effectiveMin, effectiveMax);
 
-    if (input.imageIds && input.attachmentIds) {
-      const overlap = input.imageIds.filter((x) => input.attachmentIds!.includes(x));
-      if (overlap.length > 0) {
-        throw new BadRequestException('Upload cannot be both an image and an attachment');
-      }
+    const effectiveImageIds =
+      input.imageIds !== undefined
+        ? input.imageIds
+        : (listing.images?.map((img) => img.uploadId) ?? []);
+    const effectiveAttachmentIds =
+      input.attachmentIds !== undefined
+        ? input.attachmentIds
+        : (listing.attachments?.map((att) => att.uploadId) ?? []);
+
+    const overlap = effectiveImageIds.filter((x) => effectiveAttachmentIds.includes(x));
+    if (overlap.length > 0) {
+      throw new BadRequestException('Upload cannot be both an image and an attachment');
     }
 
     const targetOwnerId = listing.ownerId;
@@ -273,45 +293,52 @@ export class ListingsService {
       await this.validateUploads(targetOwnerId, input.attachmentIds, 'LISTING_ATTACHMENT', id);
     }
 
-    await this.prisma.$transaction(async (tx) => {
-      if (input.imageIds !== undefined) {
-        await tx.listingImage.deleteMany({ where: { listingId: id } });
-        for (const [position, uploadId] of input.imageIds.entries()) {
-          await tx.listingImage.create({
-            data: { listingId: id, uploadId, position },
-          });
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        if (input.imageIds !== undefined) {
+          await tx.listingImage.deleteMany({ where: { listingId: id } });
+          for (const [position, uploadId] of input.imageIds.entries()) {
+            await tx.listingImage.create({
+              data: { listingId: id, uploadId, position },
+            });
+          }
         }
-      }
-      if (input.attachmentIds !== undefined) {
-        await tx.listingAttachment.deleteMany({ where: { listingId: id } });
-        for (const uploadId of input.attachmentIds) {
-          await tx.listingAttachment.create({
-            data: { listingId: id, uploadId },
-          });
+        if (input.attachmentIds !== undefined) {
+          await tx.listingAttachment.deleteMany({ where: { listingId: id } });
+          for (const uploadId of input.attachmentIds) {
+            await tx.listingAttachment.create({
+              data: { listingId: id, uploadId },
+            });
+          }
         }
-      }
 
-      await tx.listing.update({
-        where: { id },
-        data: {
-          ...(input.kind !== undefined && { kind: input.kind }),
-          ...(input.title !== undefined && { title: input.title }),
-          ...(input.description !== undefined && { description: input.description }),
-          ...(input.categoryId !== undefined && { categoryId: input.categoryId }),
-          ...(input.priceType !== undefined && { priceType: input.priceType }),
-          ...(input.priceMinCents !== undefined && { priceMinCents: input.priceMinCents }),
-          ...(input.priceMaxCents !== undefined && { priceMaxCents: input.priceMaxCents }),
-          ...(input.currency !== undefined && { currency: input.currency }),
-          ...(input.deliveryDays !== undefined && { deliveryDays: input.deliveryDays }),
-          ...(input.location !== undefined && { location: input.location }),
-          ...(input.tags !== undefined && { tags: input.tags }),
-          ...(input.expiresAt !== undefined && {
-            expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
-          }),
-          ...(input.status !== undefined && { status: input.status }),
-        },
+        await tx.listing.update({
+          where: { id },
+          data: {
+            ...(input.kind !== undefined && { kind: input.kind }),
+            ...(input.title !== undefined && { title: input.title }),
+            ...(input.description !== undefined && { description: input.description }),
+            ...(input.categoryId !== undefined && { categoryId: input.categoryId }),
+            ...(input.priceType !== undefined && { priceType: input.priceType }),
+            ...(input.priceMinCents !== undefined && { priceMinCents: input.priceMinCents }),
+            ...(input.priceMaxCents !== undefined && { priceMaxCents: input.priceMaxCents }),
+            ...(input.currency !== undefined && { currency: input.currency }),
+            ...(input.deliveryDays !== undefined && { deliveryDays: input.deliveryDays }),
+            ...(input.location !== undefined && { location: input.location }),
+            ...(input.tags !== undefined && { tags: input.tags }),
+            ...(input.expiresAt !== undefined && {
+              expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
+            }),
+            ...(input.status !== undefined && { status: input.status }),
+          },
+        });
       });
-    });
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        throw new ConflictException('Upload is already attached to another listing');
+      }
+      throw err;
+    }
 
     await this.categoriesService.invalidateCache();
 
@@ -376,15 +403,22 @@ export class ListingsService {
       if (bidCount > 0) {
         throw new ConflictException('Cannot delete listing with bids unless DRAFT');
       }
-      await this.prisma.$transaction(async (tx) => {
-        // Never call bid.deleteMany for non-DRAFT listings
-        const res = await tx.listing.deleteMany({
-          where: { id, status: listing.status },
+      try {
+        await this.prisma.$transaction(async (tx) => {
+          // Never call bid.deleteMany for non-DRAFT listings
+          const res = await tx.listing.deleteMany({
+            where: { id, status: listing.status },
+          });
+          if (res.count === 0) {
+            throw new ConflictException('Listing status changed concurrently');
+          }
         });
-        if (res.count === 0) {
-          throw new ConflictException('Listing status changed concurrently');
+      } catch (err) {
+        if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2003') {
+          throw new ConflictException('Cannot delete listing with bids unless DRAFT');
         }
-      });
+        throw err;
+      }
     }
 
     await this.categoriesService.invalidateCache();
@@ -603,7 +637,9 @@ export class ListingsService {
       }
     }
 
-    const sort: ListingSort = query.sort ?? 'newest';
+    const hasSearchQuery = Boolean(query.q && query.q.trim());
+    const sort: ListingSort =
+      query.sort === 'relevance' && !hasSearchQuery ? 'newest' : (query.sort ?? 'newest');
 
     if (query.cursor) {
       const d = decodeCursor(query.cursor, sort);

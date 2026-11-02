@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { UserPresenter, toPublicUser } from './user.presenter.js';
+import { UserPresenter } from './user.presenter.js';
 
 describe('UserPresenter', () => {
   it('returns null avatarUrl when avatarKey is null or undefined', async () => {
@@ -24,59 +24,40 @@ describe('UserPresenter', () => {
     expect(storage.presignGet).not.toHaveBeenCalled();
   });
 
-  it('presigns avatarUrl and caches repeated calls', async () => {
+  it('presigns avatarUrl using storage service', async () => {
     const storage = { presignGet: vi.fn().mockResolvedValue('https://s3.example.com/avatar.png') };
     const presenter = new UserPresenter(storage as never);
 
-    const publicUser1 = await presenter.toPublicUser({
+    const createdAt = new Date('2026-01-01T00:00:00.000Z');
+    const publicUser = await presenter.toPublicUser({
       id: 'u1',
       displayName: 'Alice',
       avatarKey: 'avatars/u1/pic.png',
+      createdAt,
     });
 
-    expect(publicUser1.avatarUrl).toBe('https://s3.example.com/avatar.png');
-    expect(storage.presignGet).toHaveBeenCalledTimes(1);
+    expect(publicUser.avatarUrl).toBe('https://s3.example.com/avatar.png');
+    expect(publicUser.createdAt).toBe(createdAt);
     expect(storage.presignGet).toHaveBeenCalledWith('avatars/u1/pic.png');
-
-    const publicUser2 = await presenter.toPublicUser({
-      id: 'u1',
-      displayName: 'Alice',
-      avatarKey: 'avatars/u1/pic.png',
-    });
-
-    expect(publicUser2.avatarUrl).toBe('https://s3.example.com/avatar.png');
-    // Cached, so no second call
-    expect(storage.presignGet).toHaveBeenCalledTimes(1);
   });
 
   it('maps toPrivateUser with email, role, and presigned avatarUrl', async () => {
     const storage = { presignGet: vi.fn().mockResolvedValue('https://s3.example.com/private.png') };
     const presenter = new UserPresenter(storage as never);
 
+    const createdAt = new Date('2026-01-01T00:00:00.000Z');
     const privateUser = await presenter.toPrivateUser({
       id: 'u2',
       email: 'user@example.com',
       role: 'ADMIN',
       displayName: 'Admin User',
       avatarKey: 'avatars/u2/pic.png',
+      createdAt,
     });
 
     expect(privateUser.email).toBe('user@example.com');
     expect(privateUser.role).toBe('ADMIN');
     expect(privateUser.avatarUrl).toBe('https://s3.example.com/private.png');
-  });
-
-  it('works via standalone toPublicUser function', async () => {
-    const storage = { presignGet: vi.fn().mockResolvedValue('https://s3.example.com/helper.png') };
-    const publicUser = await toPublicUser(
-      {
-        id: 'u3',
-        displayName: 'Bob',
-        avatarKey: 'avatars/u3/pic.png',
-      },
-      storage as never,
-    );
-
-    expect(publicUser.avatarUrl).toBe('https://s3.example.com/helper.png');
+    expect(privateUser.createdAt).toBe(createdAt);
   });
 });

@@ -249,7 +249,7 @@ model ListingImage {
 id String @id @default(cuid())
 listingId String
 listing Listing @relation(fields:[listingId],references:[id],onDelete:Cascade)
-uploadId String
+uploadId String @unique
 upload Upload @relation(fields:[uploadId],references:[id],onDelete:Restrict)
 position Int @default(0)
 @@unique([listingId,uploadId])
@@ -258,7 +258,7 @@ model ListingAttachment {
 id String @id @default(cuid())
 listingId String
 listing Listing @relation(fields:[listingId],references:[id],onDelete:Cascade)
-uploadId String
+uploadId String @unique
 upload Upload @relation(fields:[uploadId],references:[id],onDelete:Restrict)
 @@unique([listingId,uploadId])
 }

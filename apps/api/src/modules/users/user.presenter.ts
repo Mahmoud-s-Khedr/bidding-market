@@ -33,7 +33,7 @@ export interface PublicUserData {
   ratingAvg?: number;
   ratingCount?: number;
   completedCount?: number;
-  createdAt?: Date;
+  createdAt: Date;
 }
 
 export interface PrivateUserData extends PublicUserData {
@@ -43,20 +43,11 @@ export interface PrivateUserData extends PublicUserData {
 
 @Injectable()
 export class UserPresenter {
-  private readonly avatarCache = new Map<string, { url: string; expiresAt: number }>();
-
   constructor(private readonly storage: StorageService) {}
 
   async presignAvatar(avatarKey: string | null | undefined): Promise<string | null> {
     if (!avatarKey) return null;
-    const now = Date.now();
-    const cached = this.avatarCache.get(avatarKey);
-    if (cached && cached.expiresAt > now) {
-      return cached.url;
-    }
-    const url = await this.storage.presignGet(avatarKey);
-    this.avatarCache.set(avatarKey, { url, expiresAt: now + 240_000 });
-    return url;
+    return this.storage.presignGet(avatarKey);
   }
 
   async toPublicUser(user: PublicUserData): Promise<PublicUser> {
@@ -72,7 +63,7 @@ export class UserPresenter {
       ratingAvg: user.ratingAvg ?? 0,
       ratingCount: user.ratingCount ?? 0,
       completedCount: user.completedCount ?? 0,
-      createdAt: user.createdAt ?? new Date(),
+      createdAt: user.createdAt,
     };
   }
 
@@ -84,12 +75,4 @@ export class UserPresenter {
       role: user.role,
     };
   }
-}
-
-export async function toPublicUser(
-  user: PublicUserData,
-  storage: StorageService,
-): Promise<PublicUser> {
-  const presenter = new UserPresenter(storage);
-  return presenter.toPublicUser(user);
 }

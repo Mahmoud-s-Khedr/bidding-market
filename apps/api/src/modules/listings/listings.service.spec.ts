@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { listingCreateSchema, listingQuerySchema } from '@market/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { Prisma } from '../../generated/prisma/client.js';
 import { decodeCursor, encodeCursor } from './listings.cursor.js';
 import { ListingsController } from './listings.controller.js';
 import { ListingsService, validatePriceRules } from './listings.service.js';
@@ -91,6 +92,16 @@ describe('listings.cursor', () => {
       JSON.stringify({ s: 'relevance', v: 'nan', id: 'l1' }),
     ).toString('base64url');
     expect(() => decodeCursor(cursorBadRel, 'relevance')).toThrow(BadRequestException);
+
+    // Int overflow numeric cursors capped at 2147483647
+    for (const sort of ['price_asc', 'price_desc', 'most_bids'] as const) {
+      for (const overflowVal of [99999999999, 9007199254740991]) {
+        const c = Buffer.from(JSON.stringify({ s: sort, v: overflowVal, id: 'l1' })).toString(
+          'base64url',
+        );
+        expect(() => decodeCursor(c, sort)).toThrow(BadRequestException);
+      }
+    }
   });
 });
 
@@ -420,6 +431,38 @@ describe('ListingsService', () => {
         ConflictException,
       );
     });
+
+    it('rejects PATCH when image upload matches an existing attachment on the listing', async () => {
+      prisma.listing.findUnique.mockResolvedValueOnce({
+        id: 'l1',
+        ownerId: 'u1',
+        status: 'OPEN',
+        priceType: 'FIXED',
+        priceMinCents: 1000,
+        images: [],
+        attachments: [{ uploadId: 'up-same' }],
+      });
+
+      await expect(service.update(mockUser, 'l1', { imageIds: ['up-same'] })).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('rejects PATCH when attachment upload matches an existing image on the listing', async () => {
+      prisma.listing.findUnique.mockResolvedValueOnce({
+        id: 'l1',
+        ownerId: 'u1',
+        status: 'OPEN',
+        priceType: 'FIXED',
+        priceMinCents: 1000,
+        images: [{ uploadId: 'up-same' }],
+        attachments: [],
+      });
+
+      await expect(service.update(mockUser, 'l1', { attachmentIds: ['up-same'] })).rejects.toThrow(
+        BadRequestException,
+      );
+    });
   });
 
   describe('close', () => {
@@ -476,6 +519,23 @@ describe('ListingsService', () => {
         status: 'OPEN',
       });
       prisma.bid.count.mockResolvedValueOnce(3);
+
+      await expect(service.delete(mockUser, 'l1')).rejects.toThrow(ConflictException);
+    });
+
+    it('throws 409 when deleting non-DRAFT listing races a new bid (Prisma P2003)', async () => {
+      prisma.listing.findUnique.mockResolvedValueOnce({
+        id: 'l1',
+        ownerId: 'u1',
+        status: 'OPEN',
+      });
+      prisma.bid.count.mockResolvedValueOnce(0);
+      prisma.listing.deleteMany.mockRejectedValueOnce(
+        new Prisma.PrismaClientKnownRequestError('Foreign key constraint failed', {
+          code: 'P2003',
+          clientVersion: '7.10.1',
+        }),
+      );
 
       await expect(service.delete(mockUser, 'l1')).rejects.toThrow(ConflictException);
     });
@@ -786,6 +846,18 @@ describe('ListingsService', () => {
       );
 
       expect(prisma.$queryRaw).toHaveBeenCalledTimes(4);
+    });
+
+    it('normalizes sort=relevance without q to newest', async () => {
+      prisma.$queryRaw.mockResolvedValue([]);
+
+      const cNewest = encodeCursor('newest', new Date().toISOString(), 'l1');
+      // When sort=relevance without q, it accepts the newest cursor and queries newest
+      await service.list(
+        listingQuerySchema.parse({ sort: 'relevance', cursor: cNewest, limit: 10 }),
+      );
+
+      expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
     });
   });
 
