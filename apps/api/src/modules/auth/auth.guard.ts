@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
-import { IS_PUBLIC, ROLES, type AuthUser } from '../../common/auth.js';
+import { IS_OPTIONAL_AUTH, IS_PUBLIC, ROLES, type AuthUser } from '../../common/auth.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
@@ -26,11 +26,18 @@ export class JwtAuthGuard implements CanActivate {
       ])
     )
       return true;
+    const isOptional = this.reflector.getAllAndOverride<boolean>(IS_OPTIONAL_AUTH, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
     const request = context
       .switchToHttp()
       .getRequest<{ headers: { authorization?: string }; user?: AuthUser }>();
     const token = request.headers.authorization?.replace(/^Bearer\s+/i, '');
-    if (!token) throw new UnauthorizedException('Authentication required');
+    if (!token) {
+      if (isOptional) return true;
+      throw new UnauthorizedException('Authentication required');
+    }
     try {
       const payload = this.jwt.verify<{ sub: string; role: AuthUser['role'] }>(token, {
         algorithms: ['HS256'],

@@ -23,35 +23,37 @@ Requests from the web app use `credentials: 'include'`.
 
 ## Users
 
-| GET   | /users/:id         | public profile `{id, displayName, avatarUrl, bio, location, isBusiness, companyName, ratingAvg, ratingCount, completedCount, createdAt}` |
-| ----- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| PATCH | /users/me 🔒       | `{displayName?, bio?, location?, avatarKey?, isBusiness?, companyName?}`                                                                 |
-| GET   | /users/:id/reviews | paginated reviews received                                                                                                               |
+| GET   | /users/:id         | public profile `{id, displayName, avatarUrl, bio, location, isBusiness, companyName, ratingAvg, ratingCount, completedCount, createdAt}`                                                                                                                                 |
+| ----- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| PATCH | /users/me 🔒       | `{displayName?, bio?, location?, avatarUploadId?, isBusiness?, companyName?}` (avatarUploadId must reference a READY upload owned by user with purpose AVATAR, or null to clear; others rejected with 400; user responses return avatarUrl as presigned GET URL or null) |
+| GET   | /users/:id/reviews | paginated reviews received                                                                                                                                                                                                                                               |
 
 ## Uploads
 
-| POST | /uploads/presign 🔒 | `{purpose: 'LISTING_IMAGE'|'LISTING_ATTACHMENT'|'BID_ATTACHMENT'|'MESSAGE_ATTACHMENT'|'DELIVERABLE'|'AVATAR', fileName, mimeType, sizeBytes}` → `{uploadId, url, fields?|headers, key, expiresAt}` (validates MIME allowlist + size per purpose) |
+| POST | /uploads/presign 🔒 | `{purpose: 'LISTING_IMAGE'|'LISTING_ATTACHMENT'|'BID_ATTACHMENT'|'MESSAGE_ATTACHMENT'|'DELIVERABLE'|'AVATAR', fileName, mimeType, sizeBytes}` → `{uploadId, url, headers, key, expiresAt}` (validates MIME allowlist + size per purpose; key format: `${purpose.toLowerCase()}/${userId}/${cuid}/${sanitizedFileName}`) |
 |---|---|---|
-| POST | /uploads/:uploadId/complete 🔒 | marks upload ready, returns `Attachment {id, key, url, fileName, mimeType, sizeBytes}` |
-| GET | /uploads/:id/url 🔒 | short-lived signed GET URL (authorization: uploader, or participant of the owning conversation/agreement/listing is public) |
+| POST | /uploads/:uploadId/complete 🔒 | owner only; verifies object exists in S3 via `headObject` and size/content-type match presigned parameters (else 400); already READY returns 409; marks upload ready (status READY), returns `Attachment {id, key, url, fileName, mimeType, sizeBytes}` |
+| GET | /uploads/:id/url 🔒 | short-lived (300s) presigned GET URL (authorization: uploader, admin, OR the upload is attached to a publicly visible listing [OPEN/IN_PROGRESS/COMPLETED/CLOSED], OR to a listing/bid/message/deliverable where the requester is an authorized participant; else 404) |
 
 Limits: images (jpeg/png/webp/gif) ≤ 10 MB; documents (pdf, docx, xlsx, txt, zip) ≤ 25 MB; voice (webm/ogg/mp4/mpeg audio) ≤ 10 MB.
+File names are sanitized on presign (path separators stripped, control characters removed, length capped, extension preserved).
+Scheduled lifecycle cleanup of uncompleted PENDING uploads is out of scope and should be managed via S3 bucket lifecycle rules or background cleanup workers.
 
 ## Categories
 
-| GET               | /categories                | tree `[{id, name, slug, parentId, children: [...] , listingCount}]`         |
-| ----------------- | -------------------------- | --------------------------------------------------------------------------- |
-| POST/PATCH/DELETE | /admin/categories[/:id] 👑 | `{name, slug, parentId?, description?}`; delete fails 409 if listings exist |
+| GET               | /categories                | tree `[{id, name, slug, parentId, description, listingCount, children: [...]}]` (counts OPEN listings including all descendants; cached in Redis with automatic invalidation on admin writes and listing lifecycle events [create, update, close, delete])                          |
+| ----------------- | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| POST/PATCH/DELETE | /admin/categories[/:id] 👑 | `{name, slug, parentId?, description?}`; slug must be unique (409); parentId if provided must exist (400); cycles prevented (a category cannot become its own descendant, 400); delete fails with 409 if category has subcategories or if category or its descendants have listings |
 
 ## Listings
 
-| GET | /listings | filters: `q, kind, categoryId|categorySlug (includes descendants), minPrice, maxPrice, currency, location, status (default OPEN), ownerId, sort=newest|price_asc|price_desc|ending_soon|most_bids, cursor, limit` → paginated `ListingSummary` |
+| GET | /listings | filters: `q` (Postgres full-text using GIN index: `websearch_to_tsquery('simple', ...)` with ranking when sort is relevance), `kind` (REQUEST/OFFER), `categoryId` / `categorySlug` (includes all descendants), `minPrice` / `maxPrice` (interval overlap semantics on `[priceMinCents, COALESCE(priceMaxCents, priceMinCents)]`), `currency`, `location` (case-insensitive substring contains), `status` (default OPEN; when `ownerId=me` without explicit status returns all of the caller's own listings regardless of status; non-admins may only query OPEN/IN_PROGRESS/COMPLETED/CLOSED or their own via `ownerId=me`), `ownerId`, `sort=newest|price_asc|price_desc|ending_soon|most_bids|relevance` (when `sort=relevance` is requested without `q`, it normalizes to `newest` for cursor encode/decode and order-by), `cursor`, `limit` → paginated `ListingSummary` (each summary enriched with `thumbnailUrl` [presigned GET URL of first image by position, or null], `categoryName`, and owner public profile with presigned `avatarUrl`). Listings with `status: OPEN` that are expired (`expiresAt <= NOW()`) are excluded from default browse and active OPEN queries. Stable cursor pagination uses compound base64url JSON cursors `{"s": "<sort>", "v": <sortValue>, "id": "<listingId>"}` |
 |---|---|---|
-| GET | /listings/:id | `ListingDetail` (owner, category, images, attachments, bidCount, myBid if authed) — DRAFT/REMOVED only visible to owner/admin |
-| POST | /listings 🔒 | `{kind, title(5..120), description(20..10000), categoryId, priceType: 'FIXED'|'RANGE'|'NEGOTIABLE', priceMinCents?, priceMaxCents?, currency, deliveryDays?, location?, tags?: string[≤10], imageIds?, attachmentIds?, expiresAt?, status?: 'DRAFT'|'OPEN'}` |
-| PATCH | /listings/:id 🔒 owner | same fields (not when IN_PROGRESS/COMPLETED) |
-| POST | /listings/:id/close 🔒 owner | OPEN → CLOSED; pending bids declined |
-| DELETE | /listings/:id 🔒 owner | only DRAFT or no bids, else 409 |
+| GET | /listings/:id | optional auth: valid token → user, no token → anonymous, invalid token → 401; returns `ListingDetail` (extends `ListingSummary` with `categoryName`, `thumbnailUrl`, owner public profile with presigned `avatarUrl`, category, images and attachments with ids and presigned URLs, bidCount, and `myBid` [with bidder presigned `avatarUrl`] if authed); DRAFT and REMOVED only visible to owner or admin (else 404) |
+| POST | /listings 🔒 | owner = current user; categoryId must exist; price rules: FIXED requires `priceMinCents` (no `priceMaxCents`), RANGE requires `priceMinCents <= priceMaxCents`, NEGOTIABLE neither; imageIds / attachmentIds must be READY uploads owned by user with purpose `LISTING_IMAGE` / `LISTING_ATTACHMENT`, attached to at most one listing; status DRAFT\|OPEN (default OPEN) |
+| PATCH | /listings/:id 🔒 owner | owner (or admin); forbidden when IN_PROGRESS/COMPLETED/REMOVED (409); status changes restricted to DRAFT→OPEN, OPEN→DRAFT rejected when bids exist (409), reopening CLOSED returns 409; admin PATCH validates uploads against listing owner; same price and upload validation |
+| POST | /listings/:id/close 🔒 owner | owner; OPEN → CLOSED (conditional write); pending/shortlisted/countered bids declined in a single transaction |
+| DELETE | /listings/:id 🔒 owner | owner; allowed only when listing is DRAFT or has zero bids (conditional write; never deletes bids for non-DRAFT listings), else 409 |
 
 ## Bids
 

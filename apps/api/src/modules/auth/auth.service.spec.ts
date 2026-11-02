@@ -8,6 +8,11 @@ vi.mock('argon2', () => ({
 }));
 import * as argon2 from 'argon2';
 import { AuthService } from './auth.service.js';
+import { UserPresenter } from '../users/user.presenter.js';
+
+const mockPresenter = new UserPresenter({
+  presignGet: vi.fn().mockImplementation((k: string) => Promise.resolve(`https://s3/${k}`)),
+} as never);
 const user = {
   id: 'u',
   email: 'a@test.com',
@@ -76,6 +81,7 @@ describe('AuthService', () => {
       p as never,
       { sign: vi.fn().mockReturnValue('access') } as never,
       env,
+      mockPresenter,
     ).register({
       email: 'a@test.com',
       password: 'Password1',
@@ -93,6 +99,7 @@ describe('AuthService', () => {
       p as never,
       { sign: vi.fn().mockReturnValue('access') } as never,
       { ...env, JWT_REFRESH_TTL: '12h' },
+      mockPresenter,
     );
     const before = Date.now();
     await service.register({
@@ -112,7 +119,7 @@ describe('AuthService', () => {
     const p = base();
     p.user.findUnique.mockResolvedValue(user);
     await expect(
-      new AuthService(p as never, { sign: vi.fn() } as never, env).register({
+      new AuthService(p as never, { sign: vi.fn() } as never, env, mockPresenter).register({
         email: 'a@test.com',
         password: 'Password1',
         displayName: 'AA',
@@ -123,7 +130,7 @@ describe('AuthService', () => {
     const p = base();
     p.user.findUnique.mockResolvedValue(user);
     vi.mocked(argon2.verify).mockResolvedValueOnce(false).mockResolvedValueOnce(true);
-    const s = new AuthService(p as never, { sign: vi.fn() } as never, env);
+    const s = new AuthService(p as never, { sign: vi.fn() } as never, env, mockPresenter);
     await expect(s.login({ email: 'a@test.com', password: 'x' })).rejects.toBeInstanceOf(
       UnauthorizedException,
     );
@@ -154,6 +161,7 @@ describe('AuthService', () => {
       p as never,
       { sign: vi.fn().mockReturnValue('access') } as never,
       env,
+      mockPresenter,
     );
     await expect(s.refresh('raw')).resolves.toMatchObject({ accessToken: 'access' });
     await expect(s.refresh('old')).rejects.toBeInstanceOf(UnauthorizedException);
@@ -185,7 +193,7 @@ describe('AuthService', () => {
           },
         }),
     );
-    const service = new AuthService(p as never, { sign: vi.fn() } as never, env);
+    const service = new AuthService(p as never, { sign: vi.fn() } as never, env, mockPresenter);
     await expect(service.refresh('raw')).rejects.toBeInstanceOf(UnauthorizedException);
     expect(p.refreshToken.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { familyId: 'f', revokedAt: null } }),
@@ -193,20 +201,25 @@ describe('AuthService', () => {
   });
   it('revokes on logout', async () => {
     const p = base();
-    await new AuthService(p as never, { sign: vi.fn() } as never, env).logout('raw');
+    await new AuthService(p as never, { sign: vi.fn() } as never, env, mockPresenter).logout('raw');
     expect(p.refreshToken.updateMany).toHaveBeenCalled();
   });
   it('returns me and rejects missing user', async () => {
     const p = base();
-    p.user.findUnique.mockResolvedValueOnce(user).mockResolvedValueOnce(null);
-    const service = new AuthService(p as never, { sign: vi.fn() } as never, env);
-    await expect(service.me('u')).resolves.toMatchObject({ id: 'u' });
+    p.user.findUnique
+      .mockResolvedValueOnce({ ...user, avatarKey: 'avatars/u/pic.png' })
+      .mockResolvedValueOnce(null);
+    const service = new AuthService(p as never, { sign: vi.fn() } as never, env, mockPresenter);
+    await expect(service.me('u')).resolves.toMatchObject({
+      id: 'u',
+      avatarUrl: 'https://s3/avatars/u/pic.png',
+    });
     await expect(service.me('x')).rejects.toBeInstanceOf(UnauthorizedException);
   });
   it('covers absent login and logout tokens', async () => {
     const p = base();
     p.user.findUnique.mockResolvedValue(null);
-    const service = new AuthService(p as never, { sign: vi.fn() } as never, env);
+    const service = new AuthService(p as never, { sign: vi.fn() } as never, env, mockPresenter);
     await expect(service.login({ email: 'x@test.com', password: 'x' })).rejects.toBeInstanceOf(
       UnauthorizedException,
     );
