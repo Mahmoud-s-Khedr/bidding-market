@@ -40,22 +40,39 @@ async function main(): Promise<void> {
     update: {},
     create: { name: 'Services', slug: 'services' },
   });
-  await prisma.listing.upsert({
-    where: { id: 'demo-listing-alice' },
+  const design = await prisma.category.upsert({
+    where: { slug: 'design' },
     update: {},
-    create: {
-      id: 'demo-listing-alice',
-      ownerId: alice.id,
-      categoryId: category.id,
-      kind: ListingKind.REQUEST,
-      status: ListingStatus.OPEN,
-      title: 'Build a marketplace landing page',
-      description: 'A demo listing used for local development and end to end testing.',
-      priceType: PriceType.RANGE,
-      priceMinCents: 50000,
-      priceMaxCents: 100000,
-    },
+    create: { name: 'Design', slug: 'design', parentId: category.id },
   });
+  for (const [index, title] of [
+    'Build a marketplace landing page',
+    'Design a brand identity',
+    'Write product documentation',
+    'Create a mobile prototype',
+    'SEO content strategy',
+    'Data dashboard design',
+  ].entries())
+    await prisma.listing.upsert({
+      where: { id: `demo-listing-${index + 1}` },
+      update: {},
+      create: {
+        id: `demo-listing-${index + 1}`,
+        ownerId:
+          index % 2 === 0
+            ? alice.id
+            : (await prisma.user.findUniqueOrThrow({ where: { email: 'bob@market.test' } })).id,
+        categoryId: index % 2 === 0 ? category.id : design.id,
+        kind: index % 2 === 0 ? ListingKind.REQUEST : ListingKind.OFFER,
+        status: ListingStatus.OPEN,
+        title,
+        description:
+          'A seeded marketplace listing used for local development and end to end testing.',
+        priceType: PriceType.RANGE,
+        priceMinCents: 50000,
+        priceMaxCents: 100000,
+      },
+    });
 }
 main()
   .then(() => prisma.$disconnect())
