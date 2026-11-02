@@ -106,6 +106,23 @@ OPEN
 RESOLVED
 DISMISSED
 }
+enum ReportResolution {
+DISMISS
+REMOVE_CONTENT
+SUSPEND_USER
+}
+enum AgreementEventType {
+CREATED
+STATUS_CHANGED
+MILESTONE_CREATED
+MILESTONE_UPDATED
+DELIVERABLE_SUBMITTED
+DELIVERABLE_ACCEPTED
+REVISION_REQUESTED
+CANCELLED
+DISPUTED
+COMPLETED
+}
 
 model User {
 id String @id @default(cuid())
@@ -129,15 +146,20 @@ updatedAt DateTime @updatedAt
 refreshTokens RefreshToken[]
 listings Listing[]
 bids Bid[]
+bidRevisions BidRevision[] @relation("BidRevisionAuthor")
 sentMessages Message[]
+submittedDeliverables Deliverable[] @relation("DeliverableSubmitter")
 participants ConversationParticipant[]
 buyerAgreements Agreement[] @relation("Buyer")
 providerAgreements Agreement[] @relation("Provider")
+cancelledAgreements Agreement[] @relation("AgreementCanceller")
+agreementEvents AgreementEvent[] @relation("AgreementEventActor")
 reviewsWritten Review[] @relation("ReviewAuthor")
 reviewsReceived Review[] @relation("ReviewTarget")
 notifications Notification[]
 uploads Upload[]
 reports Report[]
+resolvedReports Report[] @relation("ReportResolver")
 auditLogs AuditLog[]
 @@index([status])
 }
@@ -192,7 +214,8 @@ expiresAt DateTime?
 images ListingImage[]
 attachments ListingAttachment[]
 bids Bid[]
-agreement Agreement?
+agreements Agreement[]
+conversations Conversation[]
 createdAt DateTime @default(now())
 updatedAt DateTime @updatedAt
 @@index([status,createdAt])
@@ -255,6 +278,7 @@ lastCounterById String?
 revisions BidRevision[]
 attachments BidAttachment[]
 agreement Agreement?
+conversations Conversation[]
 createdAt DateTime @default(now())
 updatedAt DateTime @updatedAt
 @@index([listingId,status])
@@ -265,6 +289,7 @@ id String @id @default(cuid())
 bidId String
 bid Bid @relation(fields:[bidId],references:[id],onDelete:Cascade)
 authorId String
+author User @relation("BidRevisionAuthor",fields:[authorId],references:[id],onDelete:Restrict)
 amountCents Int
 deliveryDays Int
 message String
@@ -282,7 +307,9 @@ upload Upload @relation(fields:[uploadId],references:[id],onDelete:Restrict)
 model Conversation {
 id String @id @default(cuid())
 listingId String?
+listing Listing? @relation(fields:[listingId],references:[id],onDelete:Restrict)
 bidId String?
+bid Bid? @relation(fields:[bidId],references:[id],onDelete:Restrict)
 agreementId String? @unique
 agreement Agreement? @relation(fields:[agreementId],references:[id],onDelete:Restrict)
 participants ConversationParticipant[]
@@ -325,7 +352,7 @@ upload Upload @relation(fields:[uploadId],references:[id],onDelete:Restrict)
 }
 model Agreement {
 id String @id @default(cuid())
-listingId String @unique
+listingId String
 listing Listing @relation(fields:[listingId],references:[id],onDelete:Restrict)
 bidId String @unique
 bid Bid @relation(fields:[bidId],references:[id],onDelete:Restrict)
@@ -338,6 +365,7 @@ status AgreementStatus @default(ACTIVE)
 completedAt DateTime?
 cancelledAt DateTime?
 cancelledById String?
+cancelledBy User? @relation("AgreementCanceller",fields:[cancelledById],references:[id],onDelete:Restrict)
 cancelReason String?
 disputeReason String?
 statusChangedAt DateTime @default(now())
@@ -370,6 +398,7 @@ agreementId String
 agreement Agreement @relation(fields:[agreementId],references:[id],onDelete:Cascade)
 note String
 submittedById String
+submittedBy User @relation("DeliverableSubmitter",fields:[submittedById],references:[id],onDelete:Restrict)
 acceptedAt DateTime?
 revisionNote String?
 attachments DeliverableAttachment[]
@@ -389,7 +418,8 @@ id String @id @default(cuid())
 agreementId String
 agreement Agreement @relation(fields:[agreementId],references:[id],onDelete:Cascade)
 actorId String?
-type String
+actor User? @relation("AgreementEventActor",fields:[actorId],references:[id],onDelete:SetNull)
+type AgreementEventType
 data Json?
 createdAt DateTime @default(now())
 @@index([agreementId,createdAt])
@@ -431,8 +461,9 @@ reason ReportReason
 details String?
 status ReportStatus @default(OPEN)
 resolutionNote String?
-resolution String?
+resolution ReportResolution?
 resolvedById String?
+resolvedBy User? @relation("ReportResolver",fields:[resolvedById],references:[id],onDelete:Restrict)
 createdAt DateTime @default(now())
 resolvedAt DateTime?
 @@index([status,createdAt])
