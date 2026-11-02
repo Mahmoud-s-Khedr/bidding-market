@@ -36,4 +36,17 @@ describe('users', () => {
       .expect(200);
     expect(reviews.body).toEqual({ items: [], nextCursor: null });
   });
+  it('validates profile updates and review pagination', async () => {
+    const auth = await registerAndLogin(app);
+    const invalid = await request(app.getHttpServer())
+      .patch('/api/v1/users/me')
+      .set('Authorization', `Bearer ${auth.accessToken}`)
+      .send({ displayName: 'x'.repeat(81) })
+      .expect(400);
+    expect(invalid.body.error.code).toBe('VALIDATION_ERROR');
+    await request(app.getHttpServer())
+      .get(`/api/v1/users/${auth.user.id}/reviews?limit=51`)
+      .expect(400);
+    await request(app.getHttpServer()).get('/api/v1/does-not-exist').expect(404);
+  });
 });

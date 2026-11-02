@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ConflictException, ForbiddenException, UnauthorizedException } from '@nestjs/common';
+import type * as Argon2 from 'argon2';
 vi.mock('argon2', () => ({
   argon2id: 2,
   hash: vi.fn().mockResolvedValue('hash'),
@@ -24,6 +25,22 @@ const user = {
   completedCount: 0,
   createdAt: new Date(),
 };
+const env = {
+  NODE_ENV: 'test' as const,
+  DATABASE_URL: 'postgresql://a:b@localhost/db',
+  REDIS_URL: 'redis://localhost:6379',
+  JWT_ACCESS_SECRET: 'a'.repeat(32),
+  JWT_REFRESH_SECRET: 'b'.repeat(32),
+  JWT_ACCESS_TTL: '15m',
+  JWT_REFRESH_TTL: '7d',
+  WEB_ORIGIN: 'http://localhost:3000',
+  API_PORT: 4000,
+  S3_ENDPOINT: 'http://localhost:8333',
+  S3_REGION: 'us-east-1',
+  S3_BUCKET: 'bucket',
+  S3_ACCESS_KEY: 'key',
+  S3_SECRET_KEY: 'secret',
+};
 const base = () => ({
   user: { findUnique: vi.fn(), create: vi.fn() },
   refreshToken: {
@@ -45,12 +62,22 @@ const base = () => ({
   ),
 });
 describe('AuthService', () => {
+  it('uses a real argon2id hash format for password verification', async () => {
+    const realArgon = await vi.importActual<typeof Argon2>('argon2');
+    const hash = await realArgon.hash('Password123!', { type: realArgon.argon2id });
+    await expect(realArgon.verify(hash, 'Password123!')).resolves.toBe(true);
+    await expect(realArgon.verify(hash, 'wrong')).resolves.toBe(false);
+  });
   it('registers a new account', async () => {
     const p = base();
     p.user.findUnique.mockResolvedValue(null);
     p.user.create.mockResolvedValue(user);
     await expect(
-      new AuthService(p as never, { sign: vi.fn().mockReturnValue('access') } as never).register({
+      new AuthService(
+        p as never,
+        { sign: vi.fn().mockReturnValue('access') } as never,
+        env,
+      ).register({
         email: 'a@test.com',
         password: 'Password1',
         displayName: 'AA',
@@ -61,7 +88,7 @@ describe('AuthService', () => {
     const p = base();
     p.user.findUnique.mockResolvedValue(user);
     await expect(
-      new AuthService(p as never, { sign: vi.fn() } as never).register({
+      new AuthService(p as never, { sign: vi.fn() } as never, env).register({
         email: 'a@test.com',
         password: 'Password1',
         displayName: 'AA',
@@ -72,7 +99,7 @@ describe('AuthService', () => {
     const p = base();
     p.user.findUnique.mockResolvedValue(user);
     vi.mocked(argon2.verify).mockResolvedValueOnce(false).mockResolvedValueOnce(true);
-    const s = new AuthService(p as never, { sign: vi.fn() } as never);
+    const s = new AuthService(p as never, { sign: vi.fn() } as never, env);
     await expect(s.login({ email: 'a@test.com', password: 'x' })).rejects.toBeInstanceOf(
       UnauthorizedException,
     );
@@ -99,27 +126,63 @@ describe('AuthService', () => {
         revokedAt: new Date(),
         user,
       });
-    const s = new AuthService(p as never, { sign: vi.fn().mockReturnValue('access') } as never);
+    const s = new AuthService(
+      p as never,
+      { sign: vi.fn().mockReturnValue('access') } as never,
+      env,
+    );
     await expect(s.refresh('raw')).resolves.toMatchObject({ accessToken: 'access' });
     await expect(s.refresh('old')).rejects.toBeInstanceOf(UnauthorizedException);
     expect(p.refreshToken.updateMany).toHaveBeenCalled();
   });
+  it('revokes the family when the conditional rotation loses a race', async () => {
+    const p = base();
+    p.refreshToken.findUnique.mockResolvedValue({
+      id: 'old',
+      userId: 'u',
+      familyId: 'f',
+      tokenHash: 'h',
+      expiresAt: new Date(Date.now() + 10000),
+      user,
+    });
+    p.$transaction.mockImplementation(
+      async (
+        fn: (tx: {
+          refreshToken: {
+            create: () => Promise<{ id: string }>;
+            updateMany: () => Promise<{ count: number }>;
+          };
+        }) => Promise<unknown>,
+      ) =>
+        fn({
+          refreshToken: {
+            create: vi.fn().mockResolvedValue({ id: 'new' }),
+            updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+          },
+        }),
+    );
+    const service = new AuthService(p as never, { sign: vi.fn() } as never, env);
+    await expect(service.refresh('raw')).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(p.refreshToken.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { familyId: 'f', revokedAt: null } }),
+    );
+  });
   it('revokes on logout', async () => {
     const p = base();
-    await new AuthService(p as never, { sign: vi.fn() } as never).logout('raw');
+    await new AuthService(p as never, { sign: vi.fn() } as never, env).logout('raw');
     expect(p.refreshToken.updateMany).toHaveBeenCalled();
   });
   it('returns me and rejects missing user', async () => {
     const p = base();
     p.user.findUnique.mockResolvedValueOnce(user).mockResolvedValueOnce(null);
-    const service = new AuthService(p as never, { sign: vi.fn() } as never);
+    const service = new AuthService(p as never, { sign: vi.fn() } as never, env);
     await expect(service.me('u')).resolves.toMatchObject({ id: 'u' });
     await expect(service.me('x')).rejects.toBeInstanceOf(UnauthorizedException);
   });
   it('covers absent login and logout tokens', async () => {
     const p = base();
     p.user.findUnique.mockResolvedValue(null);
-    const service = new AuthService(p as never, { sign: vi.fn() } as never);
+    const service = new AuthService(p as never, { sign: vi.fn() } as never, env);
     await expect(service.login({ email: 'x@test.com', password: 'x' })).rejects.toBeInstanceOf(
       UnauthorizedException,
     );

@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { StorageService } from '../src/storage/storage.service.js';
+import { parseEnv } from '../src/common/env.js';
 describe('storage', () => {
   it('puts, gets and heads signed objects', async () => {
-    const storage = new StorageService();
+    const storage = new StorageService(parseEnv(process.env));
     await storage.onModuleInit();
     await storage.onModuleInit();
     const key = `test/${Date.now()}.txt`;
