@@ -92,6 +92,7 @@ LISTING
 USER
 MESSAGE
 BID
+AGREEMENT
 }
 enum ReportReason {
 SPAM
@@ -112,6 +113,8 @@ email String @unique
 passwordHash String
 role Role @default(USER)
 status UserStatus @default(ACTIVE)
+suspendedReason String?
+suspendedAt DateTime?
 displayName String
 avatarKey String?
 bio String?
@@ -173,6 +176,9 @@ categoryId String
 category Category @relation(fields:[categoryId],references:[id],onDelete:Restrict)
 kind ListingKind
 status ListingStatus @default(DRAFT)
+removedReason String?
+removedAt DateTime?
+previousStatus ListingStatus?
 title String
 description String
 priceType PriceType
@@ -193,6 +199,9 @@ updatedAt DateTime @updatedAt
 @@index([ownerId,status])
 @@index([categoryId,status])
 @@index([priceMinCents])
+@@index([status,kind,location])
+@@index([status,priceMinCents])
+@@index([status,expiresAt])
 }
 model Upload {
 id String @id @default(cuid())
@@ -241,6 +250,8 @@ currency String
 deliveryDays Int
 message String
 status BidStatus @default(PENDING)
+rejectReason String?
+lastCounterById String?
 revisions BidRevision[]
 attachments BidAttachment[]
 agreement Agreement?
@@ -324,6 +335,12 @@ providerId String
 provider User @relation("Provider",fields:[providerId],references:[id],onDelete:Restrict)
 conversation Conversation?
 status AgreementStatus @default(ACTIVE)
+completedAt DateTime?
+cancelledAt DateTime?
+cancelledById String?
+cancelReason String?
+disputeReason String?
+statusChangedAt DateTime @default(now())
 buyerConfirmedAt DateTime?
 providerConfirmedAt DateTime?
 milestones Milestone[]
@@ -345,6 +362,7 @@ dueDate DateTime?
 status MilestoneStatus @default(PENDING)
 position Int @default(0)
 createdAt DateTime @default(now())
+@@index([agreementId])
 }
 model Deliverable {
 id String @id @default(cuid())
@@ -356,6 +374,7 @@ acceptedAt DateTime?
 revisionNote String?
 attachments DeliverableAttachment[]
 createdAt DateTime @default(now())
+@@index([agreementId])
 }
 model DeliverableAttachment {
 id String @id @default(cuid())
@@ -412,6 +431,7 @@ reason ReportReason
 details String?
 status ReportStatus @default(OPEN)
 resolutionNote String?
+resolution String?
 resolvedById String?
 createdAt DateTime @default(now())
 resolvedAt DateTime?
