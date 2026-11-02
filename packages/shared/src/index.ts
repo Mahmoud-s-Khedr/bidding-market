@@ -53,7 +53,7 @@ export const NotificationType = z.enum([
   'REPORT_RESOLVED',
   'REVIEW_RECEIVED',
 ]);
-export const ReportTargetType = z.enum(['LISTING', 'USER', 'MESSAGE', 'BID']);
+export const ReportTargetType = z.enum(['LISTING', 'USER', 'MESSAGE', 'BID', 'AGREEMENT']);
 export const ReportReason = z.enum(['SPAM', 'FRAUD', 'INAPPROPRIATE', 'HARASSMENT', 'OTHER']);
 export const ReportStatus = z.enum(['OPEN', 'RESOLVED', 'DISMISSED']);
 
@@ -235,6 +235,12 @@ export const presignUploadSchema = uploadPresignSchema.superRefine((value, ctx) 
     ctx.addIssue({ code: 'custom', message: 'File is too large', path: ['sizeBytes'] });
 });
 export const bidUpdateSchema = bidCreateSchema.partial();
+export const bidQuerySchema = paginationSchema.extend({
+  listingId: z.string().optional(),
+  status: BidStatus.optional(),
+  sort: z.enum(['newest', 'amount_asc', 'amount_desc', 'delivery_asc']).default('newest'),
+});
+export const myBidsQuerySchema = paginationSchema.extend({ status: BidStatus.optional() });
 export const bidCounterSchema = z.object({
   amountCents: z.number().int().positive(),
   deliveryDays: z.number().int().positive(),
@@ -254,6 +260,11 @@ export const revisionRequestSchema = z.object({ note: z.string().min(1).max(5000
 export const notificationQuerySchema = paginationSchema.extend({
   unread: z.coerce.boolean().optional(),
 });
+export const agreementsQuerySchema = paginationSchema.extend({
+  status: AgreementStatus.optional(),
+  role: z.enum(['buyer', 'provider']).optional(),
+});
+export const adminReportsQuerySchema = paginationSchema.extend({ status: ReportStatus.optional() });
 export const adminUsersQuerySchema = paginationSchema.extend({
   q: z.string().optional(),
   role: Role.optional(),
@@ -302,17 +313,189 @@ export const publicUserSchema = z.object({
 export const privateUserSchema = publicUserSchema.extend({ email: z.email(), role: Role });
 export type PublicUser = z.infer<typeof publicUserSchema>;
 export type PrivateUser = z.infer<typeof privateUserSchema>;
-export type ListingSummary = Record<string, unknown>;
-export type ListingDetail = Record<string, unknown>;
-export type Bid = Record<string, unknown>;
-export type Agreement = Record<string, unknown>;
-export type Message = Record<string, unknown>;
-export type Conversation = Record<string, unknown>;
-export type Notification = Record<string, unknown>;
+const date = z.coerce.date();
+export const attachmentSchema = z.object({
+  id: z.string(),
+  key: z.string(),
+  fileName: z.string(),
+  mimeType: z.string(),
+  sizeBytes: z.number().int().nonnegative(),
+});
+export const uploadSchema = attachmentSchema.extend({
+  purpose: UploadPurpose,
+  status: z.enum(['PENDING', 'READY', 'FAILED']),
+  createdAt: date,
+  completedAt: date.nullable(),
+});
+export const uploadPresignResponseSchema = z.object({
+  upload: uploadSchema,
+  uploadUrl: z.url(),
+  headers: z.record(z.string(), z.string()).default({}),
+});
+export const listingSummarySchema = z.object({
+  id: z.string(),
+  owner: publicUserSchema,
+  categoryId: z.string(),
+  kind: ListingKind,
+  status: ListingStatus,
+  title: z.string(),
+  priceType: PriceType,
+  priceMinCents: z.number().int().nullable(),
+  priceMaxCents: z.number().int().nullable(),
+  currency: z.string(),
+  location: z.string().nullable(),
+  expiresAt: date.nullable(),
+  bidCount: z.number().int().nonnegative(),
+  createdAt: date,
+});
+export const listingDetailSchema = listingSummarySchema.extend({
+  description: z.string(),
+  deliveryDays: z.number().int().nullable(),
+  tags: z.array(z.string()),
+  images: z.array(attachmentSchema),
+  attachments: z.array(attachmentSchema),
+  updatedAt: date,
+});
+export const bidSchema = z.object({
+  id: z.string(),
+  listingId: z.string(),
+  bidder: publicUserSchema,
+  amountCents: z.number().int(),
+  currency: z.string(),
+  deliveryDays: z.number().int(),
+  message: z.string(),
+  status: BidStatus,
+  rejectReason: z.string().nullable(),
+  lastCounterById: z.string().nullable(),
+  createdAt: date,
+  updatedAt: date,
+});
+export const milestoneResponseSchema = z.object({
+  id: z.string(),
+  agreementId: z.string(),
+  title: z.string(),
+  amountCents: z.number().int().nullable(),
+  dueDate: date.nullable(),
+  status: MilestoneStatus,
+  position: z.number().int(),
+});
+export const deliverableResponseSchema = z.object({
+  id: z.string(),
+  agreementId: z.string(),
+  note: z.string(),
+  submittedById: z.string(),
+  acceptedAt: date.nullable(),
+  revisionNote: z.string().nullable(),
+  attachments: z.array(attachmentSchema),
+  createdAt: date,
+});
+export const agreementEventSchema = z.object({
+  id: z.string(),
+  agreementId: z.string(),
+  actorId: z.string().nullable(),
+  type: z.string(),
+  data: z.unknown().nullable(),
+  createdAt: date,
+});
+export const agreementSchema = z.object({
+  id: z.string(),
+  listingId: z.string(),
+  bidId: z.string(),
+  buyer: publicUserSchema,
+  provider: publicUserSchema,
+  status: AgreementStatus,
+  milestones: z.array(milestoneResponseSchema),
+  deliverables: z.array(deliverableResponseSchema),
+  events: z.array(agreementEventSchema),
+  createdAt: date,
+  updatedAt: date,
+});
+export const messageSchema = z.object({
+  id: z.string(),
+  conversationId: z.string(),
+  sender: publicUserSchema,
+  type: MessageType,
+  body: z.string().nullable(),
+  voiceDurationSec: z.number().nullable(),
+  attachments: z.array(attachmentSchema),
+  createdAt: date,
+});
+export const conversationSchema = z.object({
+  id: z.string(),
+  listingId: z.string().nullable(),
+  bidId: z.string().nullable(),
+  agreementId: z.string().nullable(),
+  participants: z.array(publicUserSchema),
+  lastMessage: messageSchema.nullable(),
+  createdAt: date,
+  updatedAt: date,
+});
+export const notificationSchema = z.object({
+  id: z.string(),
+  type: NotificationType,
+  title: z.string(),
+  body: z.string(),
+  link: z.string().nullable(),
+  data: z.unknown().nullable(),
+  readAt: date.nullable(),
+  createdAt: date,
+});
+export const reviewItemSchema = z.object({
+  id: z.string(),
+  agreementId: z.string(),
+  author: publicUserSchema,
+  rating: z.number().int().min(1).max(5),
+  comment: z.string().nullable(),
+  createdAt: date,
+});
+export const dashboardSummarySchema = z.object({
+  openListings: z.number().int(),
+  activeBids: z.number().int(),
+  activeAgreements: z.number().int(),
+  unreadNotifications: z.number().int(),
+});
+export const adminStatsSchema = z.object({
+  users: z.number().int(),
+  listings: z.number().int(),
+  agreements: z.number().int(),
+  openReports: z.number().int(),
+});
+export const auditLogItemSchema = z.object({
+  id: z.string(),
+  actorId: z.string(),
+  action: z.string(),
+  targetType: z.string(),
+  targetId: z.string().nullable(),
+  data: z.unknown().nullable(),
+  createdAt: date,
+});
+export const authResponseSchema = z.object({ accessToken: z.string(), user: privateUserSchema });
+export type ListingSummary = z.infer<typeof listingSummarySchema>;
+export type ListingDetail = z.infer<typeof listingDetailSchema>;
+export type Bid = z.infer<typeof bidSchema>;
+export type Agreement = z.infer<typeof agreementSchema>;
+export type Message = z.infer<typeof messageSchema>;
+export type Conversation = z.infer<typeof conversationSchema>;
+export type Notification = z.infer<typeof notificationSchema>;
 export const wsPayloadSchemas = {
   typing: z.object({ conversationId: z.string(), isTyping: z.boolean() }),
   conversationJoin: z.object({ conversationId: z.string() }),
   read: z.object({ conversationId: z.string(), lastMessageId: z.string() }),
+};
+export const wsServerPayloadSchemas = {
+  'message:new': messageSchema,
+  typing: z.object({ conversationId: z.string(), userId: z.string(), isTyping: z.boolean() }),
+  presence: z.object({ userId: z.string(), online: z.boolean() }),
+  'bid:updated': bidSchema,
+  'agreement:updated': agreementSchema,
+  'message:read': z.object({
+    conversationId: z.string(),
+    userId: z.string(),
+    lastMessageId: z.string(),
+  }),
+};
+export type WsServerPayloads = {
+  [K in keyof typeof wsServerPayloadSchemas]: z.infer<(typeof wsServerPayloadSchemas)[K]>;
 };
 export const categorySchema = z.object({
   name: z.string().trim().min(1).max(80),
