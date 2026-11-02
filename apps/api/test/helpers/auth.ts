@@ -1,5 +1,6 @@
 import type { INestApplication } from '@nestjs/common';
 import type { Server } from 'node:http';
+import { JwtService } from '@nestjs/jwt';
 import request from 'supertest';
 import * as argon2 from 'argon2';
 import { expect } from 'vitest';
@@ -47,6 +48,12 @@ export async function loginAs(app: INestApplication, email: string, password = '
     cookie: response.headers['set-cookie']?.[0] as string,
     user: response.body.user as { id: string; role: 'USER' | 'ADMIN' },
   };
+}
+export function signToken(
+  app: INestApplication,
+  user: { id: string; role: 'USER' | 'ADMIN' },
+): string {
+  return app.get(JwtService).sign({ sub: user.id, role: user.role });
 }
 export async function createUser(
   options: {
