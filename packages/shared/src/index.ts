@@ -319,10 +319,12 @@ export const milestoneSchema = z.object({
   dueDate: z.iso.datetime().optional(),
   status: MilestoneStatus.optional(),
 });
+export type MilestoneInput = z.infer<typeof milestoneSchema>;
 export const deliverableSchema = z.object({
   note: z.string().max(5000),
   attachmentIds: z.array(z.string()).min(1),
 });
+export type DeliverableInput = z.infer<typeof deliverableSchema>;
 export const revisionRequestSchema = z.object({ note: z.string().min(1).max(5000) });
 export const notificationQuerySchema = paginationSchema.extend({
   unread: z.coerce.boolean().optional(),
@@ -358,6 +360,7 @@ export const bidRejectSchema = z.object({ reason: z.string().max(2000).optional(
 export type BidRejectInput = z.infer<typeof bidRejectSchema>;
 export const acceptCounterSchema = z.object({});
 export const milestoneUpdateSchema = milestoneSchema.partial();
+export type MilestoneUpdateInput = z.infer<typeof milestoneUpdateSchema>;
 export const disputeSchema = agreementCancelSchema;
 export const adminListingActionSchema = z.object({ reason: z.string().min(1).max(2000) });
 export const adminListingsQuerySchema = paginationSchema.extend({
@@ -515,6 +518,11 @@ export const agreementSchema = z.object({
   buyer: publicUserSchema,
   provider: publicUserSchema,
   status: AgreementStatus,
+  listing: listingSummarySchema.optional(),
+  bid: bidSchema.optional(),
+  conversationId: z.string().nullable().optional(),
+  myRole: z.enum(['buyer', 'provider']).optional(),
+  myConfirmation: z.boolean().optional(),
   milestones: z.array(milestoneResponseSchema),
   deliverables: z.array(deliverableResponseSchema),
   events: z.array(agreementEventSchema),
@@ -565,9 +573,20 @@ export const reviewItemSchema = z.object({
   createdAt: date,
 });
 export const dashboardSummarySchema = z.object({
-  openListings: z.number().int(),
-  activeBids: z.number().int(),
-  activeAgreements: z.number().int(),
+  listings: z.object({
+    open: z.number().int().nonnegative(),
+    inProgress: z.number().int().nonnegative(),
+    completed: z.number().int().nonnegative(),
+  }),
+  bids: z.object({
+    pending: z.number().int().nonnegative(),
+    accepted: z.number().int().nonnegative(),
+  }),
+  agreements: z.object({
+    active: z.number().int().nonnegative(),
+    completed: z.number().int().nonnegative(),
+  }),
+  unreadMessages: z.number().int().nonnegative(),
   unreadNotifications: z.number().int(),
 });
 export const adminStatsSchema = z.object({

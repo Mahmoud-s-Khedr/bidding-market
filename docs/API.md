@@ -92,7 +92,7 @@ Bid statuses: `PENDING, SHORTLISTED, COUNTERED, ACCEPTED, REJECTED, WITHDRAWN, D
 | POST | /agreements/:id/deliverables 🔒 provider | `{note, attachmentIds}` → status DELIVERED |
 | POST | /agreements/:id/deliverables/:did/accept 🔒 buyer | |
 | POST | /agreements/:id/deliverables/:did/request-revision 🔒 buyer | `{note}` → ACTIVE |
-| POST | /agreements/:id/complete 🔒 participant | records confirmation; when both confirmed → COMPLETED, listing COMPLETED |
+| POST | /agreements/:id/complete 🔒 participant | records confirmation; when both confirmed → COMPLETED, listing COMPLETED; allowed from ACTIVE or DELIVERED and is idempotent for a party already confirmed |
 | POST | /agreements/:id/cancel 🔒 participant | `{reason}` → CANCELLED; listing → CLOSED |
 | POST | /agreements/:id/dispute 🔒 participant | `{reason}` → DISPUTED (creates admin report) |
 | POST | /agreements/:id/reviews 🔒 participant | `{rating 1..5, comment?}` only when COMPLETED, once per party |
