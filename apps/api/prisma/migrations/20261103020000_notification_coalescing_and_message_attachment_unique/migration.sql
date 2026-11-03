@@ -7,6 +7,7 @@ ALTER TABLE "Conversation" ALTER COLUMN "lastMessageAt" SET NOT NULL;
 UPDATE "Notification"
 SET "conversationId" = "data"->>'conversationId'
 WHERE "type" = 'MESSAGE_RECEIVED' AND "data" ? 'conversationId';
+ALTER TABLE "Notification" ALTER COLUMN "updatedAt" DROP DEFAULT;
 
 CREATE INDEX IF NOT EXISTS "Notification_userId_conversationId_idx" ON "Notification"("userId", "conversationId");
 DELETE FROM "Notification" older
