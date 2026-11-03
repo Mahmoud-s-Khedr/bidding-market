@@ -26,6 +26,7 @@ describe('ConversationsService', () => {
       },
       upload: { findMany: vi.fn() },
       messageAttachment: { findFirst: vi.fn().mockResolvedValue(null) },
+      $executeRaw: vi.fn(),
       $transaction: vi.fn((fn: (tx: typeof prisma) => unknown) => Promise.resolve(fn(prisma))),
     };
     const storage = { presignGet: vi.fn().mockResolvedValue('url') };
