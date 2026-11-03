@@ -390,7 +390,9 @@ describe('Listings endpoints', () => {
           .send({ amountCents: 1500, currency: 'USD', deliveryDays: 3, message: 'Race bid' }),
       ]);
 
-      expect([patchResult.status, bidResult.status]).toContain(200);
+      // Either serialization is valid: the kind change wins (200, bid 409) or the bid wins (201, patch 409).
+      expect([patchResult.status, bidResult.status].every((status) => status < 500)).toBe(true);
+      expect(patchResult.status === 200 || bidResult.status === 201).toBe(true);
 
       const [finalListing, bids] = await Promise.all([
         prisma.listing.findUniqueOrThrow({ where: { id: listing.id } }),
