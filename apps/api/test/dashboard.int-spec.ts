@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { INestApplication } from '@nestjs/common';
 import type { Server } from 'node:http';
 import request from 'supertest';
+import { dashboardSummarySchema } from '@market/shared';
 import { createTestApp } from './helpers/app.js';
 import { createUser, signToken } from './helpers/auth.js';
 import { createAgreement } from './helpers/factories.js';
@@ -34,6 +35,16 @@ describe('GET /dashboard/summary', () => {
       provider,
       listing: {},
       amountCents: 1000,
+    });
+    const fixture2 = await createAgreement({
+      buyer: user,
+      provider,
+      listing: {},
+      amountCents: 2000,
+    });
+    await prisma.agreement.update({
+      where: { id: fixture2.agreement.id },
+      data: { status: 'DELIVERED' },
     });
     await prisma.listing.update({
       where: { id: fixture.listing.id },
@@ -115,11 +126,12 @@ describe('GET /dashboard/summary', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
     expect(response.body).toEqual({
-      listings: { open: 1, inProgress: 1, completed: 1 },
+      listings: { open: 1, inProgress: 2, completed: 1 },
       bids: { pending: 2, accepted: 0 },
-      agreements: { active: 1, completed: 0 },
+      agreements: { active: 2, completed: 0 },
       unreadMessages: 1,
       unreadNotifications: 1,
     });
+    dashboardSummarySchema.parse(response.body);
   });
 });

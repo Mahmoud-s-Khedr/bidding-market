@@ -25,7 +25,7 @@ export class DashboardService {
           by: ['status'],
           where: {
             OR: [{ buyerId: userId }, { providerId: userId }],
-            status: { in: ['ACTIVE', 'COMPLETED'] },
+            status: { in: ['ACTIVE', 'DELIVERED', 'COMPLETED'] },
           },
           _count: { _all: true },
         }),
@@ -57,7 +57,7 @@ export class DashboardService {
         accepted: bids.get('ACCEPTED') ?? 0,
       },
       agreements: {
-        active: agreements.get('ACTIVE') ?? 0,
+        active: (agreements.get('ACTIVE') ?? 0) + (agreements.get('DELIVERED') ?? 0),
         completed: agreements.get('COMPLETED') ?? 0,
       },
       unreadMessages: Number(unreadMessages[0]?.count ?? 0n),

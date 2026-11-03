@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { INestApplication } from '@nestjs/common';
 import type { Server } from 'node:http';
 import request from 'supertest';
+import { agreementDetailSchema, agreementSummarySchema, paginated } from '@market/shared';
 import { createTestApp } from './helpers/app.js';
 import { createUser, signToken } from './helpers/auth.js';
 import { createAgreement } from './helpers/factories.js';
@@ -39,10 +40,10 @@ describe('Agreement endpoints', () => {
     agreementId = fixture.agreement.id;
     listingId = fixture.listing.id;
   });
-  async function readyDeliverableUpload() {
+  async function readyDeliverableUpload(uploaderId = provider.id) {
     return prisma.upload.create({
       data: {
-        uploaderId: provider.id,
+        uploaderId,
         purpose: 'DELIVERABLE',
         status: 'READY',
         key: `deliverable/${crypto.randomUUID()}.pdf`,
@@ -75,6 +76,8 @@ describe('Agreement endpoints', () => {
       expect(page.body.items).toHaveLength(1);
       expect(page.body.items[0].myRole).toBe('buyer');
       expect(page.body.nextCursor).toBeTruthy();
+      paginated(agreementSummarySchema).parse(page.body);
+
       await request(server)
         .get(`/api/v1/agreements?role=provider&status=ACTIVE`)
         .set(auth(providerToken))
@@ -85,15 +88,33 @@ describe('Agreement endpoints', () => {
         .expect(200);
       expect(second.agreement.id).toBeTruthy();
     });
+    it('returns lighter summary shape without deliverable attachments or presigning', async () => {
+      await submit();
+      const page = await request(server)
+        .get('/api/v1/agreements?role=buyer')
+        .set(auth(buyerToken))
+        .expect(200);
+      expect(page.body.items[0].deliverables).toHaveLength(1);
+      expect(page.body.items[0].deliverables[0]).not.toHaveProperty('attachments');
+      agreementSummarySchema.parse(page.body.items[0]);
+
+      // Contrast with detail view which has attachments with presigned urls
+      const detail = await request(server).get(path()).set(auth(buyerToken)).expect(200);
+      expect(detail.body.deliverables[0].attachments).toHaveLength(1);
+      expect(detail.body.deliverables[0].attachments[0].url).toBeTruthy();
+      agreementDetailSchema.parse(detail.body);
+    });
     it('validates query and requires authentication', async () => {
       await request(server).get('/api/v1/agreements?role=nope').set(auth(buyerToken)).expect(400);
       await request(server).get('/api/v1/agreements').expect(401);
     });
-    it('shows detail only to participants with parties and confirmation', async () => {
+    it('shows detail only to participants with parties, listing, bid, myRole and confirmation', async () => {
       const response = await request(server).get(path()).set(auth(buyerToken)).expect(200);
       expect(response.body.buyer.id).toBe(buyer.id);
       expect(response.body.provider.id).toBe(provider.id);
       expect(response.body.myRole).toBe('buyer');
+      expect(response.body.listing).toBeDefined();
+      expect(response.body.bid).toBeDefined();
       expect(response.body.conversationId).toBeNull();
       await request(server).get(path()).set(auth(outsiderToken)).expect(404);
       await request(server).get(path()).expect(401);
@@ -156,6 +177,51 @@ describe('Agreement endpoints', () => {
         .send({})
         .expect(400);
     });
+    it('prevents overwrite under concurrent milestone updates and sequences concurrent creations', async () => {
+      const created = await request(server)
+        .post(`${path()}/milestones`)
+        .set(auth(buyerToken))
+        .send({ title: 'Concurrent Milestone' })
+        .expect(201);
+
+      // Advance milestone to IN_PROGRESS
+      await request(server)
+        .patch(`${path()}/milestones/${created.body.id}`)
+        .set(auth(buyerToken))
+        .send({ status: 'IN_PROGRESS' })
+        .expect(200);
+
+      // A moves IN_PROGRESS to DONE while B concurrently sends status: IN_PROGRESS
+      // A succeeds (200), B gets 409 and cannot overwrite DONE back to IN_PROGRESS
+      const [u1, u2] = await Promise.all([
+        request(server)
+          .patch(`${path()}/milestones/${created.body.id}`)
+          .set(auth(buyerToken))
+          .send({ status: 'DONE' }),
+        request(server)
+          .patch(`${path()}/milestones/${created.body.id}`)
+          .set(auth(providerToken))
+          .send({ status: 'IN_PROGRESS' }),
+      ]);
+      expect([u1.status, u2.status].sort()).toEqual([200, 409]);
+
+      const milestoneRow = await prisma.milestone.findUniqueOrThrow({
+        where: { id: created.body.id },
+      });
+      expect(milestoneRow.status).toBe('DONE');
+
+      // Concurrent milestone creations assign distinct positions
+      const [c1, c2] = await Promise.all([
+        request(server).post(`${path()}/milestones`).set(auth(buyerToken)).send({ title: 'M A' }),
+        request(server)
+          .post(`${path()}/milestones`)
+          .set(auth(providerToken))
+          .send({ title: 'M B' }),
+      ]);
+      expect([c1.status, c2.status]).toEqual([201, 201]);
+      const positions = [c1.body.position, c2.body.position].sort((a, b) => a - b);
+      expect(positions[1] - positions[0]).toBe(1);
+    });
   });
 
   describe('deliverables', () => {
@@ -190,11 +256,13 @@ describe('Agreement endpoints', () => {
         .set(auth(providerToken))
         .send({ note: 'x', attachmentIds: [] })
         .expect(400);
+      // Finding 5: Buyer submitting deliverable gets 403
       await request(server)
         .post(`${path()}/deliverables`)
         .set(auth(buyerToken))
         .send({ note: 'x', attachmentIds: [upload.id] })
-        .expect(404);
+        .expect(403);
+      // Non-participant gets 404
       await request(server)
         .post(`${path()}/deliverables`)
         .set(auth(outsiderToken))
@@ -202,15 +270,27 @@ describe('Agreement endpoints', () => {
         .expect(404);
       await request(server).post(`${path()}/deliverables`).expect(401);
       const delivered = await submit();
+      // Finding 5: Provider accepting deliverable gets 403
       await request(server)
         .post(`${path()}/deliverables/${delivered.body.id}/accept`)
         .set(auth(providerToken))
         .send({})
-        .expect(404);
+        .expect(403);
       await request(server)
         .post(`${path()}/deliverables/${delivered.body.id}/accept`)
         .set(auth(outsiderToken))
         .send({})
+        .expect(404);
+      // Finding 5: Provider requesting revision gets 403
+      await request(server)
+        .post(`${path()}/deliverables/${delivered.body.id}/request-revision`)
+        .set(auth(providerToken))
+        .send({ note: 'please' })
+        .expect(403);
+      await request(server)
+        .post(`${path()}/deliverables/${delivered.body.id}/request-revision`)
+        .set(auth(outsiderToken))
+        .send({ note: 'please' })
         .expect(404);
       await request(server)
         .post(`${path()}/deliverables/${delivered.body.id}/request-revision`)
@@ -227,6 +307,35 @@ describe('Agreement endpoints', () => {
         .set(auth(buyerToken))
         .send({})
         .expect(409);
+    });
+    it('rejects reuse of attachments across deliverables (Finding 3)', async () => {
+      const upload = await readyDeliverableUpload();
+      await request(server)
+        .post(`${path()}/deliverables`)
+        .set(auth(providerToken))
+        .send({ note: 'First submission', attachmentIds: [upload.id] })
+        .expect(201);
+
+      // Re-submitting the same upload on another deliverable must be rejected with 400
+      await request(server)
+        .post(`${path()}/deliverables`)
+        .set(auth(providerToken))
+        .send({ note: 'Reusing attachment', attachmentIds: [upload.id] })
+        .expect(400);
+    });
+    it('resolves deliverable-submit versus cancel race with one winner (Finding 4)', async () => {
+      const upload = await readyDeliverableUpload();
+      const [submitRes, cancelRes] = await Promise.all([
+        request(server)
+          .post(`${path()}/deliverables`)
+          .set(auth(providerToken))
+          .send({ note: 'Race submission', attachmentIds: [upload.id] }),
+        request(server)
+          .post(`${path()}/cancel`)
+          .set(auth(buyerToken))
+          .send({ reason: 'Cancelling during submit' }),
+      ]);
+      expect([submitRes.status, cancelRes.status].sort()).toEqual([201, 409]);
     });
   });
 
@@ -258,6 +367,19 @@ describe('Agreement endpoints', () => {
         .send({ reason: 'late' })
         .expect(409);
     });
+    it('returns 409 on complete when cancel won concurrently', async () => {
+      await request(server)
+        .post(`${path()}/cancel`)
+        .set(auth(buyerToken))
+        .send({ reason: 'Cancel before complete' })
+        .expect(201);
+
+      await request(server)
+        .post(`${path()}/complete`)
+        .set(auth(providerToken))
+        .send({})
+        .expect(409);
+    });
     it('cancels or disputes once and creates an agreement report', async () => {
       await request(server)
         .post(`${path()}/cancel`)
@@ -283,25 +405,33 @@ describe('Agreement endpoints', () => {
         .send({ reason: 'again' })
         .expect(409);
     });
-    it('creates a dispute report and resolves complete versus cancel with one winner', async () => {
-      const [complete, cancel] = await Promise.all([
-        request(server).post(`${path()}/complete`).set(auth(buyerToken)).send({}),
-        request(server).post(`${path()}/cancel`).set(auth(providerToken)).send({ reason: 'stop' }),
-      ]);
-      expect([complete.status, cancel.status].filter((status) => status === 201)).toHaveLength(2);
-      const state = await prisma.agreement.findUniqueOrThrow({ where: { id: agreementId } });
-      expect(['CANCELLED', 'ACTIVE']).toContain(state.status);
+    it('rejects cancel and dispute when agreement is already DISPUTED', async () => {
       const disputed = await createAgreement({ buyer, provider, listing: {}, amountCents: 1000 });
       await request(server)
         .post(`/api/v1/agreements/${disputed.agreement.id}/dispute`)
         .set(auth(buyerToken))
         .send({ reason: 'Fraud concern' })
         .expect(201);
+
       expect(
         await prisma.report.findFirst({
           where: { targetId: disputed.agreement.id, targetType: 'AGREEMENT' },
         }),
       ).not.toBeNull();
+
+      // Subsequent dispute from DISPUTED returns 409
+      await request(server)
+        .post(`/api/v1/agreements/${disputed.agreement.id}/dispute`)
+        .set(auth(providerToken))
+        .send({ reason: 'Another dispute' })
+        .expect(409);
+
+      // Subsequent cancel from DISPUTED returns 409
+      await request(server)
+        .post(`/api/v1/agreements/${disputed.agreement.id}/cancel`)
+        .set(auth(buyerToken))
+        .send({ reason: 'Cancel disputed' })
+        .expect(409);
     });
   });
 
@@ -372,6 +502,52 @@ describe('Agreement endpoints', () => {
           .send({ note: 'change' }),
       ]);
       expect([accept.status, revision.status].sort()).toEqual([201, 409]);
+    });
+    it('updates ratings without lost updates under concurrent reviews sharing one target user (Finding 2)', async () => {
+      const buyer2 = await createUser();
+      const buyer2Token = signToken(app, { id: buyer2.id, role: 'USER' });
+      const fixture2 = await createAgreement({
+        buyer: buyer2,
+        provider,
+        listing: {},
+        amountCents: 5000,
+      });
+
+      // Complete both agreements
+      await request(server).post(`${path()}/complete`).set(auth(buyerToken)).send({}).expect(201);
+      await request(server)
+        .post(`${path()}/complete`)
+        .set(auth(providerToken))
+        .send({})
+        .expect(201);
+
+      await request(server)
+        .post(`/api/v1/agreements/${fixture2.agreement.id}/complete`)
+        .set(auth(buyer2Token))
+        .send({})
+        .expect(201);
+      await request(server)
+        .post(`/api/v1/agreements/${fixture2.agreement.id}/complete`)
+        .set(auth(providerToken))
+        .send({})
+        .expect(201);
+
+      // Concurrently submit reviews for the same target (provider)
+      const [r1, r2] = await Promise.all([
+        request(server)
+          .post(`${path()}/reviews`)
+          .set(auth(buyerToken))
+          .send({ rating: 4, comment: 'Good' }),
+        request(server)
+          .post(`/api/v1/agreements/${fixture2.agreement.id}/reviews`)
+          .set(auth(buyer2Token))
+          .send({ rating: 5, comment: 'Great' }),
+      ]);
+      expect([r1.status, r2.status]).toEqual([201, 201]);
+
+      const providerUser = await prisma.user.findUniqueOrThrow({ where: { id: provider.id } });
+      expect(providerUser.ratingCount).toBe(2);
+      expect(providerUser.ratingAvg).toBe(4.5);
     });
   });
 });

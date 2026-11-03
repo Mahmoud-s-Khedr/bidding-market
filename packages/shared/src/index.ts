@@ -313,6 +313,12 @@ export const bidCounterSchema = z.object({
   message: z.string().max(5000),
 });
 export type BidCounterInput = z.infer<typeof bidCounterSchema>;
+export const milestoneCreateSchema = z.object({
+  title: z.string().min(1).max(200),
+  amountCents: z.number().int().nonnegative().max(MAX_INT4).optional(),
+  dueDate: z.iso.datetime().optional(),
+});
+export type MilestoneCreateInput = z.infer<typeof milestoneCreateSchema>;
 export const milestoneSchema = z.object({
   title: z.string().min(1).max(200),
   amountCents: z.number().int().nonnegative().max(MAX_INT4).optional(),
@@ -505,6 +511,15 @@ export const deliverableResponseSchema = z.object({
   attachments: z.array(attachmentSchema),
   createdAt: date,
 });
+export const deliverableSummarySchema = z.object({
+  id: z.string(),
+  agreementId: z.string(),
+  note: z.string(),
+  submittedById: z.string(),
+  acceptedAt: date.nullable(),
+  revisionNote: z.string().nullable(),
+  createdAt: date,
+});
 export const agreementEventSchema = z.object({
   id: z.string(),
   agreementId: z.string(),
@@ -513,7 +528,7 @@ export const agreementEventSchema = z.object({
   data: z.unknown().nullable(),
   createdAt: date,
 });
-export const agreementSchema = z.object({
+export const agreementDetailSchema = z.object({
   id: z.string(),
   listingId: z.string(),
   bidId: z.string(),
@@ -536,6 +551,24 @@ export const bidAcceptResponseSchema = z.object({
   agreement: agreementSchema,
 });
 export type BidAcceptResponse = z.infer<typeof bidAcceptResponseSchema>;
+export const agreementSchema = agreementDetailSchema;
+export const agreementSummarySchema = z.object({
+  id: z.string(),
+  listingId: z.string(),
+  bidId: z.string(),
+  buyer: publicUserSchema,
+  provider: publicUserSchema,
+  status: AgreementStatus,
+  listing: listingSummarySchema.optional(),
+  bid: bidSchema.optional(),
+  conversationId: z.string().nullable().optional(),
+  myRole: z.enum(['buyer', 'provider']).optional(),
+  myConfirmation: z.boolean().optional(),
+  milestones: z.array(milestoneResponseSchema),
+  deliverables: z.array(deliverableSummarySchema),
+  createdAt: date,
+  updatedAt: date,
+});
 export const messageSchema = z.object({
   id: z.string(),
   conversationId: z.string(),
@@ -611,6 +644,18 @@ export type ListingSummary = z.infer<typeof listingSummarySchema>;
 export type ListingDetail = z.infer<typeof listingDetailSchema>;
 export type Bid = z.infer<typeof bidSchema>;
 export type Agreement = z.infer<typeof agreementSchema>;
+export type AgreementDetail = z.infer<typeof agreementDetailSchema>;
+export type AgreementSummary = z.infer<typeof agreementSummarySchema>;
+export type MilestoneResponse = z.infer<typeof milestoneResponseSchema>;
+export type DeliverableResponse = z.infer<typeof deliverableResponseSchema>;
+export type AgreementEvent = z.infer<typeof agreementEventSchema>;
+export type DashboardSummary = z.infer<typeof dashboardSummarySchema>;
+export type AgreementsQueryInput = z.infer<typeof agreementsQuerySchema>;
+export type RevisionRequestInput = z.infer<typeof revisionRequestSchema>;
+export type AgreementCancelInput = z.infer<typeof agreementCancelSchema>;
+export type DisputeInput = z.infer<typeof disputeSchema>;
+export type ReviewInput = z.infer<typeof reviewSchema>;
+export type IdParamInput = z.infer<typeof idParamSchema>;
 export type Message = z.infer<typeof messageSchema>;
 export type Conversation = z.infer<typeof conversationSchema>;
 export type Notification = z.infer<typeof notificationSchema>;

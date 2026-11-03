@@ -1,11 +1,18 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import type { DeliverableInput, MilestoneInput, MilestoneUpdateInput } from '@market/shared';
+import type {
+  AgreementsQueryInput,
+  DeliverableInput,
+  MilestoneCreateInput,
+  MilestoneUpdateInput,
+  ReviewInput,
+} from '@market/shared';
 import { Prisma } from '../../generated/prisma/client.js';
 import { paginate } from '../../common/pagination.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
@@ -107,6 +114,53 @@ export class AgreementsService {
     };
   }
 
+  private async presentSummary(
+    agreement: Awaited<ReturnType<AgreementsService['loadSummaryRows']>>[number],
+    userId: string,
+  ) {
+    const myRole = roleFor(agreement, userId);
+    if (!myRole) throw new NotFoundException('Agreement not found');
+    const [buyer, provider] = await Promise.all([
+      this.users.toPublicUser(agreement.buyer),
+      this.users.toPublicUser(agreement.provider),
+    ]);
+    const deliverables = agreement.deliverables.map((deliverable) => ({
+      id: deliverable.id,
+      agreementId: deliverable.agreementId,
+      note: deliverable.note,
+      submittedById: deliverable.submittedById,
+      acceptedAt: deliverable.acceptedAt,
+      revisionNote: deliverable.revisionNote,
+      createdAt: deliverable.createdAt,
+    }));
+    return {
+      id: agreement.id,
+      listingId: agreement.listingId,
+      bidId: agreement.bidId,
+      buyer,
+      provider,
+      status: agreement.status,
+      listing: {
+        ...agreement.listing,
+        categoryName: agreement.listing.category.name,
+        thumbnailUrl: null,
+        bidCount: 0,
+        owner: await this.users.toPublicUser(agreement.listing.owner),
+      },
+      bid: { ...agreement.bid, bidder: await this.users.toPublicUser(agreement.bid.bidder) },
+      conversationId: agreement.conversation?.id ?? null,
+      myRole,
+      myConfirmation:
+        myRole === 'buyer'
+          ? agreement.buyerConfirmedAt !== null
+          : agreement.providerConfirmedAt !== null,
+      milestones: agreement.milestones,
+      deliverables,
+      createdAt: agreement.createdAt,
+      updatedAt: agreement.updatedAt,
+    };
+  }
+
   private loadDetail(id: string) {
     return this.prisma.agreement.findUniqueOrThrow({
       where: { id },
@@ -126,15 +180,31 @@ export class AgreementsService {
     });
   }
 
-  async list(
-    userId: string,
-    query: {
-      status?: 'ACTIVE' | 'DELIVERED' | 'COMPLETED' | 'CANCELLED' | 'DISPUTED';
-      role?: Role;
-      cursor?: string;
-      limit: number;
-    },
+  private loadSummaryRows(
+    where: Prisma.AgreementWhereInput,
+    take: number,
+    cursor?: string,
+    skip?: number,
   ) {
+    return this.prisma.agreement.findMany({
+      where,
+      take,
+      cursor: cursor ? { id: cursor } : undefined,
+      skip,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      include: {
+        buyer: { select: publicUserSelect },
+        provider: { select: publicUserSelect },
+        listing: { include: { owner: { select: publicUserSelect }, category: true } },
+        bid: { include: { bidder: { select: publicUserSelect } } },
+        conversation: true,
+        milestones: { orderBy: [{ position: 'asc' }, { createdAt: 'asc' }] },
+        deliverables: { orderBy: { createdAt: 'asc' } },
+      },
+    });
+  }
+
+  async list(userId: string, query: AgreementsQueryInput) {
     const where = {
       ...(query.role === 'buyer'
         ? { buyerId: userId }
@@ -143,26 +213,15 @@ export class AgreementsService {
           : { OR: [{ buyerId: userId }, { providerId: userId }] }),
       ...(query.status ? { status: query.status } : {}),
     };
-    const rows = await this.prisma.agreement.findMany({
+    const rows = await this.loadSummaryRows(
       where,
-      take: query.limit + 1,
-      cursor: query.cursor ? { id: query.cursor } : undefined,
-      skip: query.cursor ? 1 : 0,
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      include: {
-        buyer: { select: publicUserSelect },
-        provider: { select: publicUserSelect },
-        listing: { include: { owner: { select: publicUserSelect }, category: true } },
-        bid: { include: { bidder: { select: publicUserSelect } } },
-        conversation: true,
-        milestones: true,
-        deliverables: { include: { attachments: { include: { upload: true } } } },
-        events: true,
-      },
-    });
+      query.limit + 1,
+      query.cursor,
+      query.cursor ? 1 : 0,
+    );
     const page = paginate(rows, query.limit);
     return {
-      items: await Promise.all(page.items.map((row) => this.present(row, userId))),
+      items: await Promise.all(page.items.map((row) => this.presentSummary(row, userId))),
       nextCursor: page.nextCursor,
     };
   }
@@ -172,11 +231,19 @@ export class AgreementsService {
     return this.present(await this.loadDetail(id), userId);
   }
 
-  async createMilestone(id: string, userId: string, input: MilestoneInput) {
-    const agreement = await this.participant(id, userId);
-    if (!isActionable(agreement.status)) throw new ConflictException('Agreement is not actionable');
+  async createMilestone(id: string, userId: string, input: MilestoneCreateInput) {
+    await this.participant(id, userId);
     return this.prisma.$transaction(async (tx) => {
-      const position = await tx.milestone.count({ where: { agreementId: id } });
+      const moved = await tx.agreement.updateMany({
+        where: { id, status: { in: ['ACTIVE', 'DELIVERED'] } },
+        data: { statusChangedAt: new Date() },
+      });
+      if (!moved.count) throw new ConflictException('Agreement is not actionable');
+      const maxPos = await tx.milestone.aggregate({
+        where: { agreementId: id },
+        _max: { position: true },
+      });
+      const position = maxPos._max.position !== null ? maxPos._max.position + 1 : 0;
       const milestone = await tx.milestone.create({
         data: {
           agreementId: id,
@@ -204,36 +271,50 @@ export class AgreementsService {
     userId: string,
     input: MilestoneUpdateInput,
   ) {
-    const agreement = await this.participant(id, userId);
-    if (!isActionable(agreement.status)) throw new ConflictException('Agreement is not actionable');
-    const milestone = await this.prisma.milestone.findFirst({
-      where: { id: milestoneId, agreementId: id },
+    await this.participant(id, userId);
+    return this.prisma.$transaction(async (tx) => {
+      const moved = await tx.agreement.updateMany({
+        where: { id, status: { in: ['ACTIVE', 'DELIVERED'] } },
+        data: { statusChangedAt: new Date() },
+      });
+      if (!moved.count) throw new ConflictException('Agreement is not actionable');
+
+      const milestone = await tx.milestone.findFirst({
+        where: { id: milestoneId, agreementId: id },
+      });
+      if (!milestone) throw new NotFoundException('Milestone not found');
+      if (input.status && !canTransitionMilestone(milestone.status, input.status))
+        throw new ConflictException('Invalid milestone status transition');
+
+      const updated = await tx.milestone.updateMany({
+        where: { id: milestoneId, agreementId: id, status: milestone.status },
+        data: {
+          ...(input.title !== undefined ? { title: input.title } : {}),
+          ...(input.amountCents !== undefined ? { amountCents: input.amountCents } : {}),
+          ...(input.dueDate !== undefined
+            ? { dueDate: input.dueDate ? new Date(input.dueDate) : null }
+            : {}),
+          ...(input.status ? { status: input.status } : {}),
+        },
+      });
+      if (!updated.count) throw new ConflictException('Milestone status transition conflict');
+
+      await tx.agreementEvent.create({
+        data: {
+          agreementId: id,
+          actorId: userId,
+          type: 'MILESTONE_UPDATED',
+          data: { milestoneId, ...input },
+        },
+      });
+      return tx.milestone.findUniqueOrThrow({ where: { id: milestoneId } });
     });
-    if (!milestone) throw new NotFoundException('Milestone not found');
-    if (input.status && !canTransitionMilestone(milestone.status, input.status))
-      throw new ConflictException('Invalid milestone status transition');
-    const updated = await this.prisma.milestone.update({
-      where: { id: milestoneId },
-      data: {
-        ...(input.title !== undefined ? { title: input.title } : {}),
-        ...(input.status ? { status: input.status } : {}),
-      },
-    });
-    await this.prisma.agreementEvent.create({
-      data: {
-        agreementId: id,
-        actorId: userId,
-        type: 'MILESTONE_UPDATED',
-        data: { milestoneId, ...input },
-      },
-    });
-    return updated;
   }
 
   async submitDeliverable(id: string, userId: string, input: DeliverableInput) {
     const agreement = await this.participant(id, userId);
     if (roleFor(agreement, userId) !== 'provider')
-      throw new NotFoundException('Agreement not found');
+      throw new ForbiddenException('Only the provider can submit deliverables');
     if (
       !input.attachmentIds.length ||
       new Set(input.attachmentIds).size !== input.attachmentIds.length
@@ -245,11 +326,12 @@ export class AgreementsService {
         uploaderId: userId,
         purpose: 'DELIVERABLE',
         status: 'READY',
+        deliverableAttachments: { none: {} },
       },
     });
     if (uploads.length !== input.attachmentIds.length)
       throw new BadRequestException(
-        'Attachments must be ready DELIVERABLE uploads owned by provider',
+        'Attachments must be ready DELIVERABLE uploads owned by provider that are not already attached',
       );
     const deliverable = await this.prisma.$transaction(async (tx) => {
       const moved = await tx.agreement.updateMany({
@@ -296,7 +378,8 @@ export class AgreementsService {
     revisionNote?: string,
   ) {
     const agreement = await this.participant(id, userId);
-    if (roleFor(agreement, userId) !== 'buyer') throw new NotFoundException('Agreement not found');
+    if (roleFor(agreement, userId) !== 'buyer')
+      throw new ForbiddenException('Only the buyer can resolve deliverables');
     const deliverable = await this.prisma.$transaction(async (tx) => {
       const current = await tx.deliverable.findFirst({
         where: { id: deliverableId, agreementId: id },
@@ -349,7 +432,7 @@ export class AgreementsService {
     const completed = await this.prisma.$transaction(async (tx) => {
       const set =
         role === 'buyer' ? { buyerConfirmedAt: new Date() } : { providerConfirmedAt: new Date() };
-      await tx.agreement.updateMany({
+      const confirmed = await tx.agreement.updateMany({
         where: {
           id,
           status: { in: ['ACTIVE', 'DELIVERED'] },
@@ -366,6 +449,15 @@ export class AgreementsService {
         },
         data: { status: 'COMPLETED', completedAt: new Date(), statusChangedAt: new Date() },
       });
+      if (!confirmed.count && !final.count) {
+        const current = await tx.agreement.findUnique({
+          where: { id },
+          select: { status: true },
+        });
+        if (current?.status !== 'COMPLETED' && (!current || !isActionable(current.status))) {
+          throw new ConflictException('Agreement cannot be completed');
+        }
+      }
       if (final.count) {
         await tx.listing.update({
           where: { id: agreement.listingId },
@@ -434,13 +526,14 @@ export class AgreementsService {
     return this.detail(id, userId);
   }
 
-  async review(id: string, userId: string, input: { rating: number; comment?: string }) {
+  async review(id: string, userId: string, input: ReviewInput) {
     const agreement = await this.participant(id, userId);
     if (agreement.status !== 'COMPLETED')
       throw new ConflictException('Reviews require a completed agreement');
     const targetId = agreement.buyerId === userId ? agreement.providerId : agreement.buyerId;
     try {
       const review = await this.prisma.$transaction(async (tx) => {
+        await tx.$executeRaw(Prisma.sql`SELECT id FROM "User" WHERE id = ${targetId} FOR UPDATE`);
         const created = await tx.review.create({
           data: {
             agreementId: id,

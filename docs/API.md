@@ -84,20 +84,23 @@ Bid statuses: `PENDING, SHORTLISTED, COUNTERED, ACCEPTED, REJECTED, WITHDRAWN, D
 
 ## Agreements (transactions)
 
-| GET | /agreements 🔒 | mine, filter `status`, `role=buyer|provider` |
+| GET | /agreements 🔒 | mine, filter `status`, `role=buyer|provider` — returns paginated agreement summaries (lighter summary shape without deliverable attachments or presigned URLs) |
 |---|---|---|
-| GET | /agreements/:id 🔒 participant | detail: parties, listing, bid, milestones, deliverables, timeline, conversationId, myConfirmation |
+| GET | /agreements/:id 🔒 participant | detail: parties (`buyer`, `provider`), listing (summary), bid, milestones, deliverables (with presigned attachment URLs), timeline (`events`), conversationId, `myRole`, `myConfirmation` |
 | POST | /agreements/:id/milestones 🔒 participant | `{title, amountCents?, dueDate?}` |
 | PATCH | /agreements/:id/milestones/:mid 🔒 participant | `{title?, status?: 'PENDING'|'IN_PROGRESS'|'DONE'}` |
-| POST | /agreements/:id/deliverables 🔒 provider | `{note, attachmentIds}` → status DELIVERED |
+| POST | /agreements/:id/deliverables 🔒 provider | `{note, attachmentIds}` → status DELIVERED (attachments cannot be reused across deliverables) |
 | POST | /agreements/:id/deliverables/:did/accept 🔒 buyer | |
 | POST | /agreements/:id/deliverables/:did/request-revision 🔒 buyer | `{note}` → ACTIVE |
-| POST | /agreements/:id/complete 🔒 participant | records confirmation; when both confirmed → COMPLETED, listing COMPLETED; allowed from ACTIVE or DELIVERED and is idempotent for a party already confirmed |
-| POST | /agreements/:id/cancel 🔒 participant | `{reason}` → CANCELLED; listing → CLOSED |
-| POST | /agreements/:id/dispute 🔒 participant | `{reason}` → DISPUTED (creates admin report) |
+| POST | /agreements/:id/complete 🔒 participant | records confirmation; when both confirmed → COMPLETED, listing COMPLETED; allowed from ACTIVE or DELIVERED and is idempotent for a party already confirmed; returns 409 if concurrent cancel won |
+| POST | /agreements/:id/cancel 🔒 participant | `{reason}` → CANCELLED; listing → CLOSED (rejected with 409 from DISPUTED) |
+| POST | /agreements/:id/dispute 🔒 participant | `{reason}` → DISPUTED (creates admin report; rejected with 409 from DISPUTED) |
 | POST | /agreements/:id/reviews 🔒 participant | `{rating 1..5, comment?}` only when COMPLETED, once per party |
 
-Roles: in a `REQUEST` listing the owner is **buyer** and bidder is **provider**; in an `OFFER` listing the owner is **provider** and bidder is **buyer**.
+Roles and Authorization:
+
+- In a `REQUEST` listing the owner is **buyer** and bidder is **provider**; in an `OFFER` listing the owner is **provider** and bidder is **buyer**.
+- Role-restricted actions: a participant attempting the other role's action (buyer submitting deliverable; provider accepting deliverable or requesting revision) receives **403 Forbidden**. Non-participants receive **404 Not Found**.
 
 ## Notifications
 
@@ -112,6 +115,11 @@ Types: `BID_RECEIVED, BID_UPDATED, BID_COUNTERED, BID_ACCEPTED, BID_REJECTED, ME
 ## Dashboard
 
 | GET | /dashboard/summary 🔒 | `{listings: {open, inProgress, completed}, bids: {pending, accepted}, agreements: {active, completed}, unreadMessages, unreadNotifications}` |
+
+Dashboard semantics:
+
+- `agreements.active`: counts agreements in both `ACTIVE` and `DELIVERED` status for the authenticated user.
+- `unreadMessages`: counts unread messages across all conversations the user participates in where the message was sent by another participant after the user's `lastReadMessageId` timestamp (or all messages from others if unread).
 
 ## Reports
 
