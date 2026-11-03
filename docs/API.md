@@ -82,6 +82,8 @@ Bid statuses: `PENDING, SHORTLISTED, COUNTERED, ACCEPTED, REJECTED, WITHDRAWN, D
 | POST | /conversations/:id/messages 🔒    | `{type: 'TEXT'                                                                             | 'IMAGE' | 'FILE' | 'VOICE', body?, attachmentIds?, voiceDurationSec?}` |
 | POST | /conversations/:id/read 🔒        | `{lastMessageId}` marks read                                                               |
 
+Moderators may soft-delete a message. A deleted message serializes as `{body: null, attachments: [], deleted: true}`; its identity, sender and timestamp remain available to conversation participants.
+
 ## Agreements (transactions)
 
 | GET | /agreements 🔒 | mine, filter `status`, `role=buyer|provider` |
@@ -115,19 +117,23 @@ Types: `BID_RECEIVED, BID_UPDATED, BID_COUNTERED, BID_ACCEPTED, BID_REJECTED, ME
 
 ## Reports
 
-| POST | /reports 🔒 | `{targetType: 'LISTING'|'USER'|'MESSAGE'|'BID', targetId, reason: 'SPAM'|'FRAUD'|'INAPPROPRIATE'|'HARASSMENT'|'OTHER', details?}` |
+| POST | /reports 🔒 | `{targetType: 'LISTING'|'USER'|'MESSAGE'|'BID'|'AGREEMENT', targetId, reason: 'SPAM'|'FRAUD'|'INAPPROPRIATE'|'HARASSMENT'|'OTHER', details?}` |
+
+Only a conversation participant may report a message; bids and agreements are reportable only by their visible participants/owner. Users cannot report themselves or their own listings. One reporter may have at most one `OPEN` report for a target (409 on duplicates); report creation is rate limited.
 
 ## Admin 👑
 
-| GET   | /admin/stats                         | totals + 30-day daily series of signups, listings, bids, agreements |
-| ----- | ------------------------------------ | ------------------------------------------------------------------- |
-| GET   | /admin/users                         | `q, role, status` paginated                                         |
-| PATCH | /admin/users/:id                     | `{role?, status?: 'ACTIVE'                                          | 'SUSPENDED'      | 'BANNED', reason?}` (cannot modify self) |
-| GET   | /admin/listings                      | all statuses, `q, status`                                           |
-| POST  | /admin/listings/:id/remove, /restore | `{reason}`                                                          |
-| GET   | /admin/reports                       | `status=OPEN                                                        | RESOLVED         | DISMISSED`                               |
-| POST  | /admin/reports/:id/resolve           | `{action: 'DISMISS'                                                 | 'REMOVE_CONTENT' | 'SUSPEND_USER', note}`                   |
-| GET   | /admin/audit-log                     | paginated admin actions                                             |
+| GET   | /admin/stats                         | `{users:{ACTIVE,SUSPENDED,BANNED}, listings:{DRAFT,OPEN,IN_PROGRESS,COMPLETED,CLOSED,REMOVED}, bids, agreements:{ACTIVE,DELIVERED,COMPLETED,CANCELLED,DISPUTED}, openReports, daily:[{day,signups,listings,bids,agreements}]}`; daily has 30 zero-filled UTC days |
+| ----- | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET   | /admin/users                         | `q, role, status` paginated                                                                                                                                                                                                                                       |
+| PATCH | /admin/users/:id                     | `{role?, status?: 'ACTIVE'                                                                                                                                                                                                                                        | 'SUSPENDED'      | 'BANNED', reason?}` (cannot modify self) |
+| GET   | /admin/listings                      | all statuses, `q, status`                                                                                                                                                                                                                                         |
+| POST  | /admin/listings/:id/remove, /restore | `{reason}`                                                                                                                                                                                                                                                        |
+| GET   | /admin/reports                       | `status=OPEN                                                                                                                                                                                                                                                      | RESOLVED         | DISMISSED`                               |
+| POST  | /admin/reports/:id/resolve           | `{action: 'DISMISS'                                                                                                                                                                                                                                               | 'REMOVE_CONTENT' | 'SUSPEND_USER', note}`                   |
+| GET   | /admin/audit-log                     | paginated admin actions                                                                                                                                                                                                                                           |
+
+Admin writes are recorded in the audit log. Admin users cannot modify themselves, and the last remaining `ADMIN` cannot be demoted (409). Suspending or banning a user revokes all refresh tokens immediately; access tokens are rejected while their status is not `ACTIVE`.
 
 ## Health
 

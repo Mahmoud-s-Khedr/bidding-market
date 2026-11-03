@@ -56,6 +56,7 @@ export const NotificationType = z.enum([
 export const ReportTargetType = z.enum(['LISTING', 'USER', 'MESSAGE', 'BID', 'AGREEMENT']);
 export const ReportReason = z.enum(['SPAM', 'FRAUD', 'INAPPROPRIATE', 'HARASSMENT', 'OTHER']);
 export const ReportStatus = z.enum(['OPEN', 'RESOLVED', 'DISMISSED']);
+export const ReportResolution = z.enum(['DISMISS', 'REMOVE_CONTENT', 'SUSPEND_USER']);
 
 const email = z.email().transform((value) => value.toLowerCase());
 export const passwordSchema = z
@@ -495,6 +496,7 @@ export const messageSchema = z.object({
   voiceDurationSec: z.number().nullable(),
   attachments: z.array(attachmentSchema),
   createdAt: date,
+  deleted: z.boolean().default(false),
 });
 export const conversationSchema = z.object({
   id: z.string(),
@@ -621,6 +623,20 @@ export const reportSchema = z.object({
   reason: ReportReason,
   details: z.string().trim().max(2000).optional(),
 });
+export const reportResponseSchema = z.object({
+  id: z.string(),
+  reporterId: z.string(),
+  targetType: ReportTargetType,
+  targetId: z.string(),
+  reason: ReportReason,
+  details: z.string().nullable(),
+  status: ReportStatus,
+  resolution: ReportResolution.nullable(),
+  resolutionNote: z.string().nullable(),
+  resolvedById: z.string().nullable(),
+  createdAt: date,
+  resolvedAt: date.nullable(),
+});
 export const wsEventNames = {
   conversationJoin: 'conversation:join',
   conversationLeave: 'conversation:leave',
@@ -675,6 +691,10 @@ export type NotificationType = z.infer<typeof NotificationType>;
 export type ReportTargetType = z.infer<typeof ReportTargetType>;
 export type ReportReason = z.infer<typeof ReportReason>;
 export type ReportStatus = z.infer<typeof ReportStatus>;
+export type ReportResolution = z.infer<typeof ReportResolution>;
+export type ReportInput = z.infer<typeof reportSchema>;
+export type AdminUserUpdateInput = z.infer<typeof adminUserUpdateSchema>;
+export type AdminResolveReportInput = z.infer<typeof adminResolveReportSchema>;
 export type AuthResponse = z.infer<typeof authResponseSchema>;
 export type ListingFilters = z.input<typeof listingQuerySchema>;
 export type ListingSort = NonNullable<z.input<typeof listingQuerySchema>['sort']>;
