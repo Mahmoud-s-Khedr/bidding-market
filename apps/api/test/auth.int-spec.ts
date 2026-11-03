@@ -22,6 +22,7 @@ describe('auth', () => {
       .send(input)
       .expect(201);
     assertNoPasswordHash(registered.body);
+    expect(registered.body.user).not.toHaveProperty('passwordHash');
     expect(registered.body.accessToken).toEqual(expect.any(String));
     expect(registered.headers['set-cookie']?.[0]).toContain('HttpOnly');
     expect(registered.headers['set-cookie']?.[0]).toContain('Path=/api/v1/auth');
@@ -162,6 +163,18 @@ describe('auth', () => {
       .post('/api/v1/auth/refresh')
       .set('Cookie', cookie)
       .expect(401);
+  });
+  it('enforces RolesGuard: non-admin gets 403 on an admin route', async () => {
+    const registered = await request(app.getHttpServer())
+      .post('/api/v1/auth/register')
+      .send(userInput())
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post('/api/v1/admin/categories')
+      .set('Authorization', `Bearer ${registered.body.accessToken}`)
+      .send({ name: 'Admin Cat', slug: 'admin-cat' })
+      .expect(403);
   });
   it('rate limits repeated failed logins', async () => {
     const input = userInput();

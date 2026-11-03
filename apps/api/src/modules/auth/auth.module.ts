@@ -1,5 +1,5 @@
 import { forwardRef, Module } from '@nestjs/common';
-import { JwtModule } from '@nestjs/jwt';
+import { JwtModule, type JwtModuleOptions } from '@nestjs/jwt';
 import { AuthController } from './auth.controller.js';
 import { AuthService } from './auth.service.js';
 import { JwtAuthGuard, RolesGuard } from './auth.guard.js';
@@ -12,7 +12,12 @@ import { UsersModule } from '../users/users.module.js';
       inject: [APP_CONFIG],
       useFactory: (env: Env) => ({
         secret: env.JWT_ACCESS_SECRET,
-        signOptions: { expiresIn: env.JWT_ACCESS_TTL as never, algorithm: 'HS256' },
+        signOptions: {
+          expiresIn: env.JWT_ACCESS_TTL as NonNullable<
+            JwtModuleOptions['signOptions']
+          >['expiresIn'],
+          algorithm: 'HS256',
+        },
       }),
     }),
   ],

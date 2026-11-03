@@ -3,7 +3,9 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
+  Optional,
   UnauthorizedException,
 } from '@nestjs/common';
 import type {
@@ -21,6 +23,7 @@ import { StorageService } from '../../storage/storage.service.js';
 import { CategoriesService } from '../categories/categories.service.js';
 import { UserPresenter } from '../users/user.presenter.js';
 import { decodeCursor, encodeCursor, type ListingSort } from './listings.cursor.js';
+import { ListingPresenter, type ListingSummaryInput } from './listing.presenter.js';
 
 export function validatePriceRules(
   priceType: 'FIXED' | 'RANGE' | 'NEGOTIABLE',
@@ -91,12 +94,30 @@ interface RawListingRow {
 
 @Injectable()
 export class ListingsService {
+  private readonly logger = new Logger(ListingsService.name);
+  private readonly listingPresenter: ListingPresenter;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
     private readonly categoriesService: CategoriesService,
     private readonly userPresenter: UserPresenter,
-  ) {}
+    @Optional() listingPresenter?: ListingPresenter,
+  ) {
+    this.listingPresenter = listingPresenter ?? new ListingPresenter(storage, userPresenter);
+  }
+
+  async toSummary(listing: ListingSummaryInput): Promise<ListingSummary> {
+    return this.listingPresenter.toSummary(listing);
+  }
+
+  private async safeInvalidateCategories(): Promise<void> {
+    try {
+      await this.categoriesService.invalidateCache();
+    } catch (err) {
+      this.logger.warn(`Error invalidating categories cache: ${String(err)}`);
+    }
+  }
 
   async validateUploads(
     userId: string,
@@ -211,7 +232,7 @@ export class ListingsService {
         return created;
       });
 
-      await this.categoriesService.invalidateCache();
+      await this.safeInvalidateCategories();
 
       return this.getById(listing.id, { id: userId, role: 'USER' });
     } catch (err) {
@@ -251,6 +272,13 @@ export class ListingsService {
       const bidCount = await this.prisma.bid.count({ where: { listingId: id } });
       if (bidCount > 0) {
         throw new ConflictException('Cannot revert listing with bids to draft');
+      }
+    }
+
+    if (input.kind !== undefined && input.kind !== listing.kind) {
+      const bidCount = await this.prisma.bid.count({ where: { listingId: id } });
+      if (bidCount > 0) {
+        throw new ConflictException('Cannot change kind on a listing that has bids');
       }
     }
 
@@ -295,6 +323,17 @@ export class ListingsService {
 
     try {
       await this.prisma.$transaction(async (tx) => {
+        if (input.kind !== undefined && input.kind !== listing.kind) {
+          // Serialize kind changes with bid creation, which locks this same listing row.
+          await tx.$queryRaw<Array<{ id: string }>>`
+            SELECT id FROM "Listing" WHERE id = ${id} FOR UPDATE
+          `;
+          const bidCount = await tx.bid.count({ where: { listingId: id } });
+          if (bidCount > 0) {
+            throw new ConflictException('Cannot change kind on a listing that has bids');
+          }
+        }
+
         if (input.imageIds !== undefined) {
           await tx.listingImage.deleteMany({ where: { listingId: id } });
           for (const [position, uploadId] of input.imageIds.entries()) {
@@ -340,7 +379,7 @@ export class ListingsService {
       throw err;
     }
 
-    await this.categoriesService.invalidateCache();
+    await this.safeInvalidateCategories();
 
     return this.getById(id, user);
   }
@@ -374,7 +413,7 @@ export class ListingsService {
       });
     });
 
-    await this.categoriesService.invalidateCache();
+    await this.safeInvalidateCategories();
 
     return this.getById(id, user);
   }
@@ -421,7 +460,7 @@ export class ListingsService {
       }
     }
 
-    await this.categoriesService.invalidateCache();
+    await this.safeInvalidateCategories();
   }
 
   async getById(id: string, user?: AuthUser): Promise<ListingDetail> {
@@ -459,7 +498,13 @@ export class ListingsService {
           include: { upload: true },
         },
         _count: {
-          select: { bids: true },
+          select: {
+            bids: {
+              where: {
+                status: { in: ['PENDING', 'SHORTLISTED', 'COUNTERED', 'ACCEPTED'] },
+              },
+            },
+          },
         },
       },
     });
@@ -479,7 +524,11 @@ export class ListingsService {
     let myBid = null;
     if (user) {
       const bid = await this.prisma.bid.findFirst({
-        where: { listingId: id, bidderId: user.id },
+        where: {
+          listingId: id,
+          bidderId: user.id,
+          status: { in: ['PENDING', 'SHORTLISTED', 'COUNTERED'] },
+        },
         include: {
           bidder: {
             select: {
@@ -743,7 +792,8 @@ export class ListingsService {
       JOIN "User" u ON u.id = l."ownerId"
       JOIN "Category" c ON c.id = l."categoryId"
       LEFT JOIN LATERAL (
-        SELECT COUNT(*)::int AS "bidCount" FROM "Bid" b WHERE b."listingId" = l.id
+        SELECT COUNT(*)::int AS "bidCount" FROM "Bid" b
+        WHERE b."listingId" = l.id AND b."status" IN ('PENDING', 'SHORTLISTED', 'COUNTERED', 'ACCEPTED')
       ) bc ON true
       LEFT JOIN LATERAL (
         SELECT up.key AS "firstImageKey"
@@ -773,36 +823,38 @@ export class ListingsService {
     );
 
     const items: ListingSummary[] = await Promise.all(
-      paginatedResult.items.map(async (r) => ({
-        id: r.id,
-        owner: await this.userPresenter.toPublicUser({
-          id: r.owner_id,
-          displayName: r.owner_displayName,
-          avatarKey: r.owner_avatarKey,
-          bio: r.owner_bio,
-          location: r.owner_location,
-          isBusiness: r.owner_isBusiness,
-          companyName: r.owner_companyName,
-          ratingAvg: r.owner_ratingAvg,
-          ratingCount: r.owner_ratingCount,
-          completedCount: r.owner_completedCount,
-          createdAt: r.owner_createdAt,
+      paginatedResult.items.map(async (r) =>
+        this.toSummary({
+          id: r.id,
+          owner: {
+            id: r.owner_id,
+            displayName: r.owner_displayName,
+            avatarKey: r.owner_avatarKey,
+            bio: r.owner_bio,
+            location: r.owner_location,
+            isBusiness: r.owner_isBusiness,
+            companyName: r.owner_companyName,
+            ratingAvg: r.owner_ratingAvg,
+            ratingCount: r.owner_ratingCount,
+            completedCount: r.owner_completedCount,
+            createdAt: r.owner_createdAt,
+          },
+          categoryId: r.categoryId,
+          categoryName: r.categoryName,
+          firstImageKey: r.firstImageKey,
+          kind: r.kind,
+          status: r.status,
+          title: r.title,
+          priceType: r.priceType,
+          priceMinCents: r.priceMinCents,
+          priceMaxCents: r.priceMaxCents,
+          currency: r.currency,
+          location: r.location,
+          expiresAt: r.expiresAt,
+          bidCount: r.bidCount,
+          createdAt: r.createdAt,
         }),
-        categoryId: r.categoryId,
-        categoryName: r.categoryName,
-        thumbnailUrl: r.firstImageKey ? await this.storage.presignGet(r.firstImageKey) : null,
-        kind: r.kind,
-        status: r.status,
-        title: r.title,
-        priceType: r.priceType,
-        priceMinCents: r.priceMinCents,
-        priceMaxCents: r.priceMaxCents,
-        currency: r.currency,
-        location: r.location,
-        expiresAt: r.expiresAt,
-        bidCount: r.bidCount,
-        createdAt: r.createdAt,
-      })),
+      ),
     );
 
     return {

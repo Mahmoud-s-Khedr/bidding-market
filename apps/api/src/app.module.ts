@@ -1,9 +1,11 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AppConfigModule } from './common/config.module.js';
 import { JwtAuthGuard } from './modules/auth/auth.guard.js';
 import { AuthModule } from './modules/auth/auth.module.js';
+import { BidsModule } from './modules/bids/bids.module.js';
 import { CategoriesModule } from './modules/categories/categories.module.js';
 import { HealthModule } from './modules/health/health.module.js';
 import { ListingsModule } from './modules/listings/listings.module.js';
@@ -14,6 +16,7 @@ import { RedisModule } from './redis/redis.module.js';
 import { StorageModule } from './storage/storage.module.js';
 @Module({
   imports: [
+    EventEmitterModule.forRoot(),
     AppConfigModule,
     PrismaModule,
     RedisModule,
@@ -25,6 +28,7 @@ import { StorageModule } from './storage/storage.module.js';
     CategoriesModule,
     UploadsModule,
     ListingsModule,
+    BidsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
