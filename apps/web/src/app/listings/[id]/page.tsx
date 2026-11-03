@@ -29,6 +29,7 @@ import { ConfirmDialog } from '@/components/shared/confirm-dialog';
 import { useAuth } from '@/components/auth/auth-provider';
 import { useToast } from '@/components/ui/toast';
 import { useCloseListing, useDeleteListing, useListing } from '@/lib/api/listings';
+import { useCreateConversation } from '@/lib/api/conversations';
 import { getAttachmentUrl } from '@/lib/api/uploads';
 import { formatDate } from '@/lib/format';
 import { ApiError } from '@/lib/api/client';
@@ -57,12 +58,35 @@ export default function ListingDetailPage() {
 
   const closeMutation = useCloseListing();
   const deleteMutation = useDeleteListing();
+  const createConversationMutation = useCreateConversation();
 
   const [closeDialogOpen, setCloseDialogOpen] = React.useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
   const [placeholderDialogOpen, setPlaceholderDialogOpen] = React.useState<string | null>(null);
 
   const isOwner = Boolean(user && listing && user.id === listing.owner.id);
+
+  const handleMessageOwner = async () => {
+    if (!listing) return;
+    if (!user) {
+      router.push(`/login?next=/listings/${listing.id}`);
+      return;
+    }
+    try {
+      const conv = await createConversationMutation.mutateAsync({
+        recipientId: listing.owner.id,
+        listingId: listing.id,
+      });
+      router.push(`/messages/${conv.id}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Unable to start conversation';
+      toast({
+        title: 'Error',
+        description: msg,
+        variant: 'error',
+      });
+    }
+  };
 
   const handleDownloadAttachment = async (attachment: Attachment) => {
     try {
@@ -394,10 +418,15 @@ export default function ListingDetailPage() {
                   variant="outline"
                   size="lg"
                   className="w-full"
-                  onClick={() => setPlaceholderDialogOpen('message')}
+                  disabled={createConversationMutation.isPending}
+                  onClick={() => {
+                    void handleMessageOwner();
+                  }}
                 >
                   <MessageSquare className="h-4 w-4 mr-2" />
-                  Message Owner
+                  {createConversationMutation.isPending
+                    ? 'Starting Conversation...'
+                    : 'Message Owner'}
                 </Button>
               </div>
             )}
@@ -497,14 +526,10 @@ export default function ListingDetailPage() {
 
       {/* Placeholder dialog for WEB-03 */}
       <ConfirmDialog
-        open={Boolean(placeholderDialogOpen)}
+        open={placeholderDialogOpen === 'bid'}
         onOpenChange={(open) => !open && setPlaceholderDialogOpen(null)}
-        title={placeholderDialogOpen === 'bid' ? 'Place a Bid' : 'Message Owner'}
-        description={
-          placeholderDialogOpen === 'bid'
-            ? 'The interactive bidding, negotiation, and counter-offer flow will be implemented in task WEB-03.'
-            : 'Direct 1:1 real-time messaging and chat will be implemented in task WEB-04.'
-        }
+        title="Place a Bid"
+        description="The interactive bidding, negotiation, and counter-offer flow will be implemented in task WEB-03."
         confirmText="Got it"
         onConfirm={() => setPlaceholderDialogOpen(null)}
       />
