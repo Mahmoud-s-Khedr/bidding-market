@@ -23,6 +23,9 @@ import type {
   ListingCreateFormInput,
   UploadPresignResponse,
 } from '@market/shared';
+import type { Bid } from './bid-types';
+
+export * from './bid-types';
 
 export type UserRole = Role;
 export type { Role, UserStatus, ListingKind, ListingStatus, PriceType, UploadPurpose };
@@ -127,6 +130,7 @@ export type ListingDetail = Omit<
   | 'priceMinCents'
   | 'priceMaxCents'
   | 'deliveryDays'
+  | 'myBid'
 > & {
   createdAt: Date | string;
   updatedAt: Date | string;
@@ -144,7 +148,7 @@ export type ListingDetail = Omit<
     slug: string;
     parentId?: string | null;
   };
-  myBid?: unknown;
+  myBid?: Bid | null;
 };
 
 export type CreateListingRequest = ListingCreateInput;

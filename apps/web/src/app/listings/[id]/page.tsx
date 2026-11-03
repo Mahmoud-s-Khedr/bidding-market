@@ -26,13 +26,24 @@ import { ImageGallery } from '@/components/shared/image-gallery';
 import { PriceTag } from '@/components/shared/price-tag';
 import { RatingStars } from '@/components/shared/rating-stars';
 import { ConfirmDialog } from '@/components/shared/confirm-dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
+import { BidForm } from '@/components/bids/bid-form';
+import { BidStatusBadge } from '@/components/bids/bid-status-badge';
+import { ListingBidsSection } from '@/components/bids/listing-bids-section';
 import { useAuth } from '@/components/auth/auth-provider';
 import { useToast } from '@/components/ui/toast';
 import { useCloseListing, useDeleteListing, useListing } from '@/lib/api/listings';
+import { useCreateBid, useUpdateBid, useWithdrawBid } from '@/lib/api/bids';
 import { getAttachmentUrl } from '@/lib/api/uploads';
-import { formatDate } from '@/lib/format';
+import { formatDate, formatMoney } from '@/lib/format';
 import { ApiError } from '@/lib/api/client';
-import type { Attachment } from '@/lib/api/types';
+import type { Attachment, BidCreateInput } from '@/lib/api/types';
 
 export default function ListingDetailPage() {
   const params = useParams();
@@ -57,10 +68,16 @@ export default function ListingDetailPage() {
 
   const closeMutation = useCloseListing();
   const deleteMutation = useDeleteListing();
+  const createBidMutation = useCreateBid();
+  const updateBidMutation = useUpdateBid();
+  const withdrawBidMutation = useWithdrawBid();
 
   const [closeDialogOpen, setCloseDialogOpen] = React.useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
   const [placeholderDialogOpen, setPlaceholderDialogOpen] = React.useState<string | null>(null);
+  const [bidDialogOpen, setBidDialogOpen] = React.useState(false);
+  const [isEditingBid, setIsEditingBid] = React.useState(false);
+  const [withdrawDialogOpen, setWithdrawDialogOpen] = React.useState(false);
 
   const isOwner = Boolean(user && listing && user.id === listing.owner.id);
 
@@ -107,6 +124,63 @@ export default function ListingDetailPage() {
       router.push('/listings');
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to delete listing';
+      toast({
+        title: 'Action failed',
+        description: msg,
+        variant: 'error',
+      });
+    }
+  };
+
+  const handleOpenBidDialog = () => {
+    if (!user) {
+      router.push(`/login?next=/listings/${encodeURIComponent(id)}`);
+      return;
+    }
+    setIsEditingBid(false);
+    setBidDialogOpen(true);
+  };
+
+  const handleOpenEditBidDialog = () => {
+    setIsEditingBid(true);
+    setBidDialogOpen(true);
+  };
+
+  const handleBidSubmit = async (payload: BidCreateInput) => {
+    if (isEditingBid && listing?.myBid) {
+      await updateBidMutation.mutateAsync({
+        id: listing.myBid.id,
+        data: payload,
+      });
+      setBidDialogOpen(false);
+      toast({
+        title: 'Bid updated',
+        description: 'Your proposal has been updated successfully.',
+      });
+    } else {
+      await createBidMutation.mutateAsync({
+        listingId: id,
+        data: payload,
+      });
+      setBidDialogOpen(false);
+      toast({
+        title: 'Bid placed',
+        description: 'Your proposal was submitted to the listing owner.',
+      });
+    }
+  };
+
+  const handleConfirmWithdraw = async () => {
+    if (!listing?.myBid) return;
+    try {
+      await withdrawBidMutation.mutateAsync(listing.myBid.id);
+      setWithdrawDialogOpen(false);
+      toast({
+        title: 'Bid withdrawn',
+        description: 'Your proposal has been withdrawn.',
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to withdraw bid';
       toast({
         title: 'Action failed',
         description: msg,
@@ -380,25 +454,87 @@ export default function ListingDetailPage() {
 
             {/* Non-owner CTA buttons */}
             {!isOwner && listing.status === 'OPEN' && (
-              <div className="space-y-2.5 pt-4 border-t border-border">
-                <Button
-                  size="lg"
-                  className="w-full font-semibold"
-                  onClick={() => setPlaceholderDialogOpen('bid')}
-                >
-                  <Send className="h-4 w-4 mr-2" />
-                  Place a Bid
-                </Button>
+              <div className="pt-4 border-t border-border">
+                {listing.myBid ? (
+                  <div className="space-y-3" data-testid="your-bid-section">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs uppercase font-semibold text-muted-foreground tracking-wider">
+                        Your Bid
+                      </span>
+                      <BidStatusBadge status={listing.myBid.status} />
+                    </div>
 
-                <Button
-                  variant="outline"
-                  size="lg"
-                  className="w-full"
-                  onClick={() => setPlaceholderDialogOpen('message')}
-                >
-                  <MessageSquare className="h-4 w-4 mr-2" />
-                  Message Owner
-                </Button>
+                    <div className="rounded-md border border-border bg-muted/40 p-3 space-y-1.5 text-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="text-muted-foreground">Amount:</span>
+                        <span className="font-semibold text-foreground text-sm">
+                          {formatMoney(listing.myBid.amountCents, listing.myBid.currency)}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-muted-foreground">Delivery:</span>
+                        <span className="text-foreground">
+                          {listing.myBid.deliveryDays}{' '}
+                          {listing.myBid.deliveryDays === 1 ? 'day' : 'days'}
+                        </span>
+                      </div>
+                      {listing.myBid.message && (
+                        <p className="line-clamp-2 text-muted-foreground italic pt-1 border-t border-border">
+                          &ldquo;{listing.myBid.message}&rdquo;
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="flex-1"
+                        onClick={handleOpenEditBidDialog}
+                      >
+                        <Edit3 className="h-3.5 w-3.5 mr-1" />
+                        Edit Bid
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        className="flex-1"
+                        onClick={() => setWithdrawDialogOpen(true)}
+                      >
+                        <XCircle className="h-3.5 w-3.5 mr-1" />
+                        Withdraw
+                      </Button>
+                    </div>
+
+                    <Link
+                      href={`/bids/${listing.myBid.id}`}
+                      className="inline-flex items-center justify-center w-full text-xs text-primary hover:underline font-medium pt-1"
+                    >
+                      View negotiation thread
+                    </Link>
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    <Button
+                      size="lg"
+                      className="w-full font-semibold"
+                      onClick={handleOpenBidDialog}
+                    >
+                      <Send className="h-4 w-4 mr-2" />
+                      Place a Bid
+                    </Button>
+
+                    <Button
+                      variant="outline"
+                      size="lg"
+                      className="w-full"
+                      onClick={() => setPlaceholderDialogOpen('message')}
+                    >
+                      <MessageSquare className="h-4 w-4 mr-2" />
+                      Message Owner
+                    </Button>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -472,6 +608,9 @@ export default function ListingDetailPage() {
         </div>
       </div>
 
+      {/* Owner View: Compare Table / Cards */}
+      {isOwner && <ListingBidsSection listing={listing} />}
+
       {/* Owner Confirmation Dialogs */}
       <ConfirmDialog
         open={closeDialogOpen}
@@ -495,16 +634,46 @@ export default function ListingDetailPage() {
         onConfirm={handleDeleteListing}
       />
 
-      {/* Placeholder dialog for WEB-03 */}
+      {/* Bid Submission / Edit Dialog */}
+      <Dialog open={bidDialogOpen} onOpenChange={setBidDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{isEditingBid ? 'Edit Your Proposal' : 'Place a Bid'}</DialogTitle>
+            <DialogDescription>
+              {isEditingBid
+                ? 'Update your bid amount, delivery timeline, or message. Submitting an edit resets the bid status to Pending.'
+                : 'Propose your pricing and terms for this listing.'}
+            </DialogDescription>
+          </DialogHeader>
+
+          <BidForm
+            listing={listing}
+            initialBid={isEditingBid ? listing.myBid : null}
+            onSubmit={handleBidSubmit}
+            onCancel={() => setBidDialogOpen(false)}
+            isLoading={createBidMutation.isPending || updateBidMutation.isPending}
+          />
+        </DialogContent>
+      </Dialog>
+
+      {/* Bid Withdrawal Confirmation Dialog */}
+      <ConfirmDialog
+        open={withdrawDialogOpen}
+        onOpenChange={setWithdrawDialogOpen}
+        title="Withdraw Proposal"
+        description="Are you sure you want to withdraw your bid? The owner will no longer be able to accept your proposal."
+        confirmText="Withdraw Bid"
+        variant="destructive"
+        isLoading={withdrawBidMutation.isPending}
+        onConfirm={handleConfirmWithdraw}
+      />
+
+      {/* Placeholder dialog for WEB-04 Messaging */}
       <ConfirmDialog
         open={Boolean(placeholderDialogOpen)}
         onOpenChange={(open) => !open && setPlaceholderDialogOpen(null)}
-        title={placeholderDialogOpen === 'bid' ? 'Place a Bid' : 'Message Owner'}
-        description={
-          placeholderDialogOpen === 'bid'
-            ? 'The interactive bidding, negotiation, and counter-offer flow will be implemented in task WEB-03.'
-            : 'Direct 1:1 real-time messaging and chat will be implemented in task WEB-04.'
-        }
+        title="Message Owner"
+        description="Direct 1:1 real-time messaging and chat will be implemented in task WEB-04."
         confirmText="Got it"
         onConfirm={() => setPlaceholderDialogOpen(null)}
       />

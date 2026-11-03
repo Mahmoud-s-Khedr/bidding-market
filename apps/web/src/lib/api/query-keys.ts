@@ -24,4 +24,13 @@ export const queryKeys = {
     all: ['uploads'] as const,
     url: (id: string) => ['uploads', 'url', id] as const,
   },
+  bids: {
+    all: ['bids'] as const,
+    byListing: (listingId: string, sort?: string) =>
+      ['bids', 'listing', listingId, sort ?? 'newest'] as const,
+    mineAll: () => ['bids', 'mine'] as const,
+    mine: (status?: string) => ['bids', 'mine', status ?? 'all'] as const,
+    details: () => ['bids', 'detail'] as const,
+    detail: (id: string) => ['bids', 'detail', id] as const,
+  },
 };

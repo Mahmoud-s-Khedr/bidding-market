@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { formValuesToApiPayload, formValuesToUpdatePayload, listingFormSchema } from './listing';
+import {
+  createListingFormSchema,
+  formValuesToApiPayload,
+  formValuesToUpdatePayload,
+  listingFormSchema,
+} from './listing';
 
 describe('Listing Validation Schemas', () => {
   const validBase = {
@@ -101,6 +106,23 @@ describe('Listing Validation Schemas', () => {
       deliveryDays: -1,
     });
     expect(negative.success).toBe(false);
+
+    const overMax = listingFormSchema.safeParse({
+      ...validBase,
+      priceType: 'NEGOTIABLE',
+      deliveryDays: 3651,
+    });
+    expect(overMax.success).toBe(false);
+    if (!overMax.success) {
+      expect(overMax.error.issues[0]?.message).toBe('Delivery days cannot exceed 3,650');
+    }
+
+    const atMax = listingFormSchema.safeParse({
+      ...validBase,
+      priceType: 'NEGOTIABLE',
+      deliveryDays: 3650,
+    });
+    expect(atMax.success).toBe(true);
   });
 
   it('enforces int4 max limit on price inputs (21,474,836.47)', () => {
@@ -195,6 +217,30 @@ describe('Listing Validation Schemas', () => {
       expiresAt: tomorrowStr,
     });
     expect(futureRes.success).toBe(true);
+  });
+
+  it('skips the future-date check when the expiry equals the initial value', () => {
+    // A stored past date
+    const pastDate = '2025-01-01';
+    const schemaWithPastInitial = createListingFormSchema(pastDate);
+
+    // Editing with the same past date succeeds
+    const sameRes = schemaWithPastInitial.safeParse({
+      ...validBase,
+      priceType: 'FIXED',
+      priceMin: 20,
+      expiresAt: pastDate,
+    });
+    expect(sameRes.success).toBe(true);
+
+    // Editing with a different past date still fails
+    const diffPastRes = schemaWithPastInitial.safeParse({
+      ...validBase,
+      priceType: 'FIXED',
+      priceMin: 20,
+      expiresAt: '2024-12-31',
+    });
+    expect(diffPastRes.success).toBe(false);
   });
 
   it('formValuesToApiPayload converts values to cents correctly and does not send priceMaxCents for FIXED', () => {

@@ -1,14 +1,16 @@
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import ListingDetailPage from './[id]/page';
 import * as listingsApi from '@/lib/api/listings';
+import * as bidsApi from '@/lib/api/bids';
 import * as authContext from '@/components/auth/auth-provider';
 import { ApiError } from '@/lib/api/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ToastProvider } from '@/components/ui/toast';
 import type { ListingDetail } from '@/lib/api/types';
-import { makeListingDetail, makePublicUser } from '../../../test/fixtures';
+import { makeBid, makeListingDetail, makePublicUser } from '../../../test/fixtures';
 
 function renderWithToast(ui: React.ReactElement) {
   const queryClient = new QueryClient({
@@ -21,11 +23,15 @@ function renderWithToast(ui: React.ReactElement) {
   );
 }
 
+const mockPush = vi.fn();
+
 vi.mock('next/navigation', () => ({
   useParams: () => ({ id: 'listing-123' }),
   useRouter: () => ({
-    push: vi.fn(),
+    push: mockPush,
   }),
+  usePathname: () => '/listings/listing-123',
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 describe('Listing Detail Page', () => {
@@ -267,5 +273,151 @@ describe('Listing Detail Page', () => {
     renderWithToast(<ListingDetailPage />);
 
     expect(screen.getByText('Listing Not Found')).toBeInTheDocument();
+  });
+
+  it('redirects logged out users to login with next param when clicking Place a Bid', async () => {
+    const user = userEvent.setup();
+    mockPush.mockReset();
+
+    vi.spyOn(authContext, 'useAuth').mockReturnValue({
+      user: null,
+      token: null,
+      isLoading: false,
+      isAuthenticated: false,
+      isAdmin: false,
+      login: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+      refresh: vi.fn(),
+    });
+
+    vi.spyOn(listingsApi, 'useListing').mockReturnValue({
+      data: mockListing,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof listingsApi.useListing>);
+
+    renderWithToast(<ListingDetailPage />);
+
+    const bidBtn = screen.getByRole('button', { name: /place a bid/i });
+    await user.click(bidBtn);
+
+    expect(mockPush).toHaveBeenCalledWith('/login?next=/listings/listing-123');
+  });
+
+  it('shows Your Bid section with Edit and Withdraw instead of Place a Bid when user has active bid', async () => {
+    const user = userEvent.setup();
+    const mockWithdraw = vi.fn().mockResolvedValue(undefined);
+
+    vi.spyOn(authContext, 'useAuth').mockReturnValue({
+      user: {
+        id: 'user-bidder',
+        email: 'bidder@test.com',
+        displayName: 'Alice Bidder',
+        role: 'USER',
+        isBusiness: false,
+        createdAt: '2026-01-01T00:00:00Z',
+      },
+      token: 'jwt-bidder',
+      isLoading: false,
+      isAuthenticated: true,
+      isAdmin: false,
+      login: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+      refresh: vi.fn(),
+    });
+
+    const listingWithMyBid: ListingDetail = {
+      ...mockListing,
+      myBid: makeBid({
+        id: 'bid-my-1',
+        amountCents: 11000,
+        deliveryDays: 4,
+        status: 'PENDING',
+        message: 'My special offer',
+      }),
+    };
+
+    vi.spyOn(listingsApi, 'useListing').mockReturnValue({
+      data: listingWithMyBid,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof listingsApi.useListing>);
+
+    vi.spyOn(bidsApi, 'useWithdrawBid').mockReturnValue({
+      mutateAsync: mockWithdraw,
+      isPending: false,
+    } as unknown as ReturnType<typeof bidsApi.useWithdrawBid>);
+
+    renderWithToast(<ListingDetailPage />);
+
+    // Place a bid should not be present
+    expect(screen.queryByRole('button', { name: /^place a bid$/i })).not.toBeInTheDocument();
+
+    // Your Bid section should be present
+    expect(screen.getByTestId('your-bid-section')).toBeInTheDocument();
+    expect(screen.getByText('Your Bid')).toBeInTheDocument();
+    expect(screen.getByText('$110')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /edit bid/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /withdraw/i })).toBeInTheDocument();
+
+    // Clicking Withdraw opens confirm dialog
+    await user.click(screen.getByRole('button', { name: /withdraw/i }));
+    expect(screen.getByText(/Are you sure you want to withdraw your bid\?/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /^withdraw bid$/i }));
+    await waitFor(() => {
+      expect(mockWithdraw).toHaveBeenCalledWith('bid-my-1');
+    });
+  });
+
+  it('renders owner bids compare section when viewer is listing owner', () => {
+    vi.spyOn(authContext, 'useAuth').mockReturnValue({
+      user: {
+        id: 'user-owner',
+        email: 'owner@test.com',
+        displayName: 'Creative Studio',
+        role: 'USER',
+        isBusiness: true,
+        createdAt: '2026-01-01T00:00:00Z',
+      },
+      token: 'jwt-owner',
+      isLoading: false,
+      isAuthenticated: true,
+      isAdmin: false,
+      login: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+      refresh: vi.fn(),
+    });
+
+    vi.spyOn(listingsApi, 'useListing').mockReturnValue({
+      data: mockListing,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof listingsApi.useListing>);
+
+    vi.spyOn(bidsApi, 'useListingBids').mockReturnValue({
+      data: { pages: [{ items: [], nextCursor: null }], pageParams: [null] },
+      isLoading: false,
+      isFetchingNextPage: false,
+      hasNextPage: false,
+      fetchNextPage: vi.fn(),
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof bidsApi.useListingBids>);
+
+    renderWithToast(<ListingDetailPage />);
+
+    // Owner should see Bids section
+    expect(screen.getByText(/Bids \(5\)/i)).toBeInTheDocument();
+    // Owner should not see "Place a bid"
+    expect(screen.queryByRole('button', { name: /place a bid/i })).not.toBeInTheDocument();
   });
 });

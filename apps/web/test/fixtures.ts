@@ -1,5 +1,9 @@
 import type {
   Attachment,
+  Bid,
+  BidDetail,
+  BidRevision,
+  BidWithListing,
   Category,
   ListingDetail,
   ListingSummary,
@@ -87,6 +91,68 @@ export function makeAttachment(overrides: Partial<Attachment> = {}): Attachment 
     mimeType: 'application/pdf',
     sizeBytes: 1024,
     url: 'https://cdn.example.com/file.pdf',
+    ...overrides,
+  };
+}
+
+export function makeBid(overrides: Partial<Bid> = {}): Bid {
+  return {
+    id: 'bid-default',
+    listingId: 'listing-default',
+    bidder: makePublicUser({ id: 'user-bidder', displayName: 'Bidder User' }),
+    amountCents: 15000,
+    currency: 'USD',
+    deliveryDays: 5,
+    message: 'I can deliver this project within schedule and high quality.',
+    status: 'PENDING',
+    rejectReason: null,
+    lastCounterById: null,
+    attachments: [],
+    createdAt: new Date('2026-10-02T00:00:00Z'),
+    updatedAt: new Date('2026-10-02T00:00:00Z'),
+    ...overrides,
+  };
+}
+
+export function makeBidRevision(overrides: Partial<BidRevision> = {}): BidRevision {
+  return {
+    id: 'rev-default',
+    bidId: 'bid-default',
+    authorId: 'user-bidder',
+    author: makePublicUser({ id: 'user-bidder', displayName: 'Bidder User' }),
+    amountCents: 15000,
+    deliveryDays: 5,
+    message: 'Initial proposal message.',
+    createdAt: new Date('2026-10-02T00:00:00Z'),
+    ...overrides,
+  };
+}
+
+export function makeBidDetail(overrides: Partial<BidDetail> = {}): BidDetail {
+  const base = makeBid();
+  return {
+    ...base,
+    attachments: [],
+    revisions: [
+      makeBidRevision({
+        bidId: base.id,
+        authorId: base.bidder.id,
+        amountCents: base.amountCents,
+        deliveryDays: base.deliveryDays,
+        message: base.message,
+      }),
+    ],
+    listing: makeListingSummary({ id: base.listingId }),
+    ...overrides,
+  };
+}
+
+export function makeBidWithListing(overrides: Partial<BidWithListing> = {}): BidWithListing {
+  const base = makeBid();
+  return {
+    ...base,
+    listing: makeListingSummary({ id: base.listingId }),
+    attachments: [],
     ...overrides,
   };
 }
