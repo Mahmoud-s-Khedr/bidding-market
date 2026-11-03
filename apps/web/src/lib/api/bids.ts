@@ -1,4 +1,5 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useViewerId } from '@/components/auth/auth-provider';
 import { api } from './client';
 import { queryKeys } from './query-keys';
 import type {
@@ -85,10 +86,12 @@ export async function acceptBid(id: string): Promise<BidAcceptResponse> {
 export function useListingBids(
   listingId: string,
   sort: BidSort = 'newest',
-  options?: { enabled?: boolean },
+  options?: { enabled?: boolean; viewerId?: string | null },
 ) {
+  const authViewerId = useViewerId();
+  const viewerId = options?.viewerId !== undefined ? options.viewerId : authViewerId;
   return useInfiniteQuery({
-    queryKey: queryKeys.bids.byListing(listingId, sort),
+    queryKey: queryKeys.bids.byListing(listingId, sort, viewerId),
     queryFn: ({ pageParam }) => getListingBids(listingId, { sort, cursor: pageParam ?? undefined }),
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
@@ -96,9 +99,14 @@ export function useListingBids(
   });
 }
 
-export function useMyBids(status?: BidStatus, options?: { enabled?: boolean }) {
+export function useMyBids(
+  status?: BidStatus,
+  options?: { enabled?: boolean; viewerId?: string | null },
+) {
+  const authViewerId = useViewerId();
+  const viewerId = options?.viewerId !== undefined ? options.viewerId : authViewerId;
   return useInfiniteQuery({
-    queryKey: queryKeys.bids.mine(status),
+    queryKey: queryKeys.bids.mine(status, viewerId),
     queryFn: ({ pageParam }) => getMyBids({ status, cursor: pageParam ?? undefined }),
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
@@ -106,9 +114,11 @@ export function useMyBids(status?: BidStatus, options?: { enabled?: boolean }) {
   });
 }
 
-export function useBid(id: string, options?: { enabled?: boolean }) {
+export function useBid(id: string, options?: { enabled?: boolean; viewerId?: string | null }) {
+  const authViewerId = useViewerId();
+  const viewerId = options?.viewerId !== undefined ? options.viewerId : authViewerId;
   return useQuery({
-    queryKey: queryKeys.bids.detail(id),
+    queryKey: queryKeys.bids.detail(id, viewerId),
     queryFn: () => getBid(id),
     enabled: options?.enabled ?? Boolean(id),
   });

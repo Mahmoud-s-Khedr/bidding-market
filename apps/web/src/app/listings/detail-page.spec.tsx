@@ -554,4 +554,109 @@ describe('Listing Detail Page', () => {
     // Owner should not see "Place a bid"
     expect(screen.queryByRole('button', { name: /place a bid/i })).not.toBeInTheDocument();
   });
+
+  it('treats a WITHDRAWN myBid as no active bid: shows Place a Bid and links to previous thread (Finding 3)', async () => {
+    const user = userEvent.setup();
+
+    vi.spyOn(authContext, 'useAuth').mockReturnValue({
+      user: {
+        id: 'user-bidder',
+        email: 'bidder@test.com',
+        displayName: 'Alice Bidder',
+        role: 'USER',
+        isBusiness: false,
+        createdAt: '2026-01-01T00:00:00Z',
+      },
+      token: 'jwt-bidder',
+      isLoading: false,
+      isAuthenticated: true,
+      isAdmin: false,
+      login: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+      refresh: vi.fn(),
+    });
+
+    const listingWithWithdrawnBid: ListingDetail = {
+      ...mockListing,
+      myBid: makeBid({
+        id: 'bid-withdrawn-1',
+        amountCents: 11000,
+        status: 'WITHDRAWN',
+      }),
+    };
+
+    vi.spyOn(listingsApi, 'useListing').mockReturnValue({
+      data: listingWithWithdrawnBid,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof listingsApi.useListing>);
+
+    renderWithToast(<ListingDetailPage />);
+
+    // Place a bid button SHOULD be visible
+    const placeBidBtn = screen.getByRole('button', { name: /^place a bid$/i });
+    expect(placeBidBtn).toBeInTheDocument();
+
+    // Your Bid active section should NOT be visible
+    expect(screen.queryByTestId('your-bid-section')).not.toBeInTheDocument();
+
+    // Link to previous bid thread should be visible
+    expect(screen.getByText(/Previous bid \(withdrawn\):/i)).toBeInTheDocument();
+    const threadLink = screen.getByRole('link', { name: /view thread/i });
+    expect(threadLink).toHaveAttribute('href', '/bids/bid-withdrawn-1');
+
+    // Clicking Place a Bid opens the dialog in create mode (not edit)
+    await user.click(placeBidBtn);
+    expect(screen.getByRole('heading', { name: 'Place a Bid' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Edit Your Proposal' })).not.toBeInTheDocument();
+  });
+
+  it('treats a REJECTED myBid as no active bid: shows Place a Bid and links to previous thread (Finding 3)', () => {
+    vi.spyOn(authContext, 'useAuth').mockReturnValue({
+      user: {
+        id: 'user-bidder',
+        email: 'bidder@test.com',
+        displayName: 'Alice Bidder',
+        role: 'USER',
+        isBusiness: false,
+        createdAt: '2026-01-01T00:00:00Z',
+      },
+      token: 'jwt-bidder',
+      isLoading: false,
+      isAuthenticated: true,
+      isAdmin: false,
+      login: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+      refresh: vi.fn(),
+    });
+
+    const listingWithRejectedBid: ListingDetail = {
+      ...mockListing,
+      myBid: makeBid({
+        id: 'bid-rejected-1',
+        amountCents: 12000,
+        status: 'REJECTED',
+      }),
+    };
+
+    vi.spyOn(listingsApi, 'useListing').mockReturnValue({
+      data: listingWithRejectedBid,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof listingsApi.useListing>);
+
+    renderWithToast(<ListingDetailPage />);
+
+    expect(screen.getByRole('button', { name: /^place a bid$/i })).toBeInTheDocument();
+    expect(screen.queryByTestId('your-bid-section')).not.toBeInTheDocument();
+    expect(screen.getByText(/Previous bid \(rejected\):/i)).toBeInTheDocument();
+    const threadLink = screen.getByRole('link', { name: /view thread/i });
+    expect(threadLink).toHaveAttribute('href', '/bids/bid-rejected-1');
+  });
 });

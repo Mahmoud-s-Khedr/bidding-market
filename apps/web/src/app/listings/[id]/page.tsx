@@ -72,7 +72,14 @@ export default function ListingDetailPage() {
   const updateBidMutation = useUpdateBid();
   const withdrawBidMutation = useWithdrawBid();
 
-  const myBidId = listing?.myBid?.id ?? '';
+  const hasActiveBid = Boolean(
+    listing?.myBid &&
+    (listing.myBid.status === 'PENDING' ||
+      listing.myBid.status === 'SHORTLISTED' ||
+      listing.myBid.status === 'COUNTERED'),
+  );
+
+  const myBidId = hasActiveBid ? (listing?.myBid?.id ?? '') : '';
   const { data: myBidDetail, isLoading: isLoadingMyBid } = useBid(myBidId, {
     enabled: Boolean(myBidId),
   });
@@ -153,7 +160,7 @@ export default function ListingDetailPage() {
 
   const handleBidSubmit = async (payload: BidCreateInput) => {
     try {
-      if (isEditingBid && listing?.myBid) {
+      if (isEditingBid && listing?.myBid && hasActiveBid) {
         await updateBidMutation.mutateAsync({
           id: listing.myBid.id,
           data: payload,
@@ -483,7 +490,7 @@ export default function ListingDetailPage() {
             {/* Non-owner CTA buttons */}
             {!isOwner && listing.status === 'OPEN' && (
               <div className="pt-4 border-t border-border">
-                {listing.myBid ? (
+                {hasActiveBid && listing.myBid ? (
                   <div className="space-y-3" data-testid="your-bid-section">
                     <div className="flex items-center justify-between">
                       <span className="text-xs uppercase font-semibold text-muted-foreground tracking-wider">
@@ -551,6 +558,20 @@ export default function ListingDetailPage() {
                       <Send className="h-4 w-4 mr-2" />
                       Place a Bid
                     </Button>
+
+                    {listing.myBid && (
+                      <div className="text-center pt-1">
+                        <Link
+                          href={`/bids/${listing.myBid.id}`}
+                          className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
+                        >
+                          <span>Previous bid ({listing.myBid.status.toLowerCase()}):</span>
+                          <span className="text-primary hover:underline font-medium">
+                            View thread
+                          </span>
+                        </Link>
+                      </div>
+                    )}
 
                     <Button
                       variant="outline"
@@ -674,16 +695,18 @@ export default function ListingDetailPage() {
             </DialogDescription>
           </DialogHeader>
 
-          {isEditingBid && isLoadingMyBid && !myBidDetail ? (
+          {isEditingBid && hasActiveBid && isLoadingMyBid && !myBidDetail ? (
             <div className="py-8 space-y-4">
               <Skeleton className="h-10 w-full" />
               <Skeleton className="h-24 w-full" />
             </div>
           ) : (
             <BidForm
-              key={isEditingBid ? (myBidDetail?.id ?? listing.myBid?.id) : 'new-bid'}
+              key={
+                isEditingBid && hasActiveBid ? (myBidDetail?.id ?? listing.myBid?.id) : 'new-bid'
+              }
               listing={listing}
-              initialBid={isEditingBid ? (myBidDetail ?? listing.myBid) : null}
+              initialBid={isEditingBid && hasActiveBid ? (myBidDetail ?? listing.myBid) : null}
               onSubmit={handleBidSubmit}
               onCancel={() => setBidDialogOpen(false)}
               isLoading={createBidMutation.isPending || updateBidMutation.isPending}

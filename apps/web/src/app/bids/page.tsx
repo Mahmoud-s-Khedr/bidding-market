@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { EmptyState } from '@/components/ui/empty-state';
+import { ErrorState } from '@/components/ui/error-state';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
 import { RequireAuth } from '@/components/auth/require-auth';
@@ -62,9 +63,30 @@ function MyBidsPageContent() {
 
   const isActiveLoading =
     pendingQuery.isLoading || shortlistedQuery.isLoading || counteredQuery.isLoading;
+  const isActiveError = pendingQuery.isError || shortlistedQuery.isError || counteredQuery.isError;
+  const activeError = pendingQuery.error || shortlistedQuery.error || counteredQuery.error;
+  const refetchActive = () => {
+    void pendingQuery.refetch();
+    void shortlistedQuery.refetch();
+    void counteredQuery.refetch();
+  };
+
   const isAcceptedLoading = acceptedQuery.isLoading;
+  const isAcceptedError = acceptedQuery.isError;
+  const acceptedError = acceptedQuery.error;
+  const refetchAccepted = () => {
+    void acceptedQuery.refetch();
+  };
+
   const isClosedLoading =
     rejectedQuery.isLoading || withdrawnQuery.isLoading || declinedQuery.isLoading;
+  const isClosedError = rejectedQuery.isError || withdrawnQuery.isError || declinedQuery.isError;
+  const closedError = rejectedQuery.error || withdrawnQuery.error || declinedQuery.error;
+  const refetchClosed = () => {
+    void rejectedQuery.refetch();
+    void withdrawnQuery.refetch();
+    void declinedQuery.refetch();
+  };
 
   const activeHasNextPage =
     pendingQuery.hasNextPage || shortlistedQuery.hasNextPage || counteredQuery.hasNextPage;
@@ -221,6 +243,16 @@ function MyBidsPageContent() {
                 <Skeleton className="h-24 w-full rounded-lg" />
                 <Skeleton className="h-24 w-full rounded-lg" />
               </div>
+            ) : isActiveError ? (
+              <ErrorState
+                title="Failed to load active bids"
+                message={
+                  activeError instanceof Error
+                    ? activeError.message
+                    : 'Could not load your active proposals. Please try again.'
+                }
+                onRetry={refetchActive}
+              />
             ) : activeBids.length === 0 ? (
               <EmptyState
                 icon={Gavel}
@@ -259,6 +291,16 @@ function MyBidsPageContent() {
               <div className="space-y-4">
                 <Skeleton className="h-24 w-full rounded-lg" />
               </div>
+            ) : isAcceptedError ? (
+              <ErrorState
+                title="Failed to load accepted bids"
+                message={
+                  acceptedError instanceof Error
+                    ? acceptedError.message
+                    : 'Could not load your accepted proposals. Please try again.'
+                }
+                onRetry={refetchAccepted}
+              />
             ) : acceptedBids.length === 0 ? (
               <EmptyState
                 icon={Inbox}
@@ -290,6 +332,16 @@ function MyBidsPageContent() {
               <div className="space-y-4">
                 <Skeleton className="h-24 w-full rounded-lg" />
               </div>
+            ) : isClosedError ? (
+              <ErrorState
+                title="Failed to load closed bids"
+                message={
+                  closedError instanceof Error
+                    ? closedError.message
+                    : 'Could not load your closed proposals. Please try again.'
+                }
+                onRetry={refetchClosed}
+              />
             ) : closedBids.length === 0 ? (
               <EmptyState
                 icon={Inbox}

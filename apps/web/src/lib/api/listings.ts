@@ -1,4 +1,5 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useViewerId } from '@/components/auth/auth-provider';
 import { api } from './client';
 import { queryKeys } from './query-keys';
 import type {
@@ -41,18 +42,26 @@ export async function deleteListing(id: string): Promise<void> {
   return api.delete<void>(`/listings/${id}`);
 }
 
-export function useListings(filters?: ListingFilters) {
+export function useListings(
+  filters?: ListingFilters,
+  options?: { enabled?: boolean; viewerId?: string | null },
+) {
+  const authViewerId = useViewerId();
+  const viewerId = options?.viewerId !== undefined ? options.viewerId : authViewerId;
   return useInfiniteQuery({
-    queryKey: queryKeys.listings.infinite(filters),
+    queryKey: queryKeys.listings.infinite(filters, viewerId),
     queryFn: ({ pageParam }) => getListings({ ...filters, cursor: pageParam ?? undefined }),
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    enabled: options?.enabled ?? true,
   });
 }
 
 export function useListing(id: string, options?: { enabled?: boolean; viewerId?: string | null }) {
+  const authViewerId = useViewerId();
+  const viewerId = options?.viewerId !== undefined ? options.viewerId : authViewerId;
   return useQuery({
-    queryKey: queryKeys.listings.detail(id, options?.viewerId),
+    queryKey: queryKeys.listings.detail(id, viewerId),
     queryFn: () => getListing(id),
     enabled: options?.enabled ?? Boolean(id),
   });

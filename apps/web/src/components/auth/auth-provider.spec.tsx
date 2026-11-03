@@ -481,4 +481,23 @@ describe('AuthProvider & useAuth', () => {
 
     expect(screen.getByTestId('admin-state')).toHaveTextContent('admin');
   });
+
+  it('clears queryClient cache on logout and user changes to prevent cross-session leakage (Finding 1)', async () => {
+    const { QueryClient, QueryClientProvider } = await import('@tanstack/react-query');
+    const queryClient = new QueryClient();
+    const clearSpy = vi.spyOn(queryClient, 'clear');
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <TestConsumer />
+        </AuthProvider>
+      </QueryClientProvider>,
+    );
+
+    const userEventSetup = userEvent.setup();
+    await userEventSetup.click(screen.getByText('Trigger Logout'));
+
+    expect(clearSpy).toHaveBeenCalled();
+  });
 });

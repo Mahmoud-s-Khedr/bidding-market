@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/select';
 import { RatingStars } from '@/components/shared/rating-stars';
 import { EmptyState } from '@/components/ui/empty-state';
+import { ErrorState } from '@/components/ui/error-state';
 import { ConfirmDialog } from '@/components/shared/confirm-dialog';
 import { BidStatusBadge } from '@/components/bids/bid-status-badge';
 import { BidActionBar } from '@/components/bids/bid-action-bar';
@@ -32,8 +33,16 @@ export function ListingBidsSection({ listing }: ListingBidsSectionProps) {
   const [sort, setSort] = React.useState<BidSort>('newest');
 
   // Queries
-  const { data, isLoading, isFetchingNextPage, hasNextPage, fetchNextPage, refetch } =
-    useListingBids(listing.id, sort);
+  const {
+    data,
+    isLoading,
+    isError,
+    error,
+    isFetchingNextPage,
+    hasNextPage,
+    fetchNextPage,
+    refetch,
+  } = useListingBids(listing.id, sort);
 
   const {
     selectedBid: selectedBidForAction,
@@ -101,6 +110,16 @@ export function ListingBidsSection({ listing }: ListingBidsSectionProps) {
 
       {isLoading ? (
         <div className="py-12 text-center text-sm text-muted-foreground">Loading proposals...</div>
+      ) : isError ? (
+        <ErrorState
+          title="Failed to load bids"
+          message={
+            error instanceof Error
+              ? error.message
+              : 'Could not load bids for this listing. Please try again.'
+          }
+          onRetry={() => void refetch()}
+        />
       ) : allBids.length === 0 ? (
         <EmptyState
           icon={Gavel}

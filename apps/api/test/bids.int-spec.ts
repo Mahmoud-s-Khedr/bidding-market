@@ -1500,6 +1500,98 @@ describe('Bids endpoints', () => {
       expect(dAccepted.body.bidCount).toBe(1);
     });
 
+    it('allows a bidder to bid again after a terminal bid (WITHDRAWN or REJECTED) while myBid only reflects active bids', async () => {
+      // 1. Initial listing detail has no active bid
+      const d0 = await request(server)
+        .get(`/api/v1/listings/${openListingId}`)
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .expect(200);
+      expect(d0.body.myBid).toBeNull();
+      expect(d0.body.bidCount).toBe(0);
+
+      // 2. Bidder creates first bid (PENDING) -> myBid returns active bid
+      const b1 = await request(server)
+        .post(`/api/v1/listings/${openListingId}/bids`)
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .send({ amountCents: 45000, currency: 'USD', deliveryDays: 10, message: 'First bid' })
+        .expect(201);
+
+      const d1 = await request(server)
+        .get(`/api/v1/listings/${openListingId}`)
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .expect(200);
+      expect(d1.body.myBid?.id).toBe(b1.body.id);
+      expect(d1.body.myBid?.status).toBe('PENDING');
+      expect(d1.body.bidCount).toBe(1);
+
+      // 3. Bidder withdraws bid -> status WITHDRAWN -> myBid becomes null
+      await request(server)
+        .post(`/api/v1/bids/${b1.body.id}/withdraw`)
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .expect(200);
+
+      const dWithdrawn = await request(server)
+        .get(`/api/v1/listings/${openListingId}`)
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .expect(200);
+      expect(dWithdrawn.body.myBid).toBeNull();
+      expect(dWithdrawn.body.bidCount).toBe(0);
+
+      // 4. Bidder can bid again after withdrawal -> 201 Created -> myBid is the new active bid
+      const b2 = await request(server)
+        .post(`/api/v1/listings/${openListingId}/bids`)
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .send({
+          amountCents: 46000,
+          currency: 'USD',
+          deliveryDays: 9,
+          message: 'Second bid after withdraw',
+        })
+        .expect(201);
+
+      const d2 = await request(server)
+        .get(`/api/v1/listings/${openListingId}`)
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .expect(200);
+      expect(d2.body.myBid?.id).toBe(b2.body.id);
+      expect(d2.body.myBid?.status).toBe('PENDING');
+      expect(d2.body.bidCount).toBe(1);
+
+      // 5. Owner rejects second bid -> status REJECTED -> myBid becomes null
+      await request(server)
+        .post(`/api/v1/bids/${b2.body.id}/reject`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ reason: 'Timeline too long' })
+        .expect(200);
+
+      const dRejected = await request(server)
+        .get(`/api/v1/listings/${openListingId}`)
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .expect(200);
+      expect(dRejected.body.myBid).toBeNull();
+      expect(dRejected.body.bidCount).toBe(0);
+
+      // 6. Bidder can bid again after rejection -> 201 Created -> myBid is third active bid
+      const b3 = await request(server)
+        .post(`/api/v1/listings/${openListingId}/bids`)
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .send({
+          amountCents: 47000,
+          currency: 'USD',
+          deliveryDays: 5,
+          message: 'Third bid after rejection',
+        })
+        .expect(201);
+
+      const d3 = await request(server)
+        .get(`/api/v1/listings/${openListingId}`)
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .expect(200);
+      expect(d3.body.myBid?.id).toBe(b3.body.id);
+      expect(d3.body.myBid?.status).toBe('PENDING');
+      expect(d3.body.bidCount).toBe(1);
+    });
+
     it('preserves agreement and bid currency consistency during concurrent acceptance and edit', async () => {
       const b2 = await request(server)
         .post(`/api/v1/listings/${openListingId}/bids`)

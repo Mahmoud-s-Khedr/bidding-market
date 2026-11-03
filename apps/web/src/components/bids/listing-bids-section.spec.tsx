@@ -361,4 +361,51 @@ describe('ListingBidsSection Component', () => {
 
     expect(fetchNextPage).toHaveBeenCalled();
   });
+
+  it('renders ErrorState with retry when bids query fails (Finding 2)', async () => {
+    const user = userEvent.setup();
+    const mockRefetch = vi.fn();
+
+    vi.spyOn(bidsApi, 'useListingBids').mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: true,
+      error: new Error('Failed to load server bids'),
+      isFetchingNextPage: false,
+      hasNextPage: false,
+      fetchNextPage: vi.fn(),
+      refetch: mockRefetch,
+    } as unknown as ReturnType<typeof bidsApi.useListingBids>);
+
+    renderWithToast(<ListingBidsSection listing={mockListing} />);
+
+    expect(screen.getByText('Failed to load bids')).toBeInTheDocument();
+    expect(screen.getByText('Failed to load server bids')).toBeInTheDocument();
+    expect(screen.queryByText('No bids received yet')).not.toBeInTheDocument();
+
+    const retryBtn = screen.getByRole('button', { name: /try again/i });
+    await user.click(retryBtn);
+    expect(mockRefetch).toHaveBeenCalled();
+  });
+
+  it('renders EmptyState when bids query succeeds with zero bids', () => {
+    vi.spyOn(bidsApi, 'useListingBids').mockReturnValue({
+      data: {
+        pages: [{ items: [], nextCursor: null }],
+        pageParams: [null],
+      },
+      isLoading: false,
+      isError: false,
+      error: null,
+      isFetchingNextPage: false,
+      hasNextPage: false,
+      fetchNextPage: vi.fn(),
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof bidsApi.useListingBids>);
+
+    renderWithToast(<ListingBidsSection listing={mockListing} />);
+
+    expect(screen.getByText('No bids received yet')).toBeInTheDocument();
+    expect(screen.queryByText('Failed to load bids')).not.toBeInTheDocument();
+  });
 });
