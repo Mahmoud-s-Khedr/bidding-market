@@ -1180,8 +1180,13 @@ export class BidsService {
           },
         });
       } else {
+        const pair = [currentListing.ownerId, currentBid.bidderId].sort().join(':');
+        const listingKey = currentListing.id;
         await tx.conversation.create({
           data: {
+            participantPairKey: pair,
+            listingDedupKey: listingKey,
+            lastMessageAt: new Date(),
             listingId: currentListing.id,
             bidId: currentBid.id,
             agreementId: agreement.id,
