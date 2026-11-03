@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import * as React from 'react';
+import * as authProvider from '@/components/auth/auth-provider';
 import { api } from './client';
 import { queryKeys } from './query-keys';
 import {
@@ -12,6 +13,7 @@ import {
   getBid,
   getListingBids,
   getMyBids,
+  invalidateAfterBidMutation,
   rejectBid,
   shortlistBid,
   updateBid,
@@ -225,13 +227,15 @@ describe('Bids API client & hooks', () => {
         data: { amountCents: 10000, currency: 'USD', deliveryDays: 5, message: 'msg' },
       });
 
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['listings', 'detail', 'listing-1'] });
       expect(invalidateSpy).toHaveBeenCalledWith({
-        queryKey: ['bids', 'listing', 'listing-1'],
+        queryKey: queryKeys.listings.detailAll('listing-1'),
+      });
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: queryKeys.bids.listingAll('listing-1'),
       });
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.bids.mineAll() });
       expect(invalidateSpy).toHaveBeenCalledWith({
-        queryKey: queryKeys.bids.detail(mockBidDetail.id),
+        queryKey: queryKeys.bids.detailAll(mockBidDetail.id),
       });
     });
 
@@ -248,12 +252,12 @@ describe('Bids API client & hooks', () => {
       });
 
       expect(invalidateSpy).toHaveBeenCalledWith({
-        queryKey: ['listings', 'detail', mockBidDetail.listingId],
+        queryKey: queryKeys.listings.detailAll(mockBidDetail.listingId),
       });
       expect(invalidateSpy).toHaveBeenCalledWith({
-        queryKey: ['bids', 'listing', mockBidDetail.listingId],
+        queryKey: queryKeys.bids.listingAll(mockBidDetail.listingId),
       });
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.bids.detail('bid-123') });
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.bids.detailAll('bid-123') });
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.bids.mineAll() });
     });
 
@@ -267,12 +271,12 @@ describe('Bids API client & hooks', () => {
       await result.current.mutateAsync('bid-123');
 
       expect(invalidateSpy).toHaveBeenCalledWith({
-        queryKey: ['listings', 'detail', mockBidDetail.listingId],
+        queryKey: queryKeys.listings.detailAll(mockBidDetail.listingId),
       });
       expect(invalidateSpy).toHaveBeenCalledWith({
-        queryKey: ['bids', 'listing', mockBidDetail.listingId],
+        queryKey: queryKeys.bids.listingAll(mockBidDetail.listingId),
       });
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.bids.detail('bid-123') });
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.bids.detailAll('bid-123') });
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.bids.mineAll() });
     });
 
@@ -284,7 +288,14 @@ describe('Bids API client & hooks', () => {
       const { result } = renderHook(() => useShortlistBid(), { wrapper });
       await result.current.mutateAsync('bid-123');
 
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.bids.detail('bid-123') });
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: queryKeys.listings.detailAll(mockBidDetail.listingId),
+      });
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: queryKeys.bids.listingAll(mockBidDetail.listingId),
+      });
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.bids.detailAll('bid-123') });
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.bids.mineAll() });
     });
 
     it('useRejectBid invalidates queries', async () => {
@@ -295,7 +306,14 @@ describe('Bids API client & hooks', () => {
       const { result } = renderHook(() => useRejectBid(), { wrapper });
       await result.current.mutateAsync({ id: 'bid-123', data: { reason: 'No' } });
 
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.bids.detail('bid-123') });
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: queryKeys.listings.detailAll(mockBidDetail.listingId),
+      });
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: queryKeys.bids.listingAll(mockBidDetail.listingId),
+      });
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.bids.detailAll('bid-123') });
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.bids.mineAll() });
     });
 
     it('useCounterBid invalidates queries', async () => {
@@ -309,12 +327,19 @@ describe('Bids API client & hooks', () => {
         data: { amountCents: 8000, deliveryDays: 4, message: 'New terms' },
       });
 
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.bids.detail('bid-123') });
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: queryKeys.listings.detailAll(mockBidDetail.listingId),
+      });
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: queryKeys.bids.listingAll(mockBidDetail.listingId),
+      });
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.bids.detailAll('bid-123') });
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.bids.mineAll() });
     });
 
     it('useAcceptCounter and useAcceptBid invalidate queries', async () => {
       const mockRes = {
-        bid: mockBid,
+        bid: { ...mockBid, listingId: 'listing-1' },
         agreement: {
           id: 'agr-3',
           listingId: 'listing-1',
@@ -330,11 +355,201 @@ describe('Bids API client & hooks', () => {
 
       const { result: acceptCounterHook } = renderHook(() => useAcceptCounter(), { wrapper });
       await acceptCounterHook.current.mutateAsync('bid-123');
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.bids.detail('bid-123') });
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: queryKeys.listings.detailAll('listing-1'),
+      });
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: queryKeys.bids.listingAll('listing-1'),
+      });
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.bids.detailAll('bid-123') });
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.bids.mineAll() });
 
       const { result: acceptBidHook } = renderHook(() => useAcceptBid(), { wrapper });
       await acceptBidHook.current.mutateAsync('bid-123');
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.bids.detail('bid-123') });
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: queryKeys.listings.detailAll('listing-1'),
+      });
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: queryKeys.bids.listingAll('listing-1'),
+      });
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.bids.detailAll('bid-123') });
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.bids.mineAll() });
+    });
+  });
+
+  describe('invalidateAfterBidMutation helper', () => {
+    it('invalidates listing detail, bids, bid detail, and mine list', () => {
+      const { queryClient } = createWrapper();
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+
+      invalidateAfterBidMutation(queryClient, {
+        bidId: 'bid-123',
+        listingId: 'listing-456',
+      });
+
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: queryKeys.listings.detailAll('listing-456'),
+      });
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: queryKeys.bids.listingAll('listing-456'),
+      });
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: queryKeys.bids.detailAll('bid-123'),
+      });
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: queryKeys.bids.mineAll(),
+      });
+    });
+  });
+
+  describe('Viewer-scoped cache invalidation & refetch', () => {
+    interface MutationTestItem {
+      name: string;
+      method: 'post' | 'patch';
+      mockResponse: unknown;
+      execute: (wrapper: React.ComponentType<{ children: React.ReactNode }>) => Promise<unknown>;
+    }
+
+    const mutationCases: MutationTestItem[] = [
+      {
+        name: 'useWithdrawBid',
+        method: 'post',
+        mockResponse: mockBidDetail,
+        execute: async (wrapper) => {
+          const { result } = renderHook(() => useWithdrawBid(), { wrapper });
+          return result.current.mutateAsync('bid-123');
+        },
+      },
+      {
+        name: 'useUpdateBid',
+        method: 'patch',
+        mockResponse: mockBidDetail,
+        execute: async (wrapper) => {
+          const { result } = renderHook(() => useUpdateBid(), { wrapper });
+          return result.current.mutateAsync({ id: 'bid-123', data: { amountCents: 20000 } });
+        },
+      },
+      {
+        name: 'useShortlistBid',
+        method: 'post',
+        mockResponse: mockBidDetail,
+        execute: async (wrapper) => {
+          const { result } = renderHook(() => useShortlistBid(), { wrapper });
+          return result.current.mutateAsync('bid-123');
+        },
+      },
+      {
+        name: 'useRejectBid',
+        method: 'post',
+        mockResponse: mockBidDetail,
+        execute: async (wrapper) => {
+          const { result } = renderHook(() => useRejectBid(), { wrapper });
+          return result.current.mutateAsync({ id: 'bid-123', data: { reason: 'No' } });
+        },
+      },
+      {
+        name: 'useCounterBid',
+        method: 'post',
+        mockResponse: mockBidDetail,
+        execute: async (wrapper) => {
+          const { result } = renderHook(() => useCounterBid(), { wrapper });
+          return result.current.mutateAsync({
+            id: 'bid-123',
+            data: { amountCents: 8500, deliveryDays: 3, message: 'counter' },
+          });
+        },
+      },
+      {
+        name: 'useAcceptCounter',
+        method: 'post',
+        mockResponse: {
+          bid: mockBid,
+          agreement: {
+            id: 'agr-1',
+            listingId: 'listing-1',
+            bidId: 'bid-123',
+            status: 'ACTIVE',
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          },
+        },
+        execute: async (wrapper) => {
+          const { result } = renderHook(() => useAcceptCounter(), { wrapper });
+          return result.current.mutateAsync('bid-123');
+        },
+      },
+      {
+        name: 'useAcceptBid',
+        method: 'post',
+        mockResponse: {
+          bid: mockBid,
+          agreement: {
+            id: 'agr-2',
+            listingId: 'listing-1',
+            bidId: 'bid-123',
+            status: 'ACTIVE',
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          },
+        },
+        execute: async (wrapper) => {
+          const { result } = renderHook(() => useAcceptBid(), { wrapper });
+          return result.current.mutateAsync('bid-123');
+        },
+      },
+    ];
+
+    mutationCases.forEach(({ name, method, mockResponse, execute }) => {
+      it(`mounts useBid with a logged-in viewer, runs ${name}, and asserts a refetch`, async () => {
+        vi.spyOn(authProvider, 'useViewerId').mockReturnValue('logged-in-user-999');
+
+        let fetchCount = 0;
+        vi.spyOn(api, 'get').mockImplementation((path: string) => {
+          if (path === '/bids/bid-123') {
+            fetchCount++;
+            return Promise.resolve({ ...mockBidDetail, message: `version-${fetchCount}` });
+          }
+          return Promise.resolve({});
+        });
+
+        if (method === 'patch') {
+          vi.spyOn(api, 'patch').mockResolvedValue(mockResponse);
+        } else {
+          vi.spyOn(api, 'post').mockResolvedValue(mockResponse);
+        }
+
+        const { wrapper, queryClient } = createWrapper();
+
+        // 1. Mount useBid with a logged-in viewer
+        const { result: bidHook } = renderHook(() => useBid('bid-123'), { wrapper });
+
+        await waitFor(() => {
+          expect(bidHook.current.isSuccess).toBe(true);
+        });
+        expect(fetchCount).toBe(1);
+        expect(bidHook.current.data?.message).toBe('version-1');
+
+        // Confirm query is stored under viewer-scoped key
+        const cachedQuery = queryClient
+          .getQueryCache()
+          .findAll({ queryKey: ['bids', 'detail', 'bid-123'] });
+        expect(cachedQuery).toHaveLength(1);
+        expect(cachedQuery[0]?.queryKey).toEqual([
+          'bids',
+          'detail',
+          'bid-123',
+          'logged-in-user-999',
+        ]);
+
+        // 2. Run the mutation
+        await execute(wrapper);
+
+        // 3. Assert useBid refetched
+        await waitFor(() => {
+          expect(fetchCount).toBe(2);
+        });
+        expect(bidHook.current.data?.message).toBe('version-2');
+      });
     });
   });
 });

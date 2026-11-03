@@ -29,7 +29,6 @@ function EditListingContent() {
     refetch,
   } = useListing(id, {
     enabled: Boolean(id) && !authLoading,
-    viewerId: user?.id ?? null,
   });
   const updateMutation = useUpdateListing();
 

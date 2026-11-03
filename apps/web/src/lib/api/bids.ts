@@ -1,4 +1,10 @@
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  type QueryClient,
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
 import { useViewerId } from '@/components/auth/auth-provider';
 import { api } from './client';
 import { queryKeys } from './query-keys';
@@ -81,15 +87,38 @@ export async function acceptBid(id: string): Promise<BidAcceptResponse> {
   return api.post<BidAcceptResponse>(`/bids/${id}/accept`);
 }
 
+// Cache invalidation helper
+
+export function invalidateAfterBidMutation(
+  queryClient: QueryClient,
+  { bidId, listingId }: { bidId?: string | null; listingId?: string | null },
+) {
+  if (listingId) {
+    void queryClient.invalidateQueries({
+      queryKey: queryKeys.listings.detailAll(listingId),
+    });
+    void queryClient.invalidateQueries({
+      queryKey: queryKeys.bids.listingAll(listingId),
+    });
+  }
+  if (bidId) {
+    void queryClient.invalidateQueries({
+      queryKey: queryKeys.bids.detailAll(bidId),
+    });
+  }
+  void queryClient.invalidateQueries({
+    queryKey: queryKeys.bids.mineAll(),
+  });
+}
+
 // React Query hooks
 
 export function useListingBids(
   listingId: string,
   sort: BidSort = 'newest',
-  options?: { enabled?: boolean; viewerId?: string | null },
+  options?: { enabled?: boolean },
 ) {
-  const authViewerId = useViewerId();
-  const viewerId = options?.viewerId !== undefined ? options.viewerId : authViewerId;
+  const viewerId = useViewerId();
   return useInfiniteQuery({
     queryKey: queryKeys.bids.byListing(listingId, sort, viewerId),
     queryFn: ({ pageParam }) => getListingBids(listingId, { sort, cursor: pageParam ?? undefined }),
@@ -99,12 +128,8 @@ export function useListingBids(
   });
 }
 
-export function useMyBids(
-  status?: BidStatus,
-  options?: { enabled?: boolean; viewerId?: string | null },
-) {
-  const authViewerId = useViewerId();
-  const viewerId = options?.viewerId !== undefined ? options.viewerId : authViewerId;
+export function useMyBids(status?: BidStatus, options?: { enabled?: boolean }) {
+  const viewerId = useViewerId();
   return useInfiniteQuery({
     queryKey: queryKeys.bids.mine(status, viewerId),
     queryFn: ({ pageParam }) => getMyBids({ status, cursor: pageParam ?? undefined }),
@@ -114,9 +139,8 @@ export function useMyBids(
   });
 }
 
-export function useBid(id: string, options?: { enabled?: boolean; viewerId?: string | null }) {
-  const authViewerId = useViewerId();
-  const viewerId = options?.viewerId !== undefined ? options.viewerId : authViewerId;
+export function useBid(id: string, options?: { enabled?: boolean }) {
+  const viewerId = useViewerId();
   return useQuery({
     queryKey: queryKeys.bids.detail(id, viewerId),
     queryFn: () => getBid(id),
@@ -130,15 +154,10 @@ export function useCreateBid() {
     mutationFn: ({ listingId, data }: { listingId: string; data: BidCreateInput }) =>
       createBid(listingId, data),
     onSuccess: (result, variables) => {
-      const listingId = variables.listingId;
-      void queryClient.invalidateQueries({ queryKey: ['listings', 'detail', listingId] });
-      void queryClient.invalidateQueries({
-        queryKey: ['bids', 'listing', listingId],
+      invalidateAfterBidMutation(queryClient, {
+        bidId: result?.id,
+        listingId: variables.listingId,
       });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.bids.mineAll() });
-      if (result?.id) {
-        void queryClient.invalidateQueries({ queryKey: queryKeys.bids.detail(result.id) });
-      }
     },
   });
 }
@@ -148,14 +167,10 @@ export function useUpdateBid() {
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: BidUpdateInput }) => updateBid(id, data),
     onSuccess: (result, variables) => {
-      if (result?.listingId) {
-        void queryClient.invalidateQueries({ queryKey: ['listings', 'detail', result.listingId] });
-        void queryClient.invalidateQueries({
-          queryKey: ['bids', 'listing', result.listingId],
-        });
-      }
-      void queryClient.invalidateQueries({ queryKey: queryKeys.bids.detail(variables.id) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.bids.mineAll() });
+      invalidateAfterBidMutation(queryClient, {
+        bidId: variables.id,
+        listingId: result?.listingId,
+      });
     },
   });
 }
@@ -165,14 +180,10 @@ export function useWithdrawBid() {
   return useMutation({
     mutationFn: (id: string) => withdrawBid(id),
     onSuccess: (result, id) => {
-      if (result?.listingId) {
-        void queryClient.invalidateQueries({ queryKey: ['listings', 'detail', result.listingId] });
-        void queryClient.invalidateQueries({
-          queryKey: ['bids', 'listing', result.listingId],
-        });
-      }
-      void queryClient.invalidateQueries({ queryKey: queryKeys.bids.detail(id) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.bids.mineAll() });
+      invalidateAfterBidMutation(queryClient, {
+        bidId: id,
+        listingId: result?.listingId,
+      });
     },
   });
 }
@@ -182,14 +193,10 @@ export function useShortlistBid() {
   return useMutation({
     mutationFn: (id: string) => shortlistBid(id),
     onSuccess: (result, id) => {
-      if (result?.listingId) {
-        void queryClient.invalidateQueries({ queryKey: ['listings', 'detail', result.listingId] });
-        void queryClient.invalidateQueries({
-          queryKey: ['bids', 'listing', result.listingId],
-        });
-      }
-      void queryClient.invalidateQueries({ queryKey: queryKeys.bids.detail(id) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.bids.mineAll() });
+      invalidateAfterBidMutation(queryClient, {
+        bidId: id,
+        listingId: result?.listingId,
+      });
     },
   });
 }
@@ -199,14 +206,10 @@ export function useRejectBid() {
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data?: BidRejectInput }) => rejectBid(id, data),
     onSuccess: (result, variables) => {
-      if (result?.listingId) {
-        void queryClient.invalidateQueries({ queryKey: ['listings', 'detail', result.listingId] });
-        void queryClient.invalidateQueries({
-          queryKey: ['bids', 'listing', result.listingId],
-        });
-      }
-      void queryClient.invalidateQueries({ queryKey: queryKeys.bids.detail(variables.id) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.bids.mineAll() });
+      invalidateAfterBidMutation(queryClient, {
+        bidId: variables.id,
+        listingId: result?.listingId,
+      });
     },
   });
 }
@@ -216,14 +219,10 @@ export function useCounterBid() {
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: BidCounterInput }) => counterBid(id, data),
     onSuccess: (result, variables) => {
-      if (result?.listingId) {
-        void queryClient.invalidateQueries({ queryKey: ['listings', 'detail', result.listingId] });
-        void queryClient.invalidateQueries({
-          queryKey: ['bids', 'listing', result.listingId],
-        });
-      }
-      void queryClient.invalidateQueries({ queryKey: queryKeys.bids.detail(variables.id) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.bids.mineAll() });
+      invalidateAfterBidMutation(queryClient, {
+        bidId: variables.id,
+        listingId: result?.listingId,
+      });
     },
   });
 }
@@ -233,15 +232,10 @@ export function useAcceptCounter() {
   return useMutation({
     mutationFn: (id: string) => acceptCounter(id),
     onSuccess: (result, id) => {
-      const listingId = result?.bid?.listingId;
-      if (listingId) {
-        void queryClient.invalidateQueries({ queryKey: ['listings', 'detail', listingId] });
-        void queryClient.invalidateQueries({
-          queryKey: ['bids', 'listing', listingId],
-        });
-      }
-      void queryClient.invalidateQueries({ queryKey: queryKeys.bids.detail(id) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.bids.mineAll() });
+      invalidateAfterBidMutation(queryClient, {
+        bidId: id,
+        listingId: result?.bid?.listingId,
+      });
     },
   });
 }
@@ -251,15 +245,10 @@ export function useAcceptBid() {
   return useMutation({
     mutationFn: (id: string) => acceptBid(id),
     onSuccess: (result, id) => {
-      const listingId = result?.bid?.listingId;
-      if (listingId) {
-        void queryClient.invalidateQueries({ queryKey: ['listings', 'detail', listingId] });
-        void queryClient.invalidateQueries({
-          queryKey: ['bids', 'listing', listingId],
-        });
-      }
-      void queryClient.invalidateQueries({ queryKey: queryKeys.bids.detail(id) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.bids.mineAll() });
+      invalidateAfterBidMutation(queryClient, {
+        bidId: id,
+        listingId: result?.bid?.listingId,
+      });
     },
   });
 }

@@ -42,12 +42,8 @@ export async function deleteListing(id: string): Promise<void> {
   return api.delete<void>(`/listings/${id}`);
 }
 
-export function useListings(
-  filters?: ListingFilters,
-  options?: { enabled?: boolean; viewerId?: string | null },
-) {
-  const authViewerId = useViewerId();
-  const viewerId = options?.viewerId !== undefined ? options.viewerId : authViewerId;
+export function useListings(filters?: ListingFilters, options?: { enabled?: boolean }) {
+  const viewerId = useViewerId();
   return useInfiniteQuery({
     queryKey: queryKeys.listings.infinite(filters, viewerId),
     queryFn: ({ pageParam }) => getListings({ ...filters, cursor: pageParam ?? undefined }),
@@ -57,9 +53,8 @@ export function useListings(
   });
 }
 
-export function useListing(id: string, options?: { enabled?: boolean; viewerId?: string | null }) {
-  const authViewerId = useViewerId();
-  const viewerId = options?.viewerId !== undefined ? options.viewerId : authViewerId;
+export function useListing(id: string, options?: { enabled?: boolean }) {
+  const viewerId = useViewerId();
   return useQuery({
     queryKey: queryKeys.listings.detail(id, viewerId),
     queryFn: () => getListing(id),
@@ -83,7 +78,7 @@ export function useUpdateListing() {
     mutationFn: ({ id, data }: { id: string; data: UpdateListingRequest }) =>
       updateListing(id, data),
     onSuccess: (_, variables) => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.listings.detail(variables.id) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.listings.detailAll(variables.id) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.listings.all });
     },
   });
@@ -94,7 +89,7 @@ export function useCloseListing() {
   return useMutation({
     mutationFn: (id: string) => closeListing(id),
     onSuccess: (_, id) => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.listings.detail(id) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.listings.detailAll(id) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.listings.all });
     },
   });

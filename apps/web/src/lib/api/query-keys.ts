@@ -15,6 +15,7 @@ export const queryKeys = {
     details: () => ['listings', 'detail'] as const,
     detail: (id: string, viewerId?: string | null) =>
       ['listings', 'detail', id, viewerId ?? 'anon'] as const,
+    detailAll: (id: string) => ['listings', 'detail', id] as const,
   },
   categories: {
     all: ['categories'] as const,
@@ -34,6 +35,7 @@ export const queryKeys = {
     all: ['bids'] as const,
     byListing: (listingId: string, sort?: string, viewerId?: string | null) =>
       ['bids', 'listing', listingId, sort ?? 'newest', viewerId ?? 'anon'] as const,
+    listingAll: (listingId: string) => ['bids', 'listing', listingId] as const,
     mineAll: (viewerId?: string | null) =>
       viewerId ? (['bids', 'mine', viewerId] as const) : (['bids', 'mine'] as const),
     mine: (status?: string, viewerId?: string | null) =>
@@ -41,5 +43,6 @@ export const queryKeys = {
     details: () => ['bids', 'detail'] as const,
     detail: (id: string, viewerId?: string | null) =>
       ['bids', 'detail', id, viewerId ?? 'anon'] as const,
+    detailAll: (id: string) => ['bids', 'detail', id] as const,
   },
 };

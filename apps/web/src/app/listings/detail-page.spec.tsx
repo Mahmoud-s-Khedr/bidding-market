@@ -137,7 +137,7 @@ describe('Listing Detail Page', () => {
     expect(screen.getByRole('button', { name: /delete/i })).toBeInTheDocument();
   });
 
-  it('gates useListing on !authLoading and passes viewerId (Finding 8)', () => {
+  it('gates useListing on !authLoading (Finding 8)', () => {
     vi.spyOn(authContext, 'useAuth').mockReturnValue({
       user: {
         id: 'owner-viewer-1',
@@ -172,7 +172,6 @@ describe('Listing Detail Page', () => {
       'listing-123',
       expect.objectContaining({
         enabled: false,
-        viewerId: 'owner-viewer-1',
       }),
     );
   });

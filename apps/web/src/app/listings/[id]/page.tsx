@@ -61,7 +61,6 @@ export default function ListingDetailPage() {
     refetch,
   } = useListing(id, {
     enabled: Boolean(id) && !authLoading,
-    viewerId: user?.id ?? null,
   });
 
   const isLoading = authLoading || (isListingLoading && !listing);

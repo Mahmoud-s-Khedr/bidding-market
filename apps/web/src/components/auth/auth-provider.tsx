@@ -38,20 +38,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Sync token state if client updates it
   React.useEffect(() => {
     return subscribeAccessToken((newToken) => {
-      setTokenState(newToken);
-      if (!newToken) {
-        setUser(null);
-        queryClient?.clear();
-      }
+      setTokenState((prevToken) => {
+        if (!newToken && prevToken !== null) {
+          setUser(null);
+          queryClient?.clear();
+        }
+        return newToken;
+      });
     });
   }, [queryClient]);
 
   // Clear query cache on any user change to avoid cross-user session cache leakage
   const prevUserIdRef = React.useRef<string | null | undefined>(undefined);
+  const isInitialRestoreRef = React.useRef<boolean>(true);
   React.useEffect(() => {
     const currentId = user?.id ?? null;
     if (prevUserIdRef.current !== undefined && prevUserIdRef.current !== currentId) {
-      queryClient?.clear();
+      if (isInitialRestoreRef.current && prevUserIdRef.current === null && currentId !== null) {
+        // Skip the clear on the initial null -> user restore
+        isInitialRestoreRef.current = false;
+      } else {
+        queryClient?.clear();
+      }
     }
     prevUserIdRef.current = currentId;
   }, [user, queryClient]);
@@ -68,10 +76,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(res.user);
       } else {
         setUser(null);
+        isInitialRestoreRef.current = false;
       }
     } catch {
       if (gen === getAuthGeneration()) {
         setUser(null);
+        isInitialRestoreRef.current = false;
       }
     }
   }, []);
@@ -99,6 +109,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = React.useCallback(
     async (credentials: LoginInput) => {
+      isInitialRestoreRef.current = false;
       const res = await api.post<AuthResponse>('/auth/login', credentials, {
         skipAuth: true,
         retryOn401: false,
@@ -113,6 +124,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const register = React.useCallback(
     async (data: RegisterInput) => {
+      isInitialRestoreRef.current = false;
       const res = await api.post<AuthResponse>('/auth/register', data, {
         skipAuth: true,
         retryOn401: false,
@@ -126,6 +138,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const logout = React.useCallback(async () => {
+    isInitialRestoreRef.current = false;
     // Bumps generation counter and clears in-memory token to discard in-flight refresh results
     clearAuthSession();
     setUser(null);
