@@ -21,7 +21,6 @@ export const BidStatus = z.enum([
   'WITHDRAWN',
   'DECLINED',
 ]);
-export type BidStatus = z.infer<typeof BidStatus>;
 export const MessageType = z.enum(['TEXT', 'IMAGE', 'FILE', 'VOICE']);
 export const AgreementStatus = z.enum([
   'ACTIVE',
