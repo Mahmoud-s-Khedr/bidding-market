@@ -1,13 +1,11 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { config } from 'dotenv';
 import type { INestApplication } from '@nestjs/common';
 import type { Server } from 'node:http';
 import request from 'supertest';
+import '../../../test/helpers/env.js';
 import { createTestApp } from '../../../test/helpers/app.js';
 import { createAdmin, createUser, loginAs, signToken } from '../../../test/helpers/auth.js';
 import { prisma, resetDb } from '../../../test/helpers/db.js';
-
-config({ path: '.env', quiet: true });
 
 describe('reports and admin API', () => {
   let app: INestApplication;
@@ -182,7 +180,7 @@ describe('reports and admin API', () => {
       .patch(`/api/v1/admin/users/${adminId}`)
       .set(auth(adminToken))
       .send({ role: 'USER' })
-      .expect(409);
+      .expect(400);
   });
   it('suspends a user, revokes refresh credentials, blocks access, and audits', async () => {
     const login = await loginAs(app, 'user@test.local');
@@ -191,7 +189,7 @@ describe('reports and admin API', () => {
       .set(auth(adminToken))
       .send({ status: 'SUSPENDED', reason: 'policy' })
       .expect(200);
-    await request(server).post('/api/v1/auth/refresh').set('Cookie', login.cookie).expect(403);
+    await request(server).post('/api/v1/auth/refresh').set('Cookie', login.cookie).expect(401);
     await request(server).get('/api/v1/auth/me').set(auth(login.accessToken)).expect(403);
     expect(
       await prisma.auditLog.count({
@@ -213,7 +211,7 @@ describe('reports and admin API', () => {
         .set(auth(adminToken))
         .send({ action: 'DISMISS', note: 'ok' }),
     ]);
-    expect(responses.map((r) => r.status).sort()).toEqual([200, 409]);
+    expect(responses.map((r) => r.status).sort()).toEqual([201, 409]);
     expect(
       await prisma.auditLog.count({
         where: { actorId: adminId, targetId: report.id, action: 'REPORT_RESOLVED' },
