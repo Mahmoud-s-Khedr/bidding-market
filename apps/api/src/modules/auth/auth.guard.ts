@@ -18,7 +18,7 @@ export class JwtAuthGuard implements CanActivate {
   ) {}
   async canActivate(context: ExecutionContext): Promise<boolean> {
     // Socket authentication is performed by RealtimeGateway's namespace middleware.
-    if ('getType' in context && context.getType() !== 'http') return true;
+    if ('getType' in context && context.getType() === 'ws') return true;
     if (
       this.reflector.getAllAndOverride<boolean>(IS_PUBLIC, [
         context.getHandler(),

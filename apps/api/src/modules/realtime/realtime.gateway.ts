@@ -1,4 +1,4 @@
-import { Inject } from '@nestjs/common';
+import { Inject, OnApplicationShutdown } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { OnEvent } from '@nestjs/event-emitter';
 import { SubscribeMessage, WebSocketGateway, WebSocketServer } from '@nestjs/websockets';
@@ -16,7 +16,7 @@ interface AuthedSocket extends Socket {
 }
 
 @WebSocketGateway({ namespace: '/rt', cors: { origin: process.env.WEB_ORIGIN, credentials: true } })
-export class RealtimeGateway {
+export class RealtimeGateway implements OnApplicationShutdown {
   @WebSocketServer() server!: Server;
   private publisher?: Redis;
   private subscriber?: Redis;
@@ -39,6 +39,10 @@ export class RealtimeGateway {
         .then(() => next())
         .catch(() => next(new Error('Unauthorized')));
     });
+  }
+  onApplicationShutdown(): void {
+    this.publisher?.disconnect();
+    this.subscriber?.disconnect();
   }
 
   async handleConnection(socket: AuthedSocket): Promise<void> {
@@ -148,8 +152,16 @@ export class RealtimeGateway {
   }
 
   @OnEvent('message.created')
-  onMessageCreated(event: { participantIds: string[]; message: unknown }): void {
-    this.realtime.emitToUsers(event.participantIds, 'message:new', event.message);
+  async onMessageCreated(event: { participantIds: string[]; message: unknown }): Promise<void> {
+    const active = await this.prisma.user.findMany({
+      where: { id: { in: event.participantIds }, status: 'ACTIVE' },
+      select: { id: true },
+    });
+    this.realtime.emitToUsers(
+      active.map((user) => user.id),
+      'message:new',
+      event.message,
+    );
   }
   @OnEvent('message.read')
   onMessageRead(event: { conversationId: string; userId: string; lastMessageId: string }): void {
