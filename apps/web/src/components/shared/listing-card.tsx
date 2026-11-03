@@ -7,6 +7,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { PriceTag } from './price-tag';
 import { RatingStars } from './rating-stars';
 import type { ListingSummary } from '@/lib/api/types';
+import { safeMediaUrl } from '@/lib/safe-url';
 
 export interface ListingCardProps {
   listing: ListingSummary;
@@ -31,9 +32,9 @@ export function ListingCard({ listing, className }: ListingCardProps) {
         tabIndex={-1}
         aria-hidden="true"
       >
-        {listing.thumbnailUrl ? (
+        {safeMediaUrl(listing.thumbnailUrl) ? (
           <img
-            src={listing.thumbnailUrl}
+            src={safeMediaUrl(listing.thumbnailUrl)}
             alt=""
             className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
           />
@@ -107,7 +108,7 @@ export function ListingCard({ listing, className }: ListingCardProps) {
           >
             <Avatar className="h-6 w-6">
               <AvatarImage
-                src={listing.owner.avatarUrl || undefined}
+                src={safeMediaUrl(listing.owner.avatarUrl)}
                 alt={listing.owner.displayName}
               />
               <AvatarFallback className="text-[10px]">
