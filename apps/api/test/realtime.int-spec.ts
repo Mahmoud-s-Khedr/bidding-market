@@ -4,7 +4,7 @@ import type { Server } from 'node:http';
 import request from 'supertest';
 import { io, type Socket } from 'socket.io-client';
 import type Redis from 'ioredis';
-import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTestApp } from './helpers/app.js';
 import { registerAndLogin } from './helpers/auth.js';
 import { prisma, resetDb } from './helpers/db.js';
@@ -43,9 +43,12 @@ const noEvent = (socket: Socket, event: string, ms = 150) =>
 
 describe('realtime', () => {
   let app: INestApplication;
-  beforeEach(async () => {
-    await resetDb();
+  afterEach(async () => {
     await app?.close();
+  });
+  beforeEach(async () => {
+    await app?.close();
+    await resetDb();
     app = await createTestApp();
     await app.listen(0);
   });

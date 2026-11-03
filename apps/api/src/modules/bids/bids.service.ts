@@ -1156,19 +1156,10 @@ export class BidsService {
       });
 
       // 6. Reuse or create Conversation linked to listing/bid/agreement
-      const existingConv = await tx.conversation.findFirst({
+      const keys = conversationKeys(currentListing.ownerId, currentBid.bidderId, currentListing.id);
+      const existingConv = await tx.conversation.findUnique({
         where: {
-          listingId: currentListing.id,
-          participants: {
-            some: { userId: currentListing.ownerId },
-          },
-          AND: [
-            {
-              participants: {
-                some: { userId: currentBid.bidderId },
-              },
-            },
-          ],
+          participantPairKey_listingDedupKey: keys,
         },
       });
 
@@ -1181,23 +1172,34 @@ export class BidsService {
           },
         });
       } else {
-        const keys = conversationKeys(
-          currentListing.ownerId,
-          currentBid.bidderId,
-          currentListing.id,
-        );
-        await tx.conversation.create({
-          data: {
-            ...keys,
-            lastMessageAt: new Date(),
-            listingId: currentListing.id,
-            bidId: currentBid.id,
-            agreementId: agreement.id,
-            participants: {
-              create: [{ userId: currentListing.ownerId }, { userId: currentBid.bidderId }],
+        try {
+          await tx.conversation.create({
+            data: {
+              ...keys,
+              lastMessageAt: new Date(),
+              listingId: currentListing.id,
+              bidId: currentBid.id,
+              agreementId: agreement.id,
+              participants: {
+                create: [{ userId: currentListing.ownerId }, { userId: currentBid.bidderId }],
+              },
             },
-          },
-        });
+          });
+        } catch (error) {
+          if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+            await tx.conversation.update({
+              where: {
+                participantPairKey_listingDedupKey: keys,
+              },
+              data: {
+                agreementId: agreement.id,
+                bidId: currentBid.id,
+              },
+            });
+          } else {
+            throw error;
+          }
+        }
       }
 
       const updatedBid = await tx.bid.findUniqueOrThrow({

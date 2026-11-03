@@ -230,4 +230,17 @@ describe('messages', () => {
     await send(a.accessToken, id, { type: 'FILE', attachmentIds: [file.id] }).expect(201);
     await send(a.accessToken, id, { type: 'FILE', attachmentIds: [file.id] }).expect(400);
   });
+  it('leaves lastMessageAt equal to the newest message createdAt under concurrent sends', async () => {
+    const { a, b, id } = await pair();
+    await Promise.all([
+      send(a.accessToken, id, { type: 'TEXT', body: 'msg 1' }),
+      send(b.accessToken, id, { type: 'TEXT', body: 'msg 2' }),
+    ]);
+    const conv = await prisma.conversation.findUniqueOrThrow({ where: { id } });
+    const newest = await prisma.message.findFirstOrThrow({
+      where: { conversationId: id },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    });
+    expect(conv.lastMessageAt.getTime()).toBe(newest.createdAt.getTime());
+  });
 });

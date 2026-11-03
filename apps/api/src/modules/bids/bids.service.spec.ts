@@ -48,6 +48,7 @@ describe('BidsService', () => {
       findUniqueOrThrow: MockFn;
     };
     conversation: {
+      findUnique: MockFn;
       findFirst: MockFn;
       create: MockFn;
       update: MockFn;
@@ -199,6 +200,7 @@ describe('BidsService', () => {
         }),
       },
       conversation: {
+        findUnique: vi.fn().mockResolvedValue(null),
         findFirst: vi.fn(),
         create: vi.fn(),
         update: vi.fn(),
@@ -712,7 +714,7 @@ describe('BidsService', () => {
         createdAt: new Date(),
         updatedAt: new Date(),
       });
-      prisma.conversation.findFirst.mockResolvedValue({ id: 'existing_conv' });
+      prisma.conversation.findUnique.mockResolvedValue({ id: 'existing_conv' });
       prisma.conversation.update.mockResolvedValue({ id: 'existing_conv' });
       prisma.bid.findUniqueOrThrow.mockResolvedValue({
         ...bid,
@@ -726,6 +728,52 @@ describe('BidsService', () => {
         expect.objectContaining({
           where: { id: 'existing_conv' },
           data: expect.objectContaining({ agreementId: 'ag_2' }),
+        }),
+      );
+    });
+
+    it('retries and reuses conversation on P2002 unique constraint race during accept', async () => {
+      const bid = mockBid('PENDING');
+      prisma.bid.findUnique.mockResolvedValue(bid);
+      prisma.listing.updateMany.mockResolvedValue({ count: 1 });
+      prisma.bid.updateMany.mockResolvedValue({ count: 1 });
+      prisma.agreement.create.mockResolvedValue({
+        id: 'ag_race',
+        listingId: 'list_1',
+        bidId: 'bid_1',
+        buyerId: ownerUser.id,
+        providerId: bidderUser.id,
+        buyer: mockPublicUser(ownerUser.id, 'Owner'),
+        provider: mockPublicUser(bidderUser.id, 'Bidder'),
+        status: 'ACTIVE',
+        milestones: [],
+        deliverables: [],
+        events: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      prisma.conversation.findUnique.mockResolvedValue(null);
+      prisma.conversation.create.mockRejectedValueOnce(
+        new Prisma.PrismaClientKnownRequestError('duplicate', {
+          code: 'P2002',
+          clientVersion: '7.10.1',
+        }),
+      );
+      prisma.conversation.update.mockResolvedValue({ id: 'conv_reused' });
+      prisma.bid.findUniqueOrThrow.mockResolvedValue({ ...bid, status: 'ACCEPTED' });
+
+      const res = await service.accept('bid_1', ownerUser);
+      expect(res.bid.status).toBe('ACCEPTED');
+      expect(prisma.conversation.create).toHaveBeenCalled();
+      expect(prisma.conversation.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            participantPairKey_listingDedupKey: expect.any(Object),
+          },
+          data: expect.objectContaining({
+            agreementId: 'ag_race',
+            bidId: 'bid_1',
+          }),
         }),
       );
     });

@@ -2,7 +2,7 @@ import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { createTestApp } from './helpers/app.js';
-import { registerAndLogin } from './helpers/auth.js';
+import { createUser, registerAndLogin, signToken } from './helpers/auth.js';
 import { prisma, resetDb } from './helpers/db.js';
 import { ListingKind } from '../src/generated/prisma/client.js';
 
@@ -123,5 +123,170 @@ describe('conversations', () => {
       .query({ cursor: 'not-base64' })
       .set(auth(a.accessToken))
       .expect(400);
+  });
+  const userWithToken = async (email?: string, role: 'USER' | 'ADMIN' = 'USER') => {
+    const user = await createUser({ email, role });
+    return { user, accessToken: signToken(app, user) };
+  };
+
+  it('returns 404 when linking a DRAFT listing from a non-owner', async () => {
+    const owner = await userWithToken('owner-draft@test.local');
+    const nonOwner = await userWithToken('nonowner-draft@test.local');
+    const category = await prisma.category.create({
+      data: { name: 'CatDraft', slug: 'cat-draft' },
+    });
+    const listing = await prisma.listing.create({
+      data: {
+        ownerId: owner.user.id,
+        categoryId: category.id,
+        kind: ListingKind.OFFER,
+        title: 'Draft item',
+        description: 'Draft item',
+        priceType: 'FIXED',
+        priceMinCents: 100,
+        status: 'DRAFT',
+      },
+    });
+    const res = await create(nonOwner.accessToken, owner.user.id, { listingId: listing.id });
+    expect(res.status).toBe(404);
+  });
+  it('returns 404 when linking a REMOVED listing from a non-owner', async () => {
+    const owner = await userWithToken('owner-removed@test.local');
+    const nonOwner = await userWithToken('nonowner-removed@test.local');
+    const category = await prisma.category.create({
+      data: { name: 'CatRemoved', slug: 'cat-removed' },
+    });
+    const listing = await prisma.listing.create({
+      data: {
+        ownerId: owner.user.id,
+        categoryId: category.id,
+        kind: ListingKind.OFFER,
+        title: 'Removed item',
+        description: 'Removed item',
+        priceType: 'FIXED',
+        priceMinCents: 100,
+        status: 'REMOVED',
+      },
+    });
+    const res = await create(nonOwner.accessToken, owner.user.id, { listingId: listing.id });
+    expect(res.status).toBe(404);
+  });
+  it('returns 404 when linking someone elses bid', async () => {
+    const owner = await userWithToken('owner-bid@test.local');
+    const bidder = await userWithToken('bidder-bid@test.local');
+    const stranger = await userWithToken('stranger-bid@test.local');
+    const category = await prisma.category.create({ data: { name: 'CatBid', slug: 'cat-bid' } });
+    const listing = await prisma.listing.create({
+      data: {
+        ownerId: owner.user.id,
+        categoryId: category.id,
+        kind: ListingKind.REQUEST,
+        title: 'Need help',
+        description: 'Need help',
+        priceType: 'FIXED',
+        priceMinCents: 100,
+        status: 'OPEN',
+      },
+    });
+    const bid = await prisma.bid.create({
+      data: {
+        listingId: listing.id,
+        bidderId: bidder.user.id,
+        amountCents: 500,
+        currency: 'USD',
+        deliveryDays: 3,
+        message: 'I can do it',
+      },
+    });
+    const res = await create(stranger.accessToken, owner.user.id, { bidId: bid.id });
+    expect(res.status).toBe(404);
+  });
+  it('returns 404 when recipient is mismatched for a bid', async () => {
+    const owner = await userWithToken('owner-mismatch@test.local');
+    const bidder = await userWithToken('bidder-mismatch@test.local');
+    const thirdParty = await userWithToken('third-mismatch@test.local');
+    const category = await prisma.category.create({
+      data: { name: 'CatMismatch', slug: 'cat-mismatch' },
+    });
+    const listing = await prisma.listing.create({
+      data: {
+        ownerId: owner.user.id,
+        categoryId: category.id,
+        kind: ListingKind.REQUEST,
+        title: 'Need help 2',
+        description: 'Need help 2',
+        priceType: 'FIXED',
+        priceMinCents: 100,
+        status: 'OPEN',
+      },
+    });
+    const bid = await prisma.bid.create({
+      data: {
+        listingId: listing.id,
+        bidderId: bidder.user.id,
+        amountCents: 500,
+        currency: 'USD',
+        deliveryDays: 3,
+        message: 'I can do it',
+      },
+    });
+    const resBidder = await create(bidder.accessToken, thirdParty.user.id, { bidId: bid.id });
+    expect(resBidder.status).toBe(404);
+
+    const resOwner = await create(owner.accessToken, thirdParty.user.id, { bidId: bid.id });
+    expect(resOwner.status).toBe(404);
+  });
+  it('allows happy paths: owner can link DRAFT listing and bidder/owner can link bid', async () => {
+    const owner = await userWithToken('owner-happy@test.local');
+    const bidder = await userWithToken('bidder-happy@test.local');
+    const category = await prisma.category.create({
+      data: { name: 'CatHappy', slug: 'cat-happy' },
+    });
+    const draftListing = await prisma.listing.create({
+      data: {
+        ownerId: owner.user.id,
+        categoryId: category.id,
+        kind: ListingKind.OFFER,
+        title: 'Draft happy',
+        description: 'Draft happy',
+        priceType: 'FIXED',
+        priceMinCents: 100,
+        status: 'DRAFT',
+      },
+    });
+    const resDraft = await create(owner.accessToken, bidder.user.id, {
+      listingId: draftListing.id,
+    });
+    expect(resDraft.status).toBe(201);
+    expect(resDraft.body.listingId).toBe(draftListing.id);
+
+    const openListing = await prisma.listing.create({
+      data: {
+        ownerId: owner.user.id,
+        categoryId: category.id,
+        kind: ListingKind.REQUEST,
+        title: 'Open happy',
+        description: 'Open happy',
+        priceType: 'FIXED',
+        priceMinCents: 100,
+        status: 'OPEN',
+      },
+    });
+    const bid = await prisma.bid.create({
+      data: {
+        listingId: openListing.id,
+        bidderId: bidder.user.id,
+        amountCents: 500,
+        currency: 'USD',
+        deliveryDays: 3,
+        message: 'I can do it',
+      },
+    });
+    const resBidder = await create(bidder.accessToken, owner.user.id, {
+      listingId: openListing.id,
+      bidId: bid.id,
+    });
+    expect(resBidder.status).toBe(201);
+    expect(resBidder.body.bidId).toBe(bid.id);
   });
 });

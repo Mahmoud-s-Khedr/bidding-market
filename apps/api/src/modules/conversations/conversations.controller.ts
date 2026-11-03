@@ -27,7 +27,7 @@ export class ConversationsController {
     @CurrentUser() user: AuthUser,
     @Body(new ZodValidationPipe(conversationCreateSchema)) body: unknown,
   ) {
-    return this.conversations.create(user.id, body as ConversationCreateInput);
+    return this.conversations.create(user, body as ConversationCreateInput);
   }
   @Get(':id') get(
     @CurrentUser() user: AuthUser,

@@ -5,6 +5,7 @@ import type {
   MessageCreateInput,
   MessagesQueryInput,
 } from '@market/shared';
+import type { AuthUser } from '../../common/auth.js';
 import { Prisma } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { StorageService } from '../../storage/storage.service.js';
@@ -45,19 +46,58 @@ export class ConversationsService {
     private readonly events: EventEmitter2,
   ) {}
 
-  async create(userId: string, input: ConversationCreateInput) {
+  async create(caller: AuthUser | string, input: ConversationCreateInput) {
+    const userId = typeof caller === 'string' ? caller : caller.id;
+    let userRole = typeof caller === 'string' ? undefined : caller.role;
     if (input.recipientId === userId) throw new BadRequestException('You cannot message yourself');
     const recipient = await this.prisma.user.findFirst({
       where: { id: input.recipientId, status: 'ACTIVE' },
     });
     if (!recipient) throw new NotFoundException('Recipient not found');
-    if (
-      input.listingId &&
-      !(await this.prisma.listing.findUnique({ where: { id: input.listingId } }))
-    )
-      throw new NotFoundException('Listing not found');
-    if (input.bidId && !(await this.prisma.bid.findUnique({ where: { id: input.bidId } })))
-      throw new NotFoundException('Bid not found');
+
+    if (input.listingId) {
+      const listing = await this.prisma.listing.findUnique({ where: { id: input.listingId } });
+      if (!listing) throw new NotFoundException('Listing not found');
+      if (listing.status === 'DRAFT' || listing.status === 'REMOVED') {
+        if (!userRole) {
+          const callerRecord = await this.prisma.user.findUnique({
+            where: { id: userId },
+            select: { role: true },
+          });
+          userRole = callerRecord?.role ?? 'USER';
+        }
+        const isOwner = userId === listing.ownerId;
+        const isAdmin = userRole === 'ADMIN';
+        if (!isOwner && !isAdmin) {
+          throw new NotFoundException('Listing not found');
+        }
+      }
+    }
+
+    if (input.bidId) {
+      const bid = await this.prisma.bid.findUnique({
+        where: { id: input.bidId },
+        include: {
+          listing: {
+            select: { id: true, ownerId: true },
+          },
+        },
+      });
+      if (!bid) throw new NotFoundException('Bid not found');
+      const isBidder = userId === bid.bidderId;
+      const isOwner = userId === bid.listing.ownerId;
+      if (!isBidder && !isOwner) {
+        throw new NotFoundException('Bid not found');
+      }
+      const expectedRecipientId = isBidder ? bid.listing.ownerId : bid.bidderId;
+      if (input.recipientId !== expectedRecipientId) {
+        throw new NotFoundException('Bid not found');
+      }
+      if (input.listingId && input.listingId !== bid.listingId) {
+        throw new NotFoundException('Bid not found');
+      }
+    }
+
     const keys = conversationKeys(userId, input.recipientId, input.listingId);
     try {
       const conversation = await this.prisma.conversation.create({
@@ -170,8 +210,11 @@ export class ConversationsService {
             attachments: { include: { upload: true } },
           },
         });
-        await tx.conversation.update({
-          where: { id: conversationId },
+        await tx.conversation.updateMany({
+          where: {
+            id: conversationId,
+            lastMessageAt: { lt: created.createdAt },
+          },
           data: { lastMessageAt: created.createdAt },
         });
         return created;
