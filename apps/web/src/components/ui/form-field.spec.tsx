@@ -3,6 +3,8 @@ import { render, screen } from '@testing-library/react';
 import { FormField } from './form-field';
 import { Input } from './input';
 
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './select';
+
 describe('FormField component', () => {
   it('renders label and input connected by id', () => {
     render(
@@ -101,5 +103,36 @@ describe('FormField component', () => {
     expect(input).toHaveAttribute('id', 'native-field');
     expect(input).toHaveAttribute('aria-invalid', 'true');
     expect(input).not.toHaveAttribute('error');
+  });
+
+  it('forwards id, aria-describedby, and aria-invalid to SelectTrigger inside FormField', () => {
+    render(
+      <FormField
+        id="category-select"
+        label="Category"
+        error="Please select a category"
+        hint="Choose one"
+      >
+        <Select>
+          <SelectTrigger>
+            <SelectValue placeholder="Choose category" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="tech">Tech</SelectItem>
+          </SelectContent>
+        </Select>
+      </FormField>,
+    );
+
+    const label = screen.getByText('Category');
+    const trigger = screen.getByRole('combobox');
+
+    expect(label).toHaveAttribute('for', 'category-select');
+    expect(trigger).toHaveAttribute('id', 'category-select');
+    expect(trigger).toHaveAttribute('aria-invalid', 'true');
+    expect(trigger).toHaveAttribute(
+      'aria-describedby',
+      'category-select-hint category-select-error',
+    );
   });
 });

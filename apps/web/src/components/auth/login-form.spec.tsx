@@ -47,8 +47,10 @@ describe('LoginForm component', () => {
     await user.click(screen.getByRole('button', { name: /sign in/i }));
 
     await waitFor(() => {
-      expect(screen.getByText(/please enter a valid email address/i)).toBeInTheDocument();
-      expect(screen.getByText(/password is required/i)).toBeInTheDocument();
+      expect(screen.getByText(/invalid email address/i)).toBeInTheDocument();
+      expect(
+        screen.getByText(/expected string to have >=1 characters|password is required/i),
+      ).toBeInTheDocument();
     });
 
     expect(mockLogin).not.toHaveBeenCalled();

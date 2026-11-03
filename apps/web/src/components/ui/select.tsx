@@ -3,33 +3,83 @@ import * as SelectPrimitive from '@radix-ui/react-select';
 import { Check, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-export const Select = SelectPrimitive.Root;
+export interface SelectContextValue {
+  id?: string;
+  'aria-describedby'?: string;
+  'aria-invalid'?: 'true' | 'false' | boolean;
+  error?: boolean;
+}
+
+const SelectContext = React.createContext<SelectContextValue>({});
+
+export interface SelectProps extends React.ComponentPropsWithoutRef<typeof SelectPrimitive.Root> {
+  id?: string;
+  'aria-describedby'?: string;
+  'aria-invalid'?: 'true' | 'false' | boolean;
+  error?: boolean;
+}
+
+export function Select({
+  id,
+  'aria-describedby': describedBy,
+  'aria-invalid': ariaInvalid,
+  error,
+  children,
+  ...props
+}: SelectProps) {
+  return (
+    <SelectPrimitive.Root {...props}>
+      <SelectContext.Provider
+        value={{
+          id,
+          'aria-describedby': describedBy,
+          'aria-invalid': ariaInvalid,
+          error,
+        }}
+      >
+        {children}
+      </SelectContext.Provider>
+    </SelectPrimitive.Root>
+  );
+}
+
 export const SelectGroup = SelectPrimitive.Group;
 export const SelectValue = SelectPrimitive.Value;
 
 export const SelectTrigger = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Trigger>,
   React.ComponentPropsWithoutRef<typeof SelectPrimitive.Trigger> & { error?: boolean }
->(({ className, children, error, ...props }, ref) => (
-  <SelectPrimitive.Trigger
-    ref={ref}
-    aria-invalid={error ? 'true' : props['aria-invalid']}
-    className={cn(
-      'flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground shadow-xs ring-offset-background',
-      'placeholder:text-muted-foreground',
-      'focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1',
-      'disabled:cursor-not-allowed disabled:opacity-50',
-      error && 'border-destructive focus:ring-destructive',
-      className,
-    )}
-    {...props}
-  >
-    {children}
-    <SelectPrimitive.Icon asChild>
-      <ChevronDown className="h-4 w-4 opacity-50" />
-    </SelectPrimitive.Icon>
-  </SelectPrimitive.Trigger>
-));
+>(({ className, children, error, id, ...props }, ref) => {
+  const ctx = React.useContext(SelectContext);
+  const resolvedError = error ?? ctx.error;
+  const resolvedId = id ?? ctx.id;
+  const resolvedDescribedBy = props['aria-describedby'] ?? ctx['aria-describedby'];
+  const resolvedAriaInvalid =
+    props['aria-invalid'] ?? (resolvedError ? 'true' : ctx['aria-invalid'] ? 'true' : undefined);
+
+  return (
+    <SelectPrimitive.Trigger
+      ref={ref}
+      id={resolvedId}
+      aria-describedby={resolvedDescribedBy}
+      aria-invalid={resolvedAriaInvalid}
+      className={cn(
+        'flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground shadow-xs ring-offset-background',
+        'placeholder:text-muted-foreground',
+        'focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1',
+        'disabled:cursor-not-allowed disabled:opacity-50',
+        resolvedError && 'border-destructive focus:ring-destructive',
+        className,
+      )}
+      {...props}
+    >
+      {children}
+      <SelectPrimitive.Icon asChild>
+        <ChevronDown className="h-4 w-4 opacity-50" />
+      </SelectPrimitive.Icon>
+    </SelectPrimitive.Trigger>
+  );
+});
 SelectTrigger.displayName = SelectPrimitive.Trigger.displayName;
 
 export const SelectContent = React.forwardRef<

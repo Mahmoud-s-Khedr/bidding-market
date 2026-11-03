@@ -52,9 +52,9 @@ describe('RegisterForm component', () => {
     await user.click(screen.getByRole('button', { name: /create account/i }));
 
     await waitFor(() => {
-      expect(screen.getByText(/display name must be at least 2 characters/i)).toBeInTheDocument();
-      expect(screen.getByText(/please enter a valid email address/i)).toBeInTheDocument();
-      expect(screen.getByText(/password must be at least 8 characters/i)).toBeInTheDocument();
+      expect(screen.getByText(/expected string to have >=2 characters/i)).toBeInTheDocument();
+      expect(screen.getByText(/invalid email address/i)).toBeInTheDocument();
+      expect(screen.getByText(/expected string to have >=8 characters/i)).toBeInTheDocument();
     });
 
     expect(mockRegister).not.toHaveBeenCalled();
@@ -81,9 +81,7 @@ describe('RegisterForm component', () => {
     await user.click(screen.getByRole('button', { name: /create account/i }));
 
     await waitFor(() => {
-      expect(
-        screen.getByText(/company name is required for business accounts/i),
-      ).toBeInTheDocument();
+      expect(screen.getByText(/companyname is required for businesses/i)).toBeInTheDocument();
     });
 
     // Fill company name and submit

@@ -91,6 +91,7 @@ export const paginationSchema = z.object({
   limit: z.coerce.number().int().min(1).max(50).default(20),
 });
 export const idParamSchema = z.object({ id: z.string().min(1) });
+export const MAX_INT4 = 2147483647;
 export const listingCreateSchema = z
   .object({
     kind: ListingKind,
@@ -98,8 +99,8 @@ export const listingCreateSchema = z
     description: z.string().trim().min(20).max(10000),
     categoryId: z.string().min(1),
     priceType: PriceType,
-    priceMinCents: z.number().int().nonnegative().optional(),
-    priceMaxCents: z.number().int().nonnegative().optional(),
+    priceMinCents: z.number().int().nonnegative().max(MAX_INT4).optional(),
+    priceMaxCents: z.number().int().nonnegative().max(MAX_INT4).optional(),
     currency: z
       .string()
       .regex(/^[A-Z]{3}$/)
@@ -159,8 +160,8 @@ export const listingUpdateSchema = z
     description: z.string().trim().min(20).max(10000).optional(),
     categoryId: z.string().min(1).optional(),
     priceType: PriceType.optional(),
-    priceMinCents: z.number().int().nonnegative().nullable().optional(),
-    priceMaxCents: z.number().int().nonnegative().nullable().optional(),
+    priceMinCents: z.number().int().nonnegative().max(MAX_INT4).nullable().optional(),
+    priceMaxCents: z.number().int().nonnegative().max(MAX_INT4).nullable().optional(),
     currency: z
       .string()
       .regex(/^[A-Z]{3}$/)
@@ -194,8 +195,8 @@ export const listingQuerySchema = paginationSchema
     kind: ListingKind.optional(),
     categoryId: z.string().optional(),
     categorySlug: z.string().optional(),
-    minPrice: z.coerce.number().int().nonnegative().optional(),
-    maxPrice: z.coerce.number().int().nonnegative().optional(),
+    minPrice: z.coerce.number().int().nonnegative().max(MAX_INT4).optional(),
+    maxPrice: z.coerce.number().int().nonnegative().max(MAX_INT4).optional(),
     currency: z.string().length(3).optional(),
     location: z.string().max(120).optional(),
     status: ListingStatus.optional(),
@@ -209,7 +210,7 @@ export const listingQuerySchema = paginationSchema
     path: ['minPrice'],
   });
 export const bidCreateSchema = z.object({
-  amountCents: z.number().int().positive(),
+  amountCents: z.number().int().positive().max(MAX_INT4),
   currency: z
     .string()
     .regex(/^[A-Z]{3}$/)
@@ -300,13 +301,13 @@ export const bidQuerySchema = paginationSchema.extend({
 });
 export const myBidsQuerySchema = paginationSchema.extend({ status: BidStatus.optional() });
 export const bidCounterSchema = z.object({
-  amountCents: z.number().int().positive(),
+  amountCents: z.number().int().positive().max(MAX_INT4),
   deliveryDays: z.number().int().positive(),
   message: z.string().max(5000),
 });
 export const milestoneSchema = z.object({
   title: z.string().min(1).max(200),
-  amountCents: z.number().int().nonnegative().optional(),
+  amountCents: z.number().int().nonnegative().max(MAX_INT4).optional(),
   dueDate: z.iso.datetime().optional(),
   status: MilestoneStatus.optional(),
 });
@@ -656,4 +657,29 @@ export type UploadPresignInput = z.infer<typeof uploadPresignSchema>;
 export type BidCreateInput = z.infer<typeof bidCreateSchema>;
 export type MessageCreateInput = z.infer<typeof messageCreateSchema>;
 export type PaginationInput = z.infer<typeof paginationSchema>;
+export type ListingCreateFormInput = z.input<typeof listingCreateSchema>;
 export type ApiError = z.infer<typeof errorSchema>;
+export type Upload = z.infer<typeof uploadSchema>;
+export type UploadPresignRequest = z.input<typeof uploadPresignSchema>;
+export type Role = z.infer<typeof Role>;
+export type UserStatus = z.infer<typeof UserStatus>;
+export type ListingKind = z.infer<typeof ListingKind>;
+export type ListingStatus = z.infer<typeof ListingStatus>;
+export type PriceType = z.infer<typeof PriceType>;
+export type BidStatus = z.infer<typeof BidStatus>;
+export type MessageType = z.infer<typeof MessageType>;
+export type AgreementStatus = z.infer<typeof AgreementStatus>;
+export type MilestoneStatus = z.infer<typeof MilestoneStatus>;
+export type UploadPurpose = z.infer<typeof UploadPurpose>;
+export type NotificationType = z.infer<typeof NotificationType>;
+export type ReportTargetType = z.infer<typeof ReportTargetType>;
+export type ReportReason = z.infer<typeof ReportReason>;
+export type ReportStatus = z.infer<typeof ReportStatus>;
+export type AuthResponse = z.infer<typeof authResponseSchema>;
+export type ListingFilters = z.input<typeof listingQuerySchema>;
+export type ListingSort = NonNullable<z.input<typeof listingQuerySchema>['sort']>;
+export type CategoryInput = z.infer<typeof categorySchema>;
+export type PaginatedResponse<T> = { items: T[]; nextCursor: string | null };
+export type ReviewItem = z.infer<typeof reviewItemSchema>;
+
+export const categoryTreeSchema = categoryTreeNodeSchema;

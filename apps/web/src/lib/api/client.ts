@@ -152,12 +152,30 @@ export async function request<T>(endpoint: string, options: RequestOptions = {})
     }
   }
 
-  const response = await fetch(url, {
-    credentials: isApi ? 'include' : 'same-origin',
-    headers,
-    body: finalBody,
-    ...rest,
-  });
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      credentials: isApi ? 'include' : 'same-origin',
+      headers,
+      body: finalBody,
+      ...rest,
+    });
+  } catch (err) {
+    if (err instanceof ApiError) {
+      throw err;
+    }
+    if (
+      err instanceof TypeError ||
+      (err instanceof Error && /fetch|network|connection|load failed/i.test(err.message))
+    ) {
+      throw new ApiError(
+        0,
+        'Network error: unable to reach the server. Please check your connection and try again.',
+        'INTERNAL',
+      );
+    }
+    throw err;
+  }
 
   const isAuthRefresh = isExactApiPath(endpoint, '/auth/refresh');
   const isAuthLogin = isExactApiPath(endpoint, '/auth/login');
