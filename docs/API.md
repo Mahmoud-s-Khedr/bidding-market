@@ -155,3 +155,9 @@ Server → client: `message:new Message`, `message:read {conversationId, userId,
 Messages are **sent via REST** (`POST /conversations/:id/messages`), and the server broadcasts `message:new` to both participants' `user:` rooms.
 Presence is user-level: it becomes online on the first connected tab and offline only after the final
 tab disconnects. Presence events go to users sharing a conversation.
+
+Conversation deduplication uses the sorted participant pair and `listingId`; `bidId` is retained as
+metadata and is not part of the deduplication key. Conversation and message cursors are base64url JSON
+`{date,id}` values. Message bodies are plain text and clients must escape them when rendering.
+Sockets are authenticated at handshake and their user status is checked on every client event; banned
+users or expired access tokens are disconnected on their next client event.
