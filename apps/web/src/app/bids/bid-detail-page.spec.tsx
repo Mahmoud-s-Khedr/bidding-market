@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import BidDetailPage from './[id]/page';
 import * as bidsApi from '@/lib/api/bids';
+import * as listingsApi from '@/lib/api/listings';
 import * as authContext from '@/components/auth/auth-provider';
 import { ToastProvider } from '@/components/ui/toast';
 import { ApiError } from '@/lib/api/client';
@@ -384,5 +385,369 @@ describe('BidDetailPage (Negotiation Thread)', () => {
     expect(
       screen.queryByText(/Are you sure you want to withdraw this bid\?/i),
     ).not.toBeInTheDocument();
+  });
+
+  it('shows accept/counter controls and no "Unauthorized" for listing owner when bid response has no listing', () => {
+    vi.spyOn(authContext, 'useAuth').mockReturnValue({
+      user: {
+        id: 'user-owner',
+        email: 'alice@owner.test',
+        displayName: 'Alice Owner',
+        role: 'USER',
+        isBusiness: false,
+        createdAt: '2026-01-01T00:00:00Z',
+      },
+      token: 'jwt-owner',
+      isLoading: false,
+      isAuthenticated: true,
+      isAdmin: false,
+      login: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+      refresh: vi.fn(),
+    });
+
+    // Bid response does not include listing (API contract)
+    const bidWithoutListing = makeBidDetail({
+      id: 'bid-thread-1',
+      listingId: 'listing-1',
+      listing: undefined,
+      status: 'PENDING',
+      amountCents: 15000,
+      deliveryDays: 5,
+      bidder: makePublicUser({
+        id: 'user-bidder',
+        displayName: 'Bob Bidder',
+      }),
+    });
+
+    vi.spyOn(bidsApi, 'useBid').mockReturnValue({
+      data: bidWithoutListing,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof bidsApi.useBid>);
+
+    // Listing is fetched separately by useListing hook
+    vi.spyOn(listingsApi, 'useListing').mockReturnValue({
+      data: mockListing,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof listingsApi.useListing>);
+
+    renderWithToast(<BidDetailPage />);
+
+    // No unauthorized screen
+    expect(screen.queryByText('Unauthorized Access')).not.toBeInTheDocument();
+
+    // Owner controls are displayed
+    expect(screen.getByRole('button', { name: /accept proposal/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /counter-offer/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /reject/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /shortlist/i })).toBeInTheDocument();
+
+    // Derived listing title and owner card
+    expect(screen.getByText('Brand Identity Redesign')).toBeInTheDocument();
+    expect(screen.getByText('Alice Owner')).toBeInTheDocument();
+  });
+
+  it('renders bidder path when bid response has no listing', () => {
+    vi.spyOn(authContext, 'useAuth').mockReturnValue({
+      user: {
+        id: 'user-bidder',
+        email: 'bob@bidder.test',
+        displayName: 'Bob Bidder',
+        role: 'USER',
+        isBusiness: false,
+        createdAt: '2026-01-01T00:00:00Z',
+      },
+      token: 'jwt-bidder',
+      isLoading: false,
+      isAuthenticated: true,
+      isAdmin: false,
+      login: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+      refresh: vi.fn(),
+    });
+
+    const bidWithoutListing = makeBidDetail({
+      id: 'bid-thread-1',
+      listingId: 'listing-1',
+      listing: undefined,
+      status: 'PENDING',
+      amountCents: 15000,
+      deliveryDays: 5,
+      bidder: makePublicUser({
+        id: 'user-bidder',
+        displayName: 'Bob Bidder',
+      }),
+    });
+
+    vi.spyOn(bidsApi, 'useBid').mockReturnValue({
+      data: bidWithoutListing,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof bidsApi.useBid>);
+
+    vi.spyOn(listingsApi, 'useListing').mockReturnValue({
+      data: mockListing,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof listingsApi.useListing>);
+
+    renderWithToast(<BidDetailPage />);
+
+    expect(screen.queryByText('Unauthorized Access')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /edit proposal/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /withdraw proposal/i })).toBeInTheDocument();
+    expect(screen.getByText('Brand Identity Redesign')).toBeInTheDocument();
+  });
+
+  it('keeps bidder path working without listing when listing is absent', () => {
+    vi.spyOn(authContext, 'useAuth').mockReturnValue({
+      user: {
+        id: 'user-bidder',
+        email: 'bob@bidder.test',
+        displayName: 'Bob Bidder',
+        role: 'USER',
+        isBusiness: false,
+        createdAt: '2026-01-01T00:00:00Z',
+      },
+      token: 'jwt-bidder',
+      isLoading: false,
+      isAuthenticated: true,
+      isAdmin: false,
+      login: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+      refresh: vi.fn(),
+    });
+
+    const bidWithoutListing = makeBidDetail({
+      id: 'bid-thread-1',
+      listingId: 'listing-1',
+      listing: undefined,
+      status: 'PENDING',
+      amountCents: 15000,
+      deliveryDays: 5,
+      bidder: makePublicUser({
+        id: 'user-bidder',
+        displayName: 'Bob Bidder',
+      }),
+    });
+
+    vi.spyOn(bidsApi, 'useBid').mockReturnValue({
+      data: bidWithoutListing,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof bidsApi.useBid>);
+
+    vi.spyOn(listingsApi, 'useListing').mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof listingsApi.useListing>);
+
+    renderWithToast(<BidDetailPage />);
+
+    expect(screen.queryByText('Unauthorized Access')).not.toBeInTheDocument();
+    expect(screen.getByText('Proposal for Listing')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /withdraw proposal/i })).toBeInTheDocument();
+  });
+
+  it('shows loading state while listing is loading', () => {
+    vi.spyOn(authContext, 'useAuth').mockReturnValue({
+      user: {
+        id: 'user-owner',
+        email: 'alice@owner.test',
+        displayName: 'Alice Owner',
+        role: 'USER',
+        isBusiness: false,
+        createdAt: '2026-01-01T00:00:00Z',
+      },
+      token: 'jwt-owner',
+      isLoading: false,
+      isAuthenticated: true,
+      isAdmin: false,
+      login: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+      refresh: vi.fn(),
+    });
+
+    const bidWithoutListing = makeBidDetail({
+      id: 'bid-thread-1',
+      listingId: 'listing-1',
+      listing: undefined,
+      bidder: makePublicUser({
+        id: 'user-bidder',
+        displayName: 'Bob Bidder',
+      }),
+    });
+
+    vi.spyOn(bidsApi, 'useBid').mockReturnValue({
+      data: bidWithoutListing,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof bidsApi.useBid>);
+
+    vi.spyOn(listingsApi, 'useListing').mockReturnValue({
+      data: undefined,
+      isLoading: true,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof listingsApi.useListing>);
+
+    const { container } = renderWithToast(<BidDetailPage />);
+
+    // Skeleton elements are displayed
+    expect(container.querySelector('.animate-pulse')).toBeInTheDocument();
+    expect(screen.queryByText('Negotiation Thread')).not.toBeInTheDocument();
+  });
+
+  it('shows listing fetch error state with retry when listing fails to load', async () => {
+    const user = userEvent.setup();
+    const mockRefetchListing = vi.fn();
+
+    vi.spyOn(authContext, 'useAuth').mockReturnValue({
+      user: {
+        id: 'user-owner',
+        email: 'alice@owner.test',
+        displayName: 'Alice Owner',
+        role: 'USER',
+        isBusiness: false,
+        createdAt: '2026-01-01T00:00:00Z',
+      },
+      token: 'jwt-owner',
+      isLoading: false,
+      isAuthenticated: true,
+      isAdmin: false,
+      login: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+      refresh: vi.fn(),
+    });
+
+    const bidWithoutListing = makeBidDetail({
+      id: 'bid-thread-1',
+      listingId: 'listing-1',
+      listing: undefined,
+      bidder: makePublicUser({
+        id: 'user-bidder',
+        displayName: 'Bob Bidder',
+      }),
+    });
+
+    vi.spyOn(bidsApi, 'useBid').mockReturnValue({
+      data: bidWithoutListing,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof bidsApi.useBid>);
+
+    vi.spyOn(listingsApi, 'useListing').mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: true,
+      error: new ApiError(404, 'Listing not found', 'NOT_FOUND'),
+      refetch: mockRefetchListing,
+    } as unknown as ReturnType<typeof listingsApi.useListing>);
+
+    renderWithToast(<BidDetailPage />);
+
+    expect(screen.getByText('Failed to load listing')).toBeInTheDocument();
+    const retryBtn = screen.getByRole('button', { name: /try again/i });
+    expect(retryBtn).toBeInTheDocument();
+
+    await user.click(retryBtn);
+    expect(mockRefetchListing).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders bid attachments (image thumbnail and file download link)', () => {
+    vi.spyOn(authContext, 'useAuth').mockReturnValue({
+      user: {
+        id: 'user-owner',
+        email: 'alice@owner.test',
+        displayName: 'Alice Owner',
+        role: 'USER',
+        isBusiness: false,
+        createdAt: '2026-01-01T00:00:00Z',
+      },
+      token: 'jwt-owner',
+      isLoading: false,
+      isAuthenticated: true,
+      isAdmin: false,
+      login: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+      refresh: vi.fn(),
+    });
+
+    const bidWithAttachments = makeBidDetail({
+      id: 'bid-thread-1',
+      listingId: 'listing-1',
+      listing: mockListing,
+      status: 'PENDING',
+      attachments: [
+        {
+          id: 'att-1',
+          key: 'uploads/mock-design.png',
+          fileName: 'mock-design.png',
+          mimeType: 'image/png',
+          sizeBytes: 1024 * 500,
+          url: 'http://localhost:4000/files/mock-design.png',
+        },
+        {
+          id: 'att-2',
+          key: 'uploads/deliverable-plan.pdf',
+          fileName: 'deliverable-plan.pdf',
+          mimeType: 'application/pdf',
+          sizeBytes: 1024 * 1024 * 1.5,
+          url: 'http://localhost:4000/files/deliverable-plan.pdf',
+        },
+      ],
+    });
+
+    vi.spyOn(bidsApi, 'useBid').mockReturnValue({
+      data: bidWithAttachments,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof bidsApi.useBid>);
+
+    renderWithToast(<BidDetailPage />);
+
+    expect(screen.getByText(/Attachments \(2\)/i)).toBeInTheDocument();
+
+    // Image thumbnail
+    const imageThumb = screen.getByRole('img', { name: 'mock-design.png' });
+    expect(imageThumb).toBeInTheDocument();
+    expect(imageThumb).toHaveAttribute('src', 'http://localhost:4000/files/mock-design.png');
+
+    // Document download link
+    const pdfLink = screen.getByRole('link', {
+      name: /download deliverable-plan\.pdf \(1\.5 MB\)/i,
+    });
+    expect(pdfLink).toBeInTheDocument();
+    expect(pdfLink).toHaveAttribute('href', 'http://localhost:4000/files/deliverable-plan.pdf');
+    expect(screen.getByText('deliverable-plan.pdf')).toBeInTheDocument();
+    expect(screen.getByText('(1.5 MB)')).toBeInTheDocument();
   });
 });

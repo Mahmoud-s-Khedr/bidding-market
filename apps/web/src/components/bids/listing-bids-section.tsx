@@ -17,6 +17,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { ErrorState } from '@/components/ui/error-state';
 import { ConfirmDialog } from '@/components/shared/confirm-dialog';
 import { BidStatusBadge } from '@/components/bids/bid-status-badge';
+import { BidAttachments } from '@/components/bids/bid-attachments';
 import { BidActionBar } from '@/components/bids/bid-action-bar';
 import { useBidActions } from '@/components/bids/use-bid-actions';
 import { CounterDialog } from '@/components/bids/counter-dialog';
@@ -214,6 +215,11 @@ export function ListingBidsSection({ listing }: ListingBidsSectionProps) {
                         <p className="line-clamp-2 text-xs text-muted-foreground">
                           {bid.message || 'No additional proposal message.'}
                         </p>
+                        {bid.attachments && bid.attachments.length > 0 && (
+                          <div className="mt-2">
+                            <BidAttachments attachments={bid.attachments} layout="compact" />
+                          </div>
+                        )}
                         <Link
                           href={`/bids/${bid.id}`}
                           className="inline-flex items-center gap-1 text-xs text-primary hover:underline mt-1"
@@ -300,6 +306,12 @@ export function ListingBidsSection({ listing }: ListingBidsSectionProps) {
                   <p className="line-clamp-3 text-xs text-muted-foreground bg-muted/30 p-2.5 rounded-md">
                     {bid.message || 'No additional proposal message.'}
                   </p>
+
+                  {bid.attachments && bid.attachments.length > 0 && (
+                    <div>
+                      <BidAttachments attachments={bid.attachments} layout="compact" />
+                    </div>
+                  )}
 
                   <div className="flex items-center justify-between text-xs text-muted-foreground pt-1">
                     <span>Submitted {formatDate(bid.createdAt)}</span>

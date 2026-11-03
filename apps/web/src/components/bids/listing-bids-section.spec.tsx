@@ -408,4 +408,50 @@ describe('ListingBidsSection Component', () => {
     expect(screen.getByText('No bids received yet')).toBeInTheDocument();
     expect(screen.queryByText('Failed to load bids')).not.toBeInTheDocument();
   });
+
+  it('renders bid attachments in comparison view when present', () => {
+    const bidWithAttachment = makeBid({
+      id: 'bid-with-att',
+      listingId: 'listing-100',
+      status: 'PENDING',
+      amountCents: 15000,
+      deliveryDays: 5,
+      message: 'Proposal with attached resume',
+      bidder: makePublicUser({
+        id: 'bidder-att',
+        displayName: 'Sam Designer',
+      }),
+      attachments: [
+        {
+          id: 'att-sam-pdf',
+          key: 'uploads/sam-resume.pdf',
+          fileName: 'sam-resume.pdf',
+          mimeType: 'application/pdf',
+          sizeBytes: 1024 * 300,
+          url: 'http://localhost:4000/files/sam-resume.pdf',
+        },
+      ],
+    });
+
+    vi.spyOn(bidsApi, 'useListingBids').mockReturnValue({
+      data: {
+        pages: [{ items: [bidWithAttachment], nextCursor: null }],
+        pageParams: [null],
+      },
+      isLoading: false,
+      isFetchingNextPage: false,
+      hasNextPage: false,
+      fetchNextPage: vi.fn(),
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof bidsApi.useListingBids>);
+
+    renderWithToast(<ListingBidsSection listing={mockListing} />);
+
+    expect(screen.getAllByText('sam-resume.pdf').length).toBeGreaterThan(0);
+    const downloadLinks = screen.getAllByRole('link', {
+      name: /download sam-resume\.pdf/i,
+    });
+    expect(downloadLinks.length).toBeGreaterThan(0);
+    expect(downloadLinks[0]).toHaveAttribute('href', 'http://localhost:4000/files/sam-resume.pdf');
+  });
 });

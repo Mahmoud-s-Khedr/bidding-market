@@ -35,6 +35,7 @@ import { RequireAuth } from '@/components/auth/require-auth';
 import { useAuth } from '@/components/auth/auth-provider';
 import { useToast } from '@/components/ui/toast';
 import { BidStatusBadge } from '@/components/bids/bid-status-badge';
+import { BidAttachments } from '@/components/bids/bid-attachments';
 import { BidForm } from '@/components/bids/bid-form';
 import { CounterDialog } from '@/components/bids/counter-dialog';
 import { RejectDialog } from '@/components/bids/reject-dialog';
@@ -48,9 +49,11 @@ import {
   useUpdateBid,
   useWithdrawBid,
 } from '@/lib/api/bids';
+import { useListing } from '@/lib/api/listings';
 import { canBidTransition } from '@/lib/api/bid-transitions';
 import { formatDate, formatMoney } from '@/lib/format';
 import { ApiError } from '@/lib/api/client';
+import { safeMediaUrl } from '@/lib/safe-url';
 import type { BidActorRole, BidCounterInput, BidCreateInput } from '@/lib/api/types';
 
 function BidDetailPageContent() {
@@ -63,13 +66,28 @@ function BidDetailPageContent() {
 
   const {
     data: bid,
-    isLoading,
-    isError,
-    error,
-    refetch,
+    isLoading: isBidLoading,
+    isError: isBidError,
+    error: bidError,
+    refetch: refetchBid,
   } = useBid(id, {
     enabled: Boolean(id),
   });
+
+  const listingId = bid?.listingId || '';
+  const shouldFetchListing = Boolean(bid && !bid.listing && listingId);
+
+  const {
+    data: fetchedListing,
+    isLoading: isListingLoading,
+    isError: isListingError,
+    error: listingError,
+    refetch: refetchListing,
+  } = useListing(listingId, {
+    enabled: shouldFetchListing,
+  });
+
+  const listing = bid?.listing ?? fetchedListing;
 
   // Action Dialog states
   const [editDialogOpen, setEditDialogOpen] = React.useState(false);
@@ -92,9 +110,9 @@ function BidDetailPageContent() {
   const actorRole: BidActorRole | null = React.useMemo(() => {
     if (!user || !bid) return null;
     if (user.id === bid.bidder.id) return 'bidder';
-    if (bid.listing && user.id === bid.listing.owner?.id) return 'owner';
+    if (listing && user.id === listing.owner?.id) return 'owner';
     return null;
-  }, [user, bid]);
+  }, [user, bid, listing]);
 
   const handleConflictError = async (err: unknown) => {
     if (err instanceof ApiError && err.status === 409) {
@@ -109,7 +127,10 @@ function BidDetailPageContent() {
         description: 'This bid changed, refresh.',
         variant: 'error',
       });
-      await refetch();
+      await refetchBid();
+      if (shouldFetchListing) {
+        await refetchListing();
+      }
     } else {
       const msg = err instanceof Error ? err.message : 'Action failed';
       toast({
@@ -225,7 +246,7 @@ function BidDetailPageContent() {
     }
   };
 
-  if (isLoading) {
+  if (isBidLoading || (shouldFetchListing && isListingLoading && !listing)) {
     return (
       <RequireAuth>
         <div className="container mx-auto px-4 py-8 sm:px-6 max-w-4xl space-y-6">
@@ -237,18 +258,36 @@ function BidDetailPageContent() {
     );
   }
 
-  if (isError || !bid) {
+  if (isBidError || !bid) {
     return (
       <RequireAuth>
         <div className="container mx-auto px-4 py-16 sm:px-6 max-w-2xl text-center">
           <ErrorState
             title="Proposal not found"
             message={
-              error instanceof ApiError && error.status === 404
+              bidError instanceof ApiError && bidError.status === 404
                 ? 'This bid could not be found or you do not have permission to view it.'
                 : 'Unable to load proposal details. Please try again.'
             }
-            onRetry={() => void refetch()}
+            onRetry={() => void refetchBid()}
+          />
+        </div>
+      </RequireAuth>
+    );
+  }
+
+  if (shouldFetchListing && isListingError && !listing) {
+    return (
+      <RequireAuth>
+        <div className="container mx-auto px-4 py-16 sm:px-6 max-w-2xl text-center">
+          <ErrorState
+            title="Failed to load listing"
+            message={
+              listingError instanceof ApiError && listingError.status === 404
+                ? 'The listing associated with this proposal could not be found.'
+                : 'Unable to load listing details. Please try again.'
+            }
+            onRetry={() => void refetchListing()}
           />
         </div>
       </RequireAuth>
@@ -296,7 +335,13 @@ function BidDetailPageContent() {
         {/* Navigation Breadcrumb */}
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Link
-            href={isBidder ? '/bids' : `/listings/${bid.listingId}`}
+            href={
+              isBidder
+                ? '/bids'
+                : listing
+                  ? `/listings/${listing.id}`
+                  : `/listings/${bid.listingId}`
+            }
             className="inline-flex items-center gap-1 hover:text-foreground transition-colors"
           >
             <ArrowLeft className="h-4 w-4" />
@@ -304,7 +349,7 @@ function BidDetailPageContent() {
           </Link>
           <span>/</span>
           <span className="text-foreground font-medium truncate max-w-md">
-            Proposal for {bid.listing?.title || 'Listing'}
+            Proposal for {listing?.title || 'Listing'}
           </span>
         </div>
 
@@ -316,14 +361,14 @@ function BidDetailPageContent() {
                 <h1 className="text-2xl font-bold text-foreground">Negotiation Thread</h1>
                 <BidStatusBadge status={bid.status} />
               </div>
-              {bid.listing && (
+              {listing && (
                 <p className="text-sm text-muted-foreground">
                   Listing:{' '}
                   <Link
                     href={`/listings/${bid.listingId}`}
                     className="text-primary hover:underline font-medium inline-flex items-center gap-1"
                   >
-                    {bid.listing.title} <ExternalLink className="h-3.5 w-3.5" />
+                    {listing.title} <ExternalLink className="h-3.5 w-3.5" />
                   </Link>
                 </p>
               )}
@@ -356,7 +401,10 @@ function BidDetailPageContent() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4 border-t border-border">
             <div className="flex items-center gap-3">
               <Avatar className="h-10 w-10">
-                <AvatarImage src={bid.bidder.avatarUrl || undefined} alt={bid.bidder.displayName} />
+                <AvatarImage
+                  src={safeMediaUrl(bid.bidder.avatarUrl) || undefined}
+                  alt={bid.bidder.displayName}
+                />
                 <AvatarFallback>{bid.bidder.displayName.slice(0, 2).toUpperCase()}</AvatarFallback>
               </Avatar>
               <div className="min-w-0">
@@ -367,15 +415,15 @@ function BidDetailPageContent() {
               </div>
             </div>
 
-            {bid.listing?.owner && (
+            {listing?.owner && (
               <div className="flex items-center gap-3">
                 <Avatar className="h-10 w-10">
                   <AvatarImage
-                    src={bid.listing.owner.avatarUrl || undefined}
-                    alt={bid.listing.owner.displayName}
+                    src={safeMediaUrl(listing.owner.avatarUrl) || undefined}
+                    alt={listing.owner.displayName}
                   />
                   <AvatarFallback>
-                    {bid.listing.owner.displayName.slice(0, 2).toUpperCase()}
+                    {listing.owner.displayName.slice(0, 2).toUpperCase()}
                   </AvatarFallback>
                 </Avatar>
                 <div className="min-w-0">
@@ -383,12 +431,22 @@ function BidDetailPageContent() {
                     Listing Owner
                   </span>
                   <p className="font-semibold text-foreground truncate">
-                    {bid.listing.owner.displayName}
+                    {listing.owner.displayName}
                   </p>
                 </div>
               </div>
             )}
           </div>
+
+          {/* Attachments */}
+          {bid.attachments && bid.attachments.length > 0 && (
+            <div className="pt-4 border-t border-border space-y-2">
+              <span className="text-xs text-muted-foreground uppercase font-semibold">
+                Attachments ({bid.attachments.length})
+              </span>
+              <BidAttachments attachments={bid.attachments} />
+            </div>
+          )}
 
           {/* Action Toolbar */}
           <div className="flex flex-wrap items-center gap-3 pt-4 border-t border-border">
@@ -398,7 +456,7 @@ function BidDetailPageContent() {
                 <Button
                   variant="outline"
                   size="sm"
-                  disabled={!canEdit}
+                  disabled={!canEdit || !listing}
                   onClick={() => setEditDialogOpen(true)}
                 >
                   <Edit3 className="h-3.5 w-3.5 mr-1.5" />
@@ -559,7 +617,7 @@ function BidDetailPageContent() {
 
         {/* Dialogs */}
         {/* Bidder Edit Dialog */}
-        {bid.listing && (
+        {listing && (
           <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
             <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
               <DialogHeader>
@@ -571,7 +629,7 @@ function BidDetailPageContent() {
               </DialogHeader>
 
               <BidForm
-                listing={bid.listing}
+                listing={listing}
                 initialBid={bid}
                 onSubmit={handleEditSubmit}
                 onCancel={() => setEditDialogOpen(false)}
