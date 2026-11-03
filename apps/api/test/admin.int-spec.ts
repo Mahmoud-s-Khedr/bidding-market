@@ -51,4 +51,15 @@ describe('Admin endpoint authorization', () => {
       .expect(200);
     expect(result.body).toEqual({ items: [], nextCursor: null });
   });
+  it.each([
+    '/users?cursor=not-base64',
+    '/listings?cursor=not-base64',
+    '/reports?cursor=not-base64',
+    '/audit-log?cursor=not-base64',
+  ])('rejects malformed cursor on %s', async (path) => {
+    await request(server)
+      .get(`/api/v1/admin${path}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .expect(400);
+  });
 });
