@@ -324,6 +324,10 @@ export class ListingsService {
     try {
       await this.prisma.$transaction(async (tx) => {
         if (input.kind !== undefined && input.kind !== listing.kind) {
+          // Serialize kind changes with bid creation, which locks this same listing row.
+          await tx.$queryRaw<Array<{ id: string }>>`
+            SELECT id FROM "Listing" WHERE id = ${id} FOR UPDATE
+          `;
           const bidCount = await tx.bid.count({ where: { listingId: id } });
           if (bidCount > 0) {
             throw new ConflictException('Cannot change kind on a listing that has bids');

@@ -166,7 +166,9 @@ export class BidsService {
       const bid = await this.prisma.$transaction(async (tx) => {
         // Non-blocking (a): Lock/check listing row inside the transaction so close vs create cannot race
         const openListing = await tx.$queryRaw<Array<{ id: string }>>`
-          SELECT id FROM "Listing" WHERE id = ${listingId} AND status = 'OPEN' FOR UPDATE
+          SELECT id FROM "Listing"
+          WHERE id = ${listingId} AND status = 'OPEN' AND kind = ${listing.kind}::"ListingKind"
+          FOR UPDATE
         `;
         if (openListing.length === 0) {
           throw new ConflictException('Listing is not open for bidding');
