@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { ExecutionContext, Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { EventEmitterModule } from '@nestjs/event-emitter';
@@ -19,6 +19,14 @@ import { UsersModule } from './modules/users/users.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { RedisModule } from './redis/redis.module.js';
 import { StorageModule } from './storage/storage.module.js';
+
+class HttpThrottlerGuard extends ThrottlerGuard {
+  // Socket events use gateway-level validation and must not receive HTTP response headers.
+  override async canActivate(context: ExecutionContext): Promise<boolean> {
+    return context.getType() === 'ws' ? true : super.canActivate(context);
+  }
+}
+
 @Module({
   imports: [
     AppConfigModule,
@@ -41,7 +49,7 @@ import { StorageModule } from './storage/storage.module.js';
     NotificationsModule,
   ],
   providers: [
-    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: APP_GUARD, useClass: HttpThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
   ],
 })

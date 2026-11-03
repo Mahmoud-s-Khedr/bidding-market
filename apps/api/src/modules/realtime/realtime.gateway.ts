@@ -2,6 +2,7 @@ import { Inject, OnApplicationShutdown } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { OnEvent } from '@nestjs/event-emitter';
 import {
+  ConnectedSocket,
   MessageBody,
   SubscribeMessage,
   WebSocketGateway,
@@ -30,6 +31,7 @@ interface AuthedSocket extends Socket {
 @WebSocketGateway({ namespace: '/rt' })
 export class RealtimeGateway implements OnApplicationShutdown {
   @WebSocketServer() server!: Server;
+  presenceHeartbeatMs = 30_000;
   private publisher?: Redis;
   private subscriber?: Redis;
 
@@ -69,7 +71,8 @@ export class RealtimeGateway implements OnApplicationShutdown {
       socket.data.presenceTracked = true;
       socket.data.presenceHeartbeat = setInterval(() => {
         void this.redis.expire(`rt:presence:${userId}`, 90);
-      }, 30_000);
+      }, this.presenceHeartbeatMs);
+      socket.data.presenceHeartbeat.unref?.();
       if ((await this.redis.scard(`rt:presence:${userId}`)) === 1)
         await this.emitPresence(userId, true);
     } catch {
@@ -105,7 +108,10 @@ export class RealtimeGateway implements OnApplicationShutdown {
   }
 
   @SubscribeMessage('conversation:join')
-  async join(socket: AuthedSocket, @MessageBody() raw: unknown): Promise<{ ok: boolean }> {
+  async join(
+    @ConnectedSocket() socket: AuthedSocket,
+    @MessageBody() raw: unknown,
+  ): Promise<{ ok: boolean }> {
     const payload = wsPayloadSchemas.conversationJoin.safeParse(raw);
     if (
       !payload.success ||
@@ -118,7 +124,10 @@ export class RealtimeGateway implements OnApplicationShutdown {
   }
 
   @SubscribeMessage('conversation:leave')
-  async leave(socket: AuthedSocket, @MessageBody() raw: unknown): Promise<{ ok: boolean }> {
+  async leave(
+    @ConnectedSocket() socket: AuthedSocket,
+    @MessageBody() raw: unknown,
+  ): Promise<{ ok: boolean }> {
     const payload = wsPayloadSchemas.conversationJoin.safeParse(raw);
     if (!payload.success || !(await this.ensureActive(socket))) return { ok: false };
     await socket.leave(`conversation:${payload.data.conversationId}`);
@@ -126,7 +135,10 @@ export class RealtimeGateway implements OnApplicationShutdown {
   }
 
   @SubscribeMessage('typing')
-  async typing(socket: AuthedSocket, @MessageBody() raw: unknown): Promise<{ ok: boolean }> {
+  async typing(
+    @ConnectedSocket() socket: AuthedSocket,
+    @MessageBody() raw: unknown,
+  ): Promise<{ ok: boolean }> {
     const payload = wsPayloadSchemas.typing.safeParse(raw);
     const now = Date.now();
     if (
@@ -148,7 +160,10 @@ export class RealtimeGateway implements OnApplicationShutdown {
   }
 
   @SubscribeMessage('message:read')
-  async read(socket: AuthedSocket, @MessageBody() raw: unknown): Promise<{ ok: boolean }> {
+  async read(
+    @ConnectedSocket() socket: AuthedSocket,
+    @MessageBody() raw: unknown,
+  ): Promise<{ ok: boolean }> {
     const payload = wsPayloadSchemas.read.safeParse(raw);
     if (
       !payload.success ||
@@ -200,7 +215,7 @@ export class RealtimeGateway implements OnApplicationShutdown {
       !socket.data.userId ||
       (socket.data.expiresAt !== undefined && Date.now() >= socket.data.expiresAt)
     ) {
-      socket.disconnect(true);
+      setImmediate(() => socket.disconnect(true));
       return false;
     }
     const user = await this.prisma.user.findUnique({
@@ -208,7 +223,7 @@ export class RealtimeGateway implements OnApplicationShutdown {
       select: { status: true },
     });
     if (!user || user.status !== 'ACTIVE') {
-      socket.disconnect(true);
+      setImmediate(() => socket.disconnect(true));
       return false;
     }
     await this.redis.expire(`rt:presence:${socket.data.userId}`, 90);
@@ -227,7 +242,7 @@ export class RealtimeGateway implements OnApplicationShutdown {
       select: { conversation: { select: { participants: { select: { userId: true } } } } },
     });
     const recipients = conversations
-      .flatMap((row) => row.conversation.participants.map((p) => p.userId))
+      .flatMap((row) => row.conversation?.participants.map((p) => p.userId) ?? [])
       .filter((id) => id !== userId);
     this.realtime.emitToUsers(recipients, 'presence', { userId, online });
   }

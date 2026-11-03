@@ -458,7 +458,8 @@ conversationId String?
 readAt DateTime?
 createdAt DateTime @default(now())
 updatedAt DateTime @updatedAt
-@@index([userId,readAt,createdAt])
+activityAt DateTime @default(now())
+@@index([userId,readAt,activityAt])
 @@index([userId,conversationId])
 }
 model Report {

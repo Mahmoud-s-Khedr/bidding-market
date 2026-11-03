@@ -151,27 +151,35 @@ export class ConversationsService {
     const participants = await this.assertParticipant(userId, conversationId);
     const attachmentIds = input.attachmentIds ?? [];
     await this.validateAttachments(userId, input, attachmentIds);
-    const message = await this.prisma.$transaction(async (tx) => {
-      const created = await tx.message.create({
-        data: {
-          conversationId,
-          senderId: userId,
-          type: input.type,
-          body: input.body ?? null,
-          voiceDurationSec: input.voiceDurationSec ?? null,
-          attachments: { create: attachmentIds.map((uploadId: string) => ({ uploadId })) },
-        },
-        include: {
-          sender: { select: publicUserSelect },
-          attachments: { include: { upload: true } },
-        },
+    let message;
+    try {
+      message = await this.prisma.$transaction(async (tx) => {
+        const created = await tx.message.create({
+          data: {
+            conversationId,
+            senderId: userId,
+            type: input.type,
+            body: input.body ?? null,
+            voiceDurationSec: input.voiceDurationSec ?? null,
+            attachments: { create: attachmentIds.map((uploadId: string) => ({ uploadId })) },
+          },
+          include: {
+            sender: { select: publicUserSelect },
+            attachments: { include: { upload: true } },
+          },
+        });
+        await tx.conversation.update({
+          where: { id: conversationId },
+          data: { lastMessageAt: created.createdAt },
+        });
+        return created;
       });
-      await tx.conversation.update({
-        where: { id: conversationId },
-        data: { lastMessageAt: created.createdAt },
-      });
-      return created;
-    });
+    } catch (error) {
+      // The unique uploadId constraint closes the race between validation and insert.
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')
+        throw new BadRequestException('Upload is already attached to a message');
+      throw error;
+    }
     const presented = await this.presentMessage(message);
     this.events.emit('message.created', {
       message: presented,

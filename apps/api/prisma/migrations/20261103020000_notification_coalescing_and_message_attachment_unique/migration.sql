@@ -1,9 +1,6 @@
 ALTER TABLE "Notification" ADD COLUMN IF NOT EXISTS "conversationId" TEXT,
 ADD COLUMN IF NOT EXISTS "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP;
 
-UPDATE "Conversation" SET "lastMessageAt" = "createdAt" WHERE "lastMessageAt" IS NULL;
-ALTER TABLE "Conversation" ALTER COLUMN "lastMessageAt" SET NOT NULL;
-
 UPDATE "Notification"
 SET "conversationId" = "data"->>'conversationId'
 WHERE "type" = 'MESSAGE_RECEIVED' AND "data" ? 'conversationId';

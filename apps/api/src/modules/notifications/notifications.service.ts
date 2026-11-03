@@ -44,7 +44,7 @@ export class NotificationsService {
     const marker = query.cursor
       ? await this.prisma.notification.findFirst({
           where: { id: query.cursor, userId },
-          select: { updatedAt: true, id: true },
+          select: { activityAt: true, id: true },
         })
       : null;
     const rows = await this.prisma.notification.findMany({
@@ -54,13 +54,13 @@ export class NotificationsService {
         ...(marker
           ? {
               OR: [
-                { updatedAt: { lt: marker.updatedAt } },
-                { updatedAt: marker.updatedAt, id: { lt: marker.id } },
+                { activityAt: { lt: marker.activityAt } },
+                { activityAt: marker.activityAt, id: { lt: marker.id } },
               ],
             }
           : {}),
       },
-      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+      orderBy: [{ activityAt: 'desc' }, { id: 'desc' }],
       take: query.limit + 1,
     });
     const items = rows.slice(0, query.limit);
@@ -107,7 +107,7 @@ export class NotificationsService {
       if (existing)
         return tx.notification.update({
           where: { id: existing.id },
-          data: { body: event.message.body || 'Sent an attachment', data },
+          data: { body: event.message.body || 'Sent an attachment', data, activityAt: new Date() },
         });
       return tx.notification.create({
         data: {
