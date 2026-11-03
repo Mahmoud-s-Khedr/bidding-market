@@ -79,9 +79,14 @@ describe('GET /dashboard/summary', () => {
         },
       ],
     });
-    const open = await prisma.listing.findFirstOrThrow({
-      where: { ownerId: user.id, status: 'OPEN' },
-    });
+    const [open, progress] = await Promise.all([
+      prisma.listing.findFirstOrThrow({
+        where: { ownerId: user.id, status: 'OPEN' },
+      }),
+      prisma.listing.findFirstOrThrow({
+        where: { ownerId: user.id, status: 'IN_PROGRESS' },
+      }),
+    ]);
     await prisma.bid.createMany({
       data: [
         {
@@ -94,7 +99,7 @@ describe('GET /dashboard/summary', () => {
           status: 'PENDING',
         },
         {
-          listingId: open.id,
+          listingId: progress.id,
           bidderId: user.id,
           amountCents: 1,
           currency: 'USD',

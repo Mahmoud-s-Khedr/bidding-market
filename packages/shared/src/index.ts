@@ -546,11 +546,6 @@ export const agreementDetailSchema = z.object({
   createdAt: date,
   updatedAt: date,
 });
-export const bidAcceptResponseSchema = z.object({
-  bid: bidSchema,
-  agreement: agreementSchema,
-});
-export type BidAcceptResponse = z.infer<typeof bidAcceptResponseSchema>;
 export const agreementSchema = agreementDetailSchema;
 export const agreementSummarySchema = z.object({
   id: z.string(),
@@ -569,6 +564,11 @@ export const agreementSummarySchema = z.object({
   createdAt: date,
   updatedAt: date,
 });
+export const bidAcceptResponseSchema = z.object({
+  bid: bidSchema,
+  agreement: agreementSchema,
+});
+export type BidAcceptResponse = z.infer<typeof bidAcceptResponseSchema>;
 export const messageSchema = z.object({
   id: z.string(),
   conversationId: z.string(),

@@ -119,7 +119,7 @@ Types: `BID_RECEIVED, BID_UPDATED, BID_COUNTERED, BID_ACCEPTED, BID_REJECTED, ME
 Dashboard semantics:
 
 - `agreements.active`: counts agreements in both `ACTIVE` and `DELIVERED` status for the authenticated user.
-- `unreadMessages`: counts unread messages across all conversations the user participates in where the message was sent by another participant after the user's `lastReadMessageId` timestamp (or all messages from others if unread).
+- `unreadMessages`: counts every message sent by someone else in each conversation the user participates in whose `createdAt` is later than the message referenced by that participant's `lastReadMessageId`; when it is null (or references no row), all messages from other participants count as unread. Messages with the same timestamp as the read marker do not count.
 
 ## Reports
 

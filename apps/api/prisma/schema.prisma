@@ -414,7 +414,6 @@ deliverableId String
 deliverable Deliverable @relation(fields:[deliverableId],references:[id],onDelete:Cascade)
 uploadId String @unique
 upload Upload @relation(fields:[uploadId],references:[id],onDelete:Restrict)
-@@unique([deliverableId,uploadId])
 }
 model AgreementEvent {
 id String @id @default(cuid())

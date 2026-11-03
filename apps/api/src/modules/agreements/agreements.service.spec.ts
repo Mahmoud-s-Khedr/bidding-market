@@ -258,9 +258,9 @@ describe('AgreementsService', () => {
       (prisma.agreement as { findFirst: ReturnType<typeof vi.fn> }).findFirst.mockResolvedValue(
         agreement,
       );
-      (prisma.agreement as { updateMany: ReturnType<typeof vi.fn> }).updateMany.mockResolvedValue({
-        count: 1,
-      });
+      (prisma as { $queryRaw: ReturnType<typeof vi.fn> }).$queryRaw.mockResolvedValueOnce([
+        { status: 'ACTIVE' },
+      ]);
       (prisma.milestone as { aggregate: ReturnType<typeof vi.fn> }).aggregate.mockResolvedValue({
         _max: { position: 1 },
       });
@@ -279,9 +279,9 @@ describe('AgreementsService', () => {
       expect(m.id).toBe('m2');
 
       // Agreement not actionable
-      (prisma.agreement as { updateMany: ReturnType<typeof vi.fn> }).updateMany.mockResolvedValue({
-        count: 0,
-      });
+      (prisma as { $queryRaw: ReturnType<typeof vi.fn> }).$queryRaw.mockResolvedValueOnce([
+        { status: 'CANCELLED' },
+      ]);
       await expect(service.createMilestone('a1', 'b', { title: 'M2' })).rejects.toThrow(
         ConflictException,
       );
@@ -293,9 +293,9 @@ describe('AgreementsService', () => {
       (prisma.agreement as { findFirst: ReturnType<typeof vi.fn> }).findFirst.mockResolvedValue(
         agreement,
       );
-      (prisma.agreement as { updateMany: ReturnType<typeof vi.fn> }).updateMany.mockResolvedValue({
-        count: 1,
-      });
+      (prisma as { $queryRaw: ReturnType<typeof vi.fn> }).$queryRaw.mockResolvedValue([
+        { status: 'ACTIVE' },
+      ]);
       (prisma.milestone as { findFirst: ReturnType<typeof vi.fn> }).findFirst.mockResolvedValue({
         id: 'm1',
         agreementId: 'a1',
@@ -379,6 +379,20 @@ describe('AgreementsService', () => {
       await expect(
         service.submitDeliverable('a1', 'p', { note: 'Done', attachmentIds: ['u1'] }),
       ).rejects.toThrow(BadRequestException);
+
+      // Concurrent attachment reuse P2002 maps to 409 ConflictException
+      (prisma.upload as { findMany: ReturnType<typeof vi.fn> }).findMany.mockResolvedValue([
+        { id: 'u1' },
+      ]);
+      (prisma.$transaction as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+        new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+          code: 'P2002',
+          clientVersion: '7.10.1',
+        }),
+      );
+      await expect(
+        service.submitDeliverable('a1', 'p', { note: 'Done', attachmentIds: ['u1'] }),
+      ).rejects.toThrow(ConflictException);
     });
 
     it('resolves deliverable with accept and revision', async () => {

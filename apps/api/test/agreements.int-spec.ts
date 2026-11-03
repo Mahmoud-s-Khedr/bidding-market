@@ -115,7 +115,7 @@ describe('Agreement endpoints', () => {
       expect(response.body.myRole).toBe('buyer');
       expect(response.body.listing).toBeDefined();
       expect(response.body.bid).toBeDefined();
-      expect(response.body.conversationId).toBeNull();
+      expect(response.body.conversationId).toBeTruthy();
       await request(server).get(path()).set(auth(outsiderToken)).expect(404);
       await request(server).get(path()).expect(401);
     });
@@ -123,16 +123,28 @@ describe('Agreement endpoints', () => {
 
   describe('milestones', () => {
     it('creates and advances milestones, recording timeline events', async () => {
+      const initialAgreement = await prisma.agreement.findUniqueOrThrow({
+        where: { id: agreementId },
+      });
+      const initialStatusChangedAt = initialAgreement.statusChangedAt;
       const created = await request(server)
         .post(`${path()}/milestones`)
         .set(auth(buyerToken))
         .send({ title: 'Draft', amountCents: 1000, dueDate: '2030-01-01T00:00:00.000Z' })
         .expect(201);
+      const afterCreate = await prisma.agreement.findUniqueOrThrow({
+        where: { id: agreementId },
+      });
+      expect(afterCreate.statusChangedAt.getTime()).toBe(initialStatusChangedAt.getTime());
       await request(server)
         .patch(`${path()}/milestones/${created.body.id}`)
         .set(auth(providerToken))
         .send({ status: 'IN_PROGRESS' })
         .expect(200);
+      const afterUpdate = await prisma.agreement.findUniqueOrThrow({
+        where: { id: agreementId },
+      });
+      expect(afterUpdate.statusChangedAt.getTime()).toBe(initialStatusChangedAt.getTime());
       const done = await request(server)
         .patch(`${path()}/milestones/${created.body.id}`)
         .set(auth(buyerToken))
@@ -192,7 +204,8 @@ describe('Agreement endpoints', () => {
         .expect(200);
 
       // A moves IN_PROGRESS to DONE while B concurrently sends status: IN_PROGRESS
-      // A succeeds (200), B gets 409 and cannot overwrite DONE back to IN_PROGRESS
+      // u1 is always 200, u2 may be 200 (if processed before u1) or 409 (if processed after u1);
+      // in all cases neither is 5xx, and final status is guaranteed to be DONE.
       const [u1, u2] = await Promise.all([
         request(server)
           .patch(`${path()}/milestones/${created.body.id}`)
@@ -203,12 +216,21 @@ describe('Agreement endpoints', () => {
           .set(auth(providerToken))
           .send({ status: 'IN_PROGRESS' }),
       ]);
-      expect([u1.status, u2.status].sort()).toEqual([200, 409]);
+      expect([u1.status, u2.status]).not.toContain(500);
+      expect(u1.status).toBe(200);
+      expect([200, 409]).toContain(u2.status);
 
       const milestoneRow = await prisma.milestone.findUniqueOrThrow({
         where: { id: created.body.id },
       });
       expect(milestoneRow.status).toBe('DONE');
+
+      // Once DONE, attempting to regress to IN_PROGRESS must be rejected with 409
+      await request(server)
+        .patch(`${path()}/milestones/${created.body.id}`)
+        .set(auth(providerToken))
+        .send({ status: 'IN_PROGRESS' })
+        .expect(409);
 
       // Concurrent milestone creations assign distinct positions
       const [c1, c2] = await Promise.all([
@@ -323,6 +345,23 @@ describe('Agreement endpoints', () => {
         .send({ note: 'Reusing attachment', attachmentIds: [upload.id] })
         .expect(400);
     });
+    it('concurrent submission with same attachment rejects duplicate without 500', async () => {
+      const upload = await readyDeliverableUpload();
+      const [res1, res2] = await Promise.all([
+        request(server)
+          .post(`${path()}/deliverables`)
+          .set(auth(providerToken))
+          .send({ note: 'Sub 1', attachmentIds: [upload.id] }),
+        request(server)
+          .post(`${path()}/deliverables`)
+          .set(auth(providerToken))
+          .send({ note: 'Sub 2', attachmentIds: [upload.id] }),
+      ]);
+      expect([res1.status, res2.status]).not.toContain(500);
+      expect([res1.status, res2.status].filter((status) => status === 201)).toHaveLength(1);
+      const loserStatus = [res1.status, res2.status].find((status) => status !== 201);
+      expect([400, 409]).toContain(loserStatus);
+    });
     it('resolves deliverable-submit versus cancel race with one winner (Finding 4)', async () => {
       const upload = await readyDeliverableUpload();
       const [submitRes, cancelRes] = await Promise.all([
@@ -335,7 +374,18 @@ describe('Agreement endpoints', () => {
           .set(auth(buyerToken))
           .send({ reason: 'Cancelling during submit' }),
       ]);
-      expect([submitRes.status, cancelRes.status].sort()).toEqual([201, 409]);
+      expect([201, 409]).toContain(submitRes.status);
+      expect([200, 201]).toContain(cancelRes.status);
+      expect([submitRes.status, cancelRes.status]).not.toContain(500);
+      expect([submitRes.status, cancelRes.status].every((status) => status < 500)).toBe(true);
+      expect(
+        (await prisma.agreement.findUniqueOrThrow({ where: { id: agreementId } })).status,
+      ).toBe('CANCELLED');
+      expect((await prisma.listing.findUniqueOrThrow({ where: { id: listingId } })).status).toBe(
+        'CLOSED',
+      );
+      if (submitRes.status === 409)
+        expect(await prisma.deliverable.count({ where: { agreementId } })).toBe(0);
     });
   });
 

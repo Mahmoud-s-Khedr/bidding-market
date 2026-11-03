@@ -7,6 +7,7 @@ import { DashboardModule } from './modules/dashboard/dashboard.module.js';
 import { AppConfigModule } from './common/config.module.js';
 import { JwtAuthGuard } from './modules/auth/auth.guard.js';
 import { AuthModule } from './modules/auth/auth.module.js';
+import { BidsModule } from './modules/bids/bids.module.js';
 import { CategoriesModule } from './modules/categories/categories.module.js';
 import { HealthModule } from './modules/health/health.module.js';
 import { ListingsModule } from './modules/listings/listings.module.js';
@@ -29,6 +30,7 @@ import { StorageModule } from './storage/storage.module.js';
     CategoriesModule,
     UploadsModule,
     ListingsModule,
+    BidsModule,
     AgreementsModule,
     DashboardModule,
   ],

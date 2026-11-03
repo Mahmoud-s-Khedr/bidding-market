@@ -109,6 +109,21 @@ export async function createAgreement({
       bidId: bid.id,
       buyerId: buyer.id,
       providerId: provider.id,
+      status: 'ACTIVE',
+      events: {
+        create: {
+          type: 'CREATED',
+          data: { initiatorRole: 'buyer', finalAmountCents: amountCents, finalDeliveryDays: 3 },
+        },
+      },
+    },
+  });
+  await prisma.conversation.create({
+    data: {
+      listingId: createdListing.id,
+      bidId: bid.id,
+      agreementId: agreement.id,
+      participants: { create: [{ userId: buyer.id }, { userId: provider.id }] },
     },
   });
   return { agreement, listing: createdListing, bid };

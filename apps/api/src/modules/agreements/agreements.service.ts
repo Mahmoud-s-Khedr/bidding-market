@@ -234,11 +234,11 @@ export class AgreementsService {
   async createMilestone(id: string, userId: string, input: MilestoneCreateInput) {
     await this.participant(id, userId);
     return this.prisma.$transaction(async (tx) => {
-      const moved = await tx.agreement.updateMany({
-        where: { id, status: { in: ['ACTIVE', 'DELIVERED'] } },
-        data: { statusChangedAt: new Date() },
-      });
-      if (!moved.count) throw new ConflictException('Agreement is not actionable');
+      const [agreement] = await tx.$queryRaw<Array<{ status: string }>>(
+        Prisma.sql`SELECT "status" FROM "Agreement" WHERE "id" = ${id} FOR UPDATE`,
+      );
+      if (!agreement || !isActionable(agreement.status))
+        throw new ConflictException('Agreement is not actionable');
       const maxPos = await tx.milestone.aggregate({
         where: { agreementId: id },
         _max: { position: true },
@@ -273,11 +273,11 @@ export class AgreementsService {
   ) {
     await this.participant(id, userId);
     return this.prisma.$transaction(async (tx) => {
-      const moved = await tx.agreement.updateMany({
-        where: { id, status: { in: ['ACTIVE', 'DELIVERED'] } },
-        data: { statusChangedAt: new Date() },
-      });
-      if (!moved.count) throw new ConflictException('Agreement is not actionable');
+      const [agreement] = await tx.$queryRaw<Array<{ status: string }>>(
+        Prisma.sql`SELECT "status" FROM "Agreement" WHERE "id" = ${id} FOR UPDATE`,
+      );
+      if (!agreement || !isActionable(agreement.status))
+        throw new ConflictException('Agreement is not actionable');
 
       const milestone = await tx.milestone.findFirst({
         where: { id: milestoneId, agreementId: id },
@@ -333,31 +333,37 @@ export class AgreementsService {
       throw new BadRequestException(
         'Attachments must be ready DELIVERABLE uploads owned by provider that are not already attached',
       );
-    const deliverable = await this.prisma.$transaction(async (tx) => {
-      const moved = await tx.agreement.updateMany({
-        where: { id, status: { in: ['ACTIVE', 'DELIVERED'] } },
-        data: { status: 'DELIVERED', statusChangedAt: new Date() },
+    const deliverable = await this.prisma
+      .$transaction(async (tx) => {
+        const moved = await tx.agreement.updateMany({
+          where: { id, status: { in: ['ACTIVE', 'DELIVERED'] } },
+          data: { status: 'DELIVERED', statusChangedAt: new Date() },
+        });
+        if (!moved.count) throw new ConflictException('Agreement is not actionable');
+        const created = await tx.deliverable.create({
+          data: {
+            agreementId: id,
+            note: input.note,
+            submittedById: userId,
+            attachments: { create: input.attachmentIds.map((uploadId) => ({ uploadId })) },
+          },
+          include: { attachments: { include: { upload: true } } },
+        });
+        await tx.agreementEvent.create({
+          data: {
+            agreementId: id,
+            actorId: userId,
+            type: 'DELIVERABLE_SUBMITTED',
+            data: { deliverableId: created.id },
+          },
+        });
+        return created;
+      })
+      .catch((error: unknown) => {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')
+          throw new ConflictException('An attachment has already been used by another deliverable');
+        throw error;
       });
-      if (!moved.count) throw new ConflictException('Agreement is not actionable');
-      const created = await tx.deliverable.create({
-        data: {
-          agreementId: id,
-          note: input.note,
-          submittedById: userId,
-          attachments: { create: input.attachmentIds.map((uploadId) => ({ uploadId })) },
-        },
-        include: { attachments: { include: { upload: true } } },
-      });
-      await tx.agreementEvent.create({
-        data: {
-          agreementId: id,
-          actorId: userId,
-          type: 'DELIVERABLE_SUBMITTED',
-          data: { deliverableId: created.id },
-        },
-      });
-      return created;
-    });
     this.events.emit('agreement.deliverable_submitted', {
       agreementId: id,
       deliverableId: deliverable.id,
