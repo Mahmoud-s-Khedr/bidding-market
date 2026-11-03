@@ -74,13 +74,13 @@ Bid statuses: `PENDING, SHORTLISTED, COUNTERED, ACCEPTED, REJECTED, WITHDRAWN, D
 
 ## Conversations & messages
 
-| GET  | /conversations 🔒                 | my conversations with `otherParticipant, lastMessage, unreadCount, listing?, agreementId?` |
-| ---- | --------------------------------- | ------------------------------------------------------------------------------------------ |
-| POST | /conversations 🔒                 | `{recipientId, listingId?, bidId?}` → existing or new (dedup on participants+listing)      |
-| GET  | /conversations/:id 🔒 participant |                                                                                            |
-| GET  | /conversations/:id/messages 🔒    | cursor paginated, newest first                                                             |
-| POST | /conversations/:id/messages 🔒    | `{type: 'TEXT'                                                                             | 'IMAGE' | 'FILE' | 'VOICE', body?, attachmentIds?, voiceDurationSec?}` |
-| POST | /conversations/:id/read 🔒        | `{lastMessageId}` marks read                                                               |
+| GET  | /conversations 🔒                 | my conversations with `otherParticipant, lastMessage, unreadCount, listing?, agreementId?`; descending last activity with opaque base64url `{date,id}` cursor |
+| ---- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| POST | /conversations 🔒                 | `{recipientId, listingId?, bidId?}` → existing or new (dedup on participants+listing)                                                                         |
+| GET  | /conversations/:id 🔒 participant |                                                                                                                                                               |
+| GET  | /conversations/:id/messages 🔒    | cursor paginated, newest first                                                                                                                                |
+| POST | /conversations/:id/messages 🔒    | `{type: 'TEXT'                                                                                                                                                | 'IMAGE' | 'FILE' | 'VOICE', body?, attachmentIds?, voiceDurationSec?}` |
+| POST | /conversations/:id/read 🔒        | `{lastMessageId}` marks read                                                                                                                                  |
 
 ## Agreements (transactions)
 
@@ -111,6 +111,9 @@ Roles and Authorization:
 | POST | /notifications/read-all 🔒     |                           |
 
 Types: `BID_RECEIVED, BID_UPDATED, BID_COUNTERED, BID_ACCEPTED, BID_REJECTED, MESSAGE_RECEIVED, DELIVERABLE_SUBMITTED, DELIVERABLE_ACCEPTED, REVISION_REQUESTED, AGREEMENT_COMPLETED, AGREEMENT_CANCELLED, REPORT_RESOLVED, REVIEW_RECEIVED`. Shape `{id, type, title, body, link, readAt, createdAt, data}`.
+
+Unread `MESSAGE_RECEIVED` notifications are coalesced per recipient and conversation: later messages
+update the existing notification body, message id and timestamp instead of adding another unread item.
 
 ## Dashboard
 
@@ -150,3 +153,5 @@ Client → server: `conversation:join {conversationId}` (ack `{ok}`; must be par
 Server → client: `message:new Message`, `message:read {conversationId, userId, lastMessageId}`, `typing {conversationId, userId, isTyping}`, `notification:new Notification`, `presence {userId, online}`, `bid:updated Bid`, `agreement:updated {agreementId, status}`.
 
 Messages are **sent via REST** (`POST /conversations/:id/messages`), and the server broadcasts `message:new` to both participants' `user:` rooms.
+Presence is user-level: it becomes online on the first connected tab and offline only after the final
+tab disconnects. Presence events go to users sharing a conversation.

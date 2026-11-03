@@ -28,6 +28,14 @@ packages/
   Integration: `test/**/*.int-spec.ts` booting the Nest app against real Postgres via supertest,
   truncating tables between tests.
 
+### Realtime notifications
+
+Feature modules do not import the Socket.IO gateway. They use `RealtimeService.emitToUser()` for direct
+delivery, or emit a typed application event after a database transaction commits. The notifications
+module subscribes with `@OnEvent`; messaging emits `message.created`, whose listener persists/coalesces
+`MESSAGE_RECEIVED` and pushes `notification:new`. Bids and agreements add analogous post-commit
+listeners and call `NotificationsService.notify()`.
+
 ## Frontend (apps/web)
 
 - Next.js 16 App Router, React 19, Tailwind CSS 4, accessible primitives (Radix UI), lucide icons.

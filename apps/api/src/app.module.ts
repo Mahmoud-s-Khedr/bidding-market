@@ -9,8 +9,11 @@ import { JwtAuthGuard } from './modules/auth/auth.guard.js';
 import { AuthModule } from './modules/auth/auth.module.js';
 import { BidsModule } from './modules/bids/bids.module.js';
 import { CategoriesModule } from './modules/categories/categories.module.js';
+import { ConversationsModule } from './modules/conversations/conversations.module.js';
 import { HealthModule } from './modules/health/health.module.js';
 import { ListingsModule } from './modules/listings/listings.module.js';
+import { NotificationsModule } from './modules/notifications/notifications.module.js';
+import { RealtimeModule } from './modules/realtime/realtime.module.js';
 import { UploadsModule } from './modules/uploads/uploads.module.js';
 import { UsersModule } from './modules/users/users.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
@@ -33,6 +36,9 @@ import { StorageModule } from './storage/storage.module.js';
     BidsModule,
     AgreementsModule,
     DashboardModule,
+    RealtimeModule,
+    ConversationsModule,
+    NotificationsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
