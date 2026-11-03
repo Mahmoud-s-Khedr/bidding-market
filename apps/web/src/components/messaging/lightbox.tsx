@@ -4,27 +4,54 @@ import * as React from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { X, ZoomIn } from 'lucide-react';
 import { Dialog, DialogOverlay, DialogPortal } from '@/components/ui/dialog';
+import { getAttachmentUrl } from '@/lib/api/uploads';
 
 export interface LightboxProps {
   src: string | null;
+  uploadId?: string;
   alt?: string;
   onClose: () => void;
 }
 
-export function Lightbox({ src, alt = 'Image preview', onClose }: LightboxProps) {
+export function Lightbox({ src, uploadId, alt = 'Image preview', onClose }: LightboxProps) {
+  const [currentSrc, setCurrentSrc] = React.useState(src);
+  const retriedRef = React.useRef(false);
+
+  React.useEffect(() => {
+    setCurrentSrc(src);
+    retriedRef.current = false;
+  }, [src]);
+
+  const handleError = async () => {
+    if (uploadId && !retriedRef.current) {
+      retriedRef.current = true;
+      try {
+        const res = await getAttachmentUrl(uploadId);
+        if (res?.url) {
+          setCurrentSrc(res.url);
+        }
+      } catch {
+        // Ignore refresh failure
+      }
+    }
+  };
+
   return (
-    <Dialog open={Boolean(src)} onOpenChange={(open) => !open && onClose()}>
+    <Dialog open={Boolean(currentSrc)} onOpenChange={(open) => !open && onClose()}>
       <DialogPortal>
         <DialogOverlay className="bg-black/80 backdrop-blur-sm z-50 fixed inset-0" />
         <DialogPrimitive.Content
           aria-label="Image preview lightbox"
           className="fixed left-[50%] top-[50%] z-50 -translate-x-1/2 -translate-y-1/2 max-w-4xl max-h-[90vh] p-2 bg-transparent border-none shadow-none focus:outline-none flex flex-col items-center justify-center"
         >
-          {src && (
+          {currentSrc && (
             <div className="relative group max-w-full max-h-[85vh] overflow-hidden rounded-lg flex items-center justify-center">
               <img
-                src={src}
+                src={currentSrc}
                 alt={alt}
+                onError={() => {
+                  void handleError();
+                }}
                 className="max-w-full max-h-[85vh] object-contain rounded-lg shadow-2xl"
               />
               <DialogPrimitive.Close
@@ -43,23 +70,50 @@ export function Lightbox({ src, alt = 'Image preview', onClose }: LightboxProps)
 
 export function ImageAttachmentThumbnail({
   src,
+  uploadId,
   alt = 'Attached image',
   onClick,
 }: {
   src: string;
+  uploadId?: string;
   alt?: string;
-  onClick: () => void;
+  onClick: (currentUrl?: string) => void;
 }) {
+  const [currentSrc, setCurrentSrc] = React.useState(src);
+  const retriedRef = React.useRef(false);
+
+  React.useEffect(() => {
+    setCurrentSrc(src);
+    retriedRef.current = false;
+  }, [src]);
+
+  const handleError = async () => {
+    if (uploadId && !retriedRef.current) {
+      retriedRef.current = true;
+      try {
+        const res = await getAttachmentUrl(uploadId);
+        if (res?.url) {
+          setCurrentSrc(res.url);
+        }
+      } catch {
+        // Ignore refresh failure
+      }
+    }
+  };
+
   return (
     <button
       type="button"
-      onClick={onClick}
+      onClick={() => onClick(currentSrc)}
       aria-label={`View full image ${alt}`}
       className="group relative block overflow-hidden rounded-md border border-border/60 hover:border-primary/50 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
       <img
-        src={src}
+        src={currentSrc}
         alt={alt}
+        onError={() => {
+          void handleError();
+        }}
         className="h-32 w-44 object-cover transition-transform duration-200 group-hover:scale-105"
         loading="lazy"
       />

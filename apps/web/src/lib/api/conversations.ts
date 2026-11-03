@@ -94,10 +94,17 @@ export function useCreateConversation() {
   });
 }
 
+/**
+ * Aggregates unread message counts across active conversations for header badges.
+ * Note: /dashboard/summary is not yet available on the API on main (it will provide unreadMessages).
+ * Until that endpoint is implemented, this query calculates the sum across fetched conversations
+ * up to the query limit (50 conversations).
+ */
 export function useTotalUnreadMessages(options?: { enabled?: boolean }) {
   const { data } = useQuery({
     queryKey: queryKeys.conversations.unreadTotal(),
     queryFn: async () => {
+      // Fallback calculation: sums unread counts across up to 50 conversations until /dashboard/summary is available
       const res = await getConversations({ limit: 50 });
       return res.items.reduce((acc, c) => acc + (c.unreadCount ?? 0), 0);
     },

@@ -2,9 +2,11 @@
 
 import * as React from 'react';
 import { Pause, Play } from 'lucide-react';
+import { getAttachmentUrl } from '@/lib/api/uploads';
 
 export interface AudioPlayerProps {
   src: string;
+  uploadId?: string;
   durationSec?: number | null;
   className?: string;
   autoPlay?: boolean;
@@ -19,20 +21,42 @@ function formatTime(seconds: number): string {
 
 export function AudioPlayer({
   src,
+  uploadId,
   durationSec,
   className = '',
   autoPlay = false,
 }: AudioPlayerProps) {
   const audioRef = React.useRef<HTMLAudioElement | null>(null);
+  const [currentSrc, setCurrentSrc] = React.useState(src);
+  const retriedRef = React.useRef(false);
   const [isPlaying, setIsPlaying] = React.useState(false);
   const [currentTime, setCurrentTime] = React.useState(0);
   const [totalDuration, setTotalDuration] = React.useState(durationSec || 0);
+
+  React.useEffect(() => {
+    setCurrentSrc(src);
+    retriedRef.current = false;
+  }, [src]);
 
   React.useEffect(() => {
     if (durationSec) {
       setTotalDuration(durationSec);
     }
   }, [durationSec]);
+
+  const handleError = async () => {
+    if (uploadId && !retriedRef.current) {
+      retriedRef.current = true;
+      try {
+        const res = await getAttachmentUrl(uploadId);
+        if (res?.url) {
+          setCurrentSrc(res.url);
+        }
+      } catch {
+        // Ignore refresh failure
+      }
+    }
+  };
 
   const togglePlay = () => {
     if (!audioRef.current) return;
@@ -60,29 +84,35 @@ export function AudioPlayer({
     }
   };
 
-  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const time = parseFloat(e.target.value);
-    setCurrentTime(time);
-    if (audioRef.current) {
-      audioRef.current.currentTime = time;
-    }
-  };
-
   const handleEnded = () => {
     setIsPlaying(false);
     setCurrentTime(0);
+    if (audioRef.current) {
+      audioRef.current.currentTime = 0;
+    }
+  };
+
+  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = parseFloat(e.target.value);
+    setCurrentTime(val);
+    if (audioRef.current) {
+      audioRef.current.currentTime = val;
+    }
   };
 
   return (
     <div
-      className={`flex items-center gap-2.5 px-3 py-2 rounded-lg bg-background/60 border border-border/60 ${className}`}
+      className={`flex items-center gap-3 p-2.5 rounded-lg border border-border bg-card/60 max-w-sm ${className}`}
       role="region"
       aria-label="Voice note player"
     >
       <audio
         ref={audioRef}
-        src={src}
+        src={currentSrc}
         autoPlay={autoPlay}
+        onError={() => {
+          void handleError();
+        }}
         onPlay={() => setIsPlaying(true)}
         onPause={() => setIsPlaying(false)}
         onTimeUpdate={handleTimeUpdate}

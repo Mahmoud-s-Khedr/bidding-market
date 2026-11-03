@@ -1,9 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ChatView } from './chat-view';
 import * as conversationsApi from '@/lib/api/conversations';
 import * as realtimeModule from '@/lib/realtime';
 import * as authContext from '@/components/auth/auth-provider';
+import { queryKeys } from '@/lib/api/query-keys';
+import type { Message } from '@/lib/api/messaging-types';
 import { makeConversation, makeMessage, makePublicUser, makeUser } from '../../../test/fixtures';
 
 vi.mock('@/lib/api/conversations', () => ({
@@ -23,6 +26,7 @@ vi.mock('@/components/auth/auth-provider', () => ({
 }));
 
 describe('ChatView', () => {
+  let queryClient: QueryClient;
   const currentUser = makeUser({ id: 'user-me', displayName: 'Me' });
   const otherUser = makePublicUser({ id: 'user-other', displayName: 'Alice' });
 
@@ -35,10 +39,17 @@ describe('ChatView', () => {
     sendRead: vi.fn(),
   };
 
-  const realtimeHandlers: Record<string, ((data: unknown) => void)[]> = {};
+  let realtimeHandlers: Record<string, ((data: unknown) => void)[]> = {};
 
   beforeEach(() => {
     vi.clearAllMocks();
+    queryClient = new QueryClient();
+    realtimeHandlers = {};
+
+    // Default document.hasFocus to true
+    if (typeof document !== 'undefined') {
+      document.hasFocus = vi.fn().mockReturnValue(true);
+    }
 
     vi.mocked(authContext.useAuth).mockReturnValue({
       user: currentUser,
@@ -87,8 +98,16 @@ describe('ChatView', () => {
     vi.mocked(conversationsApi.markConversationRead).mockResolvedValue({ ok: true });
   });
 
+  function renderChatView(props: { conversationId?: string; onBack?: () => void } = {}) {
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <ChatView conversationId={props.conversationId ?? 'c1'} onBack={props.onBack} />
+      </QueryClientProvider>,
+    );
+  }
+
   it('joins conversation on mount and leaves on unmount', () => {
-    const { unmount } = render(<ChatView conversationId="c1" />);
+    const { unmount } = renderChatView();
     expect(mockRealtime.joinConversation).toHaveBeenCalledWith('c1');
 
     unmount();
@@ -96,13 +115,72 @@ describe('ChatView', () => {
   });
 
   it('renders participant info, listing link, and marks read', () => {
-    render(<ChatView conversationId="c1" />);
+    renderChatView();
 
     expect(screen.getByText('Alice')).toBeInTheDocument();
     expect(screen.getByText('Listing: Logo Design')).toBeInTheDocument();
     expect(screen.getByText('First message')).toBeInTheDocument();
 
     expect(conversationsApi.markConversationRead).toHaveBeenCalledWith('c1', 'm1');
+    expect(mockRealtime.sendRead).toHaveBeenCalledWith('c1', 'm1');
+  });
+
+  it('shows "unknown" presence initially, and updates to "Online" on presence event', async () => {
+    renderChatView();
+
+    // Initially status must be "unknown"
+    expect(screen.getByText(/unknown/i)).toBeInTheDocument();
+
+    // Trigger presence event
+    act(() => {
+      const handlers = realtimeHandlers['presence'] || [];
+      for (const h of handlers) {
+        h({ userId: otherUser.id, online: true });
+      }
+    });
+
+    expect(await screen.findByText('Online')).toBeInTheDocument();
+  });
+
+  it('does NOT mark conversation as read when document is not focused', () => {
+    document.hasFocus = vi.fn().mockReturnValue(false);
+
+    renderChatView();
+
+    expect(conversationsApi.markConversationRead).not.toHaveBeenCalled();
+
+    // When window receives focus, it marks as read
+    document.hasFocus = vi.fn().mockReturnValue(true);
+    act(() => {
+      window.dispatchEvent(new Event('focus'));
+    });
+
+    expect(conversationsApi.markConversationRead).toHaveBeenCalledWith('c1', 'm1');
+  });
+
+  it('resets unreadCount to 0 in conversation list cache and invalidates unreadTotal upon mark-read', async () => {
+    const cachedConv = makeConversation({ id: 'c1', unreadCount: 4 });
+    queryClient.setQueryData(queryKeys.conversations.infinite(), {
+      pages: [{ items: [cachedConv], nextCursor: null }],
+      pageParams: [undefined],
+    });
+
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+
+    renderChatView();
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const updated = queryClient.getQueryData<{
+      pages: { items: (typeof cachedConv)[] }[];
+    }>(queryKeys.conversations.infinite());
+
+    expect(updated?.pages[0]?.items[0]?.unreadCount).toBe(0);
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: queryKeys.conversations.unreadTotal(),
+    });
   });
 
   it('sends message with optimistic update and reconciles with server response', async () => {
@@ -115,7 +193,7 @@ describe('ChatView', () => {
 
     vi.mocked(conversationsApi.sendMessage).mockResolvedValue(serverMessage);
 
-    render(<ChatView conversationId="c1" />);
+    renderChatView();
 
     const input = screen.getByPlaceholderText(/type a message/i);
     fireEvent.change(input, { target: { value: 'Hello Alice!' } });
@@ -135,10 +213,83 @@ describe('ChatView', () => {
     expect(await screen.findByText('Hello Alice!')).toBeInTheDocument();
   });
 
+  it('avoids duplicate bubbles when server echo arrives via message:new before sendMessage resolves', async () => {
+    let resolveSendMessage!: (msg: Message) => void;
+    vi.mocked(conversationsApi.sendMessage).mockReturnValue(
+      new Promise<Message>((resolve) => {
+        resolveSendMessage = resolve;
+      }),
+    );
+
+    // Initial messages empty
+    vi.mocked(conversationsApi.useInfiniteMessages).mockReturnValue({
+      data: {
+        pages: [{ items: [], nextCursor: null }],
+        pageParams: [undefined],
+      },
+      isLoading: false,
+      hasNextPage: false,
+      isFetchingNextPage: false,
+      fetchNextPage: vi.fn(),
+    } as unknown as ReturnType<typeof conversationsApi.useInfiniteMessages>);
+
+    renderChatView();
+
+    const input = screen.getByPlaceholderText(/type a message/i);
+    fireEvent.change(input, { target: { value: 'Quick echo test' } });
+
+    // Send message (optimistic bubble created)
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Enter', shiftKey: false });
+      await Promise.resolve();
+    });
+
+    const messageLog = screen.getByRole('log', { name: /messages list/i });
+    expect(within(messageLog).getAllByText('Quick echo test')).toHaveLength(1);
+
+    // Server echo arrives via realtime socket BEFORE REST response resolves
+    const serverEcho = makeMessage({
+      id: 'm-server-echo-99',
+      conversationId: 'c1',
+      sender: currentUser,
+      type: 'TEXT',
+      body: 'Quick echo test',
+    });
+
+    vi.mocked(conversationsApi.useInfiniteMessages).mockReturnValue({
+      data: {
+        pages: [{ items: [serverEcho], nextCursor: null }],
+        pageParams: [undefined],
+      },
+      isLoading: false,
+      hasNextPage: false,
+      isFetchingNextPage: false,
+      fetchNextPage: vi.fn(),
+    } as unknown as ReturnType<typeof conversationsApi.useInfiniteMessages>);
+
+    act(() => {
+      const handlers = realtimeHandlers['message:new'] || [];
+      for (const h of handlers) {
+        h(serverEcho);
+      }
+    });
+
+    // Should NOT duplicate bubbles (only 1 rendered in message log)
+    expect(within(messageLog).getAllByText('Quick echo test')).toHaveLength(1);
+
+    // REST response resolves afterwards
+    await act(async () => {
+      resolveSendMessage(serverEcho);
+      await Promise.resolve();
+    });
+
+    expect(within(messageLog).getAllByText('Quick echo test')).toHaveLength(1);
+  });
+
   it('shows error state with retry on send failure', async () => {
     vi.mocked(conversationsApi.sendMessage).mockRejectedValueOnce(new Error('Network error'));
 
-    render(<ChatView conversationId="c1" />);
+    renderChatView();
 
     const input = screen.getByPlaceholderText(/type a message/i);
     fireEvent.change(input, { target: { value: 'Will fail' } });
@@ -148,7 +299,7 @@ describe('ChatView', () => {
       await Promise.resolve();
     });
 
-    expect(await screen.findByText(/failed to send/i)).toBeInTheDocument();
+    expect(await screen.findByText(/network error/i)).toBeInTheDocument();
     const retryBtn = screen.getByRole('button', { name: /retry/i });
     expect(retryBtn).toBeInTheDocument();
 
@@ -162,11 +313,11 @@ describe('ChatView', () => {
     });
 
     expect(conversationsApi.sendMessage).toHaveBeenCalledTimes(2);
-    expect(screen.queryByText(/failed to send/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/network error/i)).not.toBeInTheDocument();
   });
 
   it('shows typing indicator when typing event is received', async () => {
-    render(<ChatView conversationId="c1" />);
+    renderChatView();
 
     act(() => {
       const handlers = realtimeHandlers['typing'] || [];
@@ -176,5 +327,24 @@ describe('ChatView', () => {
     });
 
     expect(await screen.findByText(/alice is typing/i)).toBeInTheDocument();
+  });
+
+  it('sets aria-relevant="additions" and aria-busy on the messages log container', () => {
+    vi.mocked(conversationsApi.useInfiniteMessages).mockReturnValue({
+      data: {
+        pages: [{ items: [], nextCursor: null }],
+        pageParams: [undefined],
+      },
+      isLoading: false,
+      hasNextPage: true,
+      isFetchingNextPage: true,
+      fetchNextPage: vi.fn(),
+    } as unknown as ReturnType<typeof conversationsApi.useInfiniteMessages>);
+
+    renderChatView();
+
+    const log = screen.getByRole('log', { name: /messages list/i });
+    expect(log).toHaveAttribute('aria-relevant', 'additions');
+    expect(log).toHaveAttribute('aria-busy', 'true');
   });
 });

@@ -62,13 +62,17 @@ export function VoiceRecorder({
   const cancelledRef = React.useRef(false);
   const mimeConfigRef = React.useRef(getSupportedMimeType());
   const startTimeRef = React.useRef(0);
+  const isMountedRef = React.useRef(true);
 
   // Clean up resources on unmount
   React.useEffect(() => {
+    isMountedRef.current = true;
     return () => {
+      isMountedRef.current = false;
       if (timerRef.current) clearInterval(timerRef.current);
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
       }
       if (audioUrl) {
         URL.revokeObjectURL(audioUrl);
@@ -99,6 +103,11 @@ export function VoiceRecorder({
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // If component unmounted while getUserMedia was pending, stop tracks immediately to prevent leak
+      if (!isMountedRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
       streamRef.current = stream;
 
       const mimeInfo = getSupportedMimeType();
@@ -201,14 +210,17 @@ export function VoiceRecorder({
       setAudioBlob(null);
       setStatus('idle');
       setDuration(0);
-    } catch {
-      // Error handled by caller
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to send voice note';
+      setError(msg);
     }
   };
 
   if (error) {
     return (
       <div
+        role="alert"
+        aria-live="assertive"
         className={`flex items-center gap-2 p-2 rounded-md bg-destructive/10 text-destructive text-xs ${className}`}
       >
         <AlertCircle className="h-4 w-4 shrink-0" />

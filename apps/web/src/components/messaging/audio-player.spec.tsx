@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { AudioPlayer } from './audio-player';
+import * as uploadsApi from '@/lib/api/uploads';
+
+vi.mock('@/lib/api/uploads', () => ({
+  getAttachmentUrl: vi.fn(),
+}));
 
 describe('AudioPlayer', () => {
   beforeEach(() => {
@@ -60,5 +65,31 @@ describe('AudioPlayer', () => {
 
     fireEvent.ended(audioElement);
     expect(screen.getByRole('button', { name: /play audio/i })).toBeInTheDocument();
+  });
+
+  it('refreshes expired presigned URL via getAttachmentUrl on audio load error', async () => {
+    vi.mocked(uploadsApi.getAttachmentUrl).mockResolvedValue({
+      url: 'https://cdn.example.com/refreshed-audio.webm',
+      expiresAt: '2026-11-03T12:00:00Z',
+    });
+
+    render(
+      <AudioPlayer
+        src="https://cdn.example.com/expired-audio.webm"
+        uploadId="audio-att-1"
+        durationSec={15}
+      />,
+    );
+
+    const audioElement = document.querySelector('audio')!;
+    expect(audioElement).toHaveAttribute('src', 'https://cdn.example.com/expired-audio.webm');
+
+    await act(async () => {
+      fireEvent.error(audioElement);
+      await Promise.resolve();
+    });
+
+    expect(uploadsApi.getAttachmentUrl).toHaveBeenCalledWith('audio-att-1');
+    expect(audioElement).toHaveAttribute('src', 'https://cdn.example.com/refreshed-audio.webm');
   });
 });

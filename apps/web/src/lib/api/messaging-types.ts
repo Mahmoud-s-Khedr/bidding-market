@@ -42,7 +42,7 @@ export interface Conversation {
   otherParticipant?: PublicUser;
   lastMessage: Message | null;
   unreadCount?: number;
-  listing?: {
+  listing: {
     id: string;
     title: string;
     status: string;

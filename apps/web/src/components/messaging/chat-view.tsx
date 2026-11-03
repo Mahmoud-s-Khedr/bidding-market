@@ -11,6 +11,7 @@ import {
   Loader2,
   RefreshCw,
 } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/components/auth/auth-provider';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -23,30 +24,25 @@ import {
   useConversation,
   useInfiniteMessages,
 } from '@/lib/api/conversations';
-import type { Attachment } from '@/lib/api/types';
-import type { Message, MessageType } from '@/lib/api/messaging-types';
+import { queryKeys } from '@/lib/api/query-keys';
+import type { Attachment, PaginatedResponse } from '@/lib/api/types';
+import type { Conversation, Message, MessageType } from '@/lib/api/messaging-types';
 import { useRealtime, useRealtimeEvent } from '@/lib/realtime';
 import { Composer } from './composer';
 import { ImageAttachmentThumbnail, Lightbox } from './lightbox';
 import { AudioPlayer } from './audio-player';
 import { LinkifiedText } from './linkified-text';
+import {
+  computeChatScrollAction,
+  detectMessageListChange,
+  isScrolledNearBottom,
+} from './chat-scroll';
+import { isMatchingOptimistic, type OptimisticMessage } from './optimistic-message';
 
 export interface ChatViewProps {
   conversationId: string;
   onBack?: () => void;
   className?: string;
-}
-
-interface OptimisticMessage extends Message {
-  _status?: 'pending' | 'error';
-  _error?: string;
-  _rawInput?: {
-    type: MessageType;
-    body?: string;
-    attachmentIds?: string[];
-    voiceDurationSec?: number;
-    attachments?: Attachment[];
-  };
 }
 
 function getInitials(name?: string): string {
@@ -91,7 +87,8 @@ function formatFileSize(bytes: number): string {
 
 export function ChatView({ conversationId, onBack, className = '' }: ChatViewProps) {
   const { user } = useAuth();
-  const { joinConversation, leaveConversation, sendTyping } = useRealtime();
+  const queryClient = useQueryClient();
+  const { joinConversation, leaveConversation, sendTyping, sendRead } = useRealtime();
 
   const { data: conversationData, isLoading: isLoadingConv } = useConversation(conversationId);
   const {
@@ -110,6 +107,7 @@ export function ChatView({ conversationId, onBack, className = '' }: ChatViewPro
 
   const scrollContainerRef = React.useRef<HTMLDivElement | null>(null);
   const prevScrollHeightRef = React.useRef<number>(0);
+  const prevMessageIdsRef = React.useRef<string[]>([]);
   const isNearBottomRef = React.useRef(true);
   const lastMarkedReadRef = React.useRef<string | null>(null);
   const typingTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
@@ -120,6 +118,11 @@ export function ChatView({ conversationId, onBack, className = '' }: ChatViewPro
     if (conversationData.otherParticipant) return conversationData.otherParticipant;
     return conversationData.participants.find((p) => p.id !== user?.id) ?? null;
   }, [conversationData, user?.id]);
+
+  // Reset presence to unknown whenever participant changes
+  React.useEffect(() => {
+    setOtherUserOnline(null);
+  }, [otherParticipant?.id]);
 
   // Join on mount, leave on unmount
   React.useEffect(() => {
@@ -160,6 +163,13 @@ export function ChatView({ conversationId, onBack, className = '' }: ChatViewPro
     }
   });
 
+  // Reconcile optimistic messages if server echo arrives via realtime
+  useRealtimeEvent('message:new', (msg) => {
+    if (msg.conversationId === conversationId && msg.sender.id === user?.id) {
+      setOptimisticMessages((prev) => prev.filter((opt) => !isMatchingOptimistic(opt, msg)));
+    }
+  });
+
   // Build full chronological list of messages
   const serverMessages = React.useMemo(() => {
     if (!messagesPages?.pages) return [];
@@ -168,28 +178,42 @@ export function ChatView({ conversationId, onBack, className = '' }: ChatViewPro
     return [...flattened].reverse();
   }, [messagesPages]);
 
-  // Combine server messages with pending optimistic messages
+  // Combine server messages with pending optimistic messages, filtering duplicates
   const allMessages: OptimisticMessage[] = React.useMemo(() => {
     const serverIds = new Set(serverMessages.map((m) => m.id));
-    const activeOptimistic = optimisticMessages.filter((m) => !serverIds.has(m.id));
+    const activeOptimistic = optimisticMessages.filter((opt) => {
+      if (serverIds.has(opt.id)) return false;
+      const matched = serverMessages.some((sm) => isMatchingOptimistic(opt, sm));
+      return !matched;
+    });
     return [...serverMessages, ...activeOptimistic];
   }, [serverMessages, optimisticMessages]);
 
-  // Auto-scroll logic: scroll to bottom on initial load or new incoming messages
+  // Auto-scroll logic: prepend preserves viewport, append scrolls to bottom if near bottom
   React.useEffect(() => {
     const el = scrollContainerRef.current;
     if (!el) return;
 
-    if (prevScrollHeightRef.current > 0) {
-      // If we loaded older messages (scrollHeight changed without scroll being at bottom)
-      const diff = el.scrollHeight - prevScrollHeightRef.current;
-      if (diff > 0 && !isNearBottomRef.current) {
-        el.scrollTop += diff;
-      }
-    } else {
-      // First load or sending
+    const prevIds = prevMessageIdsRef.current;
+    const nextIds = allMessages.map((m) => m.id);
+    const { isInitialLoad, isPrepended, isAppended } = detectMessageListChange(prevIds, nextIds);
+
+    const action = computeChatScrollAction({
+      isInitialLoad,
+      isPrepended,
+      isAppended,
+      isNearBottom: isNearBottomRef.current,
+      prevScrollHeight: prevScrollHeightRef.current,
+      currentScrollHeight: el.scrollHeight,
+    });
+
+    if (action.type === 'scroll-to-bottom') {
       el.scrollTop = el.scrollHeight;
+    } else if (action.type === 'preserve-scroll') {
+      el.scrollTop += action.diff;
     }
+
+    prevMessageIdsRef.current = nextIds;
     prevScrollHeightRef.current = el.scrollHeight;
   }, [allMessages]);
 
@@ -197,8 +221,7 @@ export function ChatView({ conversationId, onBack, className = '' }: ChatViewPro
     const el = scrollContainerRef.current;
     if (!el) return;
 
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
-    isNearBottomRef.current = atBottom;
+    isNearBottomRef.current = isScrolledNearBottom(el, 50);
 
     // Load older messages if near top
     if (el.scrollTop < 40 && hasNextPage && !isFetchingNextPage) {
@@ -210,7 +233,8 @@ export function ChatView({ conversationId, onBack, className = '' }: ChatViewPro
   // Mark conversation read on visible & focused
   const markAsRead = React.useCallback(async () => {
     if (typeof document === 'undefined') return;
-    if (document.visibilityState !== 'visible') return;
+    // Must be visible AND window must have focus
+    if (document.visibilityState !== 'visible' || !document.hasFocus()) return;
 
     const newest = allMessages[allMessages.length - 1];
     if (!newest || newest.id.startsWith('temp-')) return;
@@ -218,18 +242,53 @@ export function ChatView({ conversationId, onBack, className = '' }: ChatViewPro
     if (lastMarkedReadRef.current === newest.id) return;
 
     lastMarkedReadRef.current = newest.id;
+    sendRead(conversationId, newest.id);
     try {
       await markConversationRead(conversationId, newest.id);
+
+      // Reset unread count to 0 for this conversation across cached lists
+      queryClient.setQueriesData<{
+        pages: Array<PaginatedResponse<Conversation>>;
+        pageParams: unknown[];
+      }>({ queryKey: queryKeys.conversations.infinite() }, (old) => {
+        if (!old || !old.pages) return old;
+        return {
+          ...old,
+          pages: old.pages.map((page) => ({
+            ...page,
+            items: page.items.map((conv) =>
+              conv.id === conversationId ? { ...conv, unreadCount: 0 } : conv,
+            ),
+          })),
+        };
+      });
+
+      queryClient.setQueriesData<PaginatedResponse<Conversation>>(
+        { queryKey: queryKeys.conversations.lists() },
+        (old) => {
+          if (!old || !old.items) return old;
+          return {
+            ...old,
+            items: old.items.map((conv) =>
+              conv.id === conversationId ? { ...conv, unreadCount: 0 } : conv,
+            ),
+          };
+        },
+      );
+
+      void queryClient.invalidateQueries({ queryKey: queryKeys.conversations.unreadTotal() });
     } catch {
       // Ignore error
     }
-  }, [allMessages, conversationId, user?.id]);
+  }, [allMessages, conversationId, user?.id, queryClient, sendRead]);
 
   React.useEffect(() => {
     void markAsRead();
     const onFocus = () => void markAsRead();
     const onVis = () => {
-      if (document.visibilityState === 'visible') void markAsRead();
+      if (document.visibilityState === 'visible' && document.hasFocus()) {
+        void markAsRead();
+      }
     };
     window.addEventListener('focus', onFocus);
     document.addEventListener('visibilitychange', onVis);
@@ -248,7 +307,6 @@ export function ChatView({ conversationId, onBack, className = '' }: ChatViewPro
       const match = myMessages[seenIndex];
       return match ? match.id : null;
     }
-    // If not exact match, check if lastSeenMessageId is past this message
     return lastSeenMessageId;
   }, [allMessages, lastSeenMessageId, user?.id]);
 
@@ -289,11 +347,37 @@ export function ChatView({ conversationId, onBack, className = '' }: ChatViewPro
         voiceDurationSec: payload.voiceDurationSec,
       });
 
-      // Reconcile optimistic message
+      // Insert REST response into messages cache directly and reconcile optimistic message
+      queryClient.setQueryData<{
+        pages: Array<PaginatedResponse<Message>>;
+        pageParams: unknown[];
+      }>(queryKeys.conversations.messages(conversationId), (old) => {
+        if (!old || !old.pages || old.pages.length === 0) return old;
+        const exists = old.pages.some((page) => page.items.some((m) => m.id === sent.id));
+        if (exists) return old;
+        const newPages = [...old.pages];
+        const firstPage = newPages[0];
+        if (firstPage) {
+          newPages[0] = {
+            ...firstPage,
+            nextCursor: firstPage.nextCursor ?? null,
+            items: [sent, ...firstPage.items],
+          };
+        }
+        return { ...old, pages: newPages };
+      });
+
       setOptimisticMessages((prev) =>
         prev.map((m) => (m.id === tempId ? { ...sent, _status: undefined } : m)),
       );
     } catch (err: unknown) {
+      // Check if real message already arrived via server echo
+      const alreadyArrived = serverMessages.some((sm) => isMatchingOptimistic(optimistic, sm));
+      if (alreadyArrived) {
+        setOptimisticMessages((prev) => prev.filter((m) => m.id !== tempId));
+        return;
+      }
+
       const msg = err instanceof Error ? err.message : 'Failed to send message';
       setOptimisticMessages((prev) =>
         prev.map((m) => (m.id === tempId ? { ...m, _status: 'error', _error: msg } : m)),
@@ -317,10 +401,34 @@ export function ChatView({ conversationId, onBack, className = '' }: ChatViewPro
         voiceDurationSec: raw.voiceDurationSec,
       });
 
+      queryClient.setQueryData<{
+        pages: Array<PaginatedResponse<Message>>;
+        pageParams: unknown[];
+      }>(queryKeys.conversations.messages(conversationId), (old) => {
+        if (!old || !old.pages || old.pages.length === 0) return old;
+        const exists = old.pages.some((page) => page.items.some((m) => m.id === sent.id));
+        if (exists) return old;
+        const newPages = [...old.pages];
+        const firstPage = newPages[0];
+        if (firstPage) {
+          newPages[0] = {
+            ...firstPage,
+            nextCursor: firstPage.nextCursor ?? null,
+            items: [sent, ...firstPage.items],
+          };
+        }
+        return { ...old, pages: newPages };
+      });
+
       setOptimisticMessages((prev) =>
         prev.map((m) => (m.id === msg.id ? { ...sent, _status: undefined } : m)),
       );
     } catch (err: unknown) {
+      const alreadyArrived = serverMessages.some((sm) => isMatchingOptimistic(msg, sm));
+      if (alreadyArrived) {
+        setOptimisticMessages((prev) => prev.filter((m) => m.id !== msg.id));
+        return;
+      }
       const errorMsg = err instanceof Error ? err.message : 'Failed to send message';
       setOptimisticMessages((prev) =>
         prev.map((m) => (m.id === msg.id ? { ...m, _status: 'error', _error: errorMsg } : m)),
@@ -331,7 +439,7 @@ export function ChatView({ conversationId, onBack, className = '' }: ChatViewPro
   const handleDownloadAttachment = async (att: Attachment) => {
     try {
       const res = await getAttachmentUrl(att.id);
-      if (res.url) {
+      if (res?.url) {
         window.open(res.url, '_blank', 'noopener,noreferrer');
         return;
       }
@@ -345,16 +453,18 @@ export function ChatView({ conversationId, onBack, className = '' }: ChatViewPro
 
   if (isLoadingConv || isLoadingMessages) {
     return (
-      <div className="flex flex-1 items-center justify-center p-12">
+      <div className={`flex flex-col h-full items-center justify-center p-8 ${className}`}>
         <Spinner size="lg" label="Loading conversation..." />
       </div>
     );
   }
 
   return (
-    <div className={`flex flex-col h-full bg-background overflow-hidden ${className}`}>
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-card/50 backdrop-blur-xs shrink-0 z-10">
+    <div
+      className={`flex flex-col h-full bg-background border border-border rounded-xl shadow-xs overflow-hidden ${className}`}
+    >
+      {/* Header bar */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-card/50 backdrop-blur-xs gap-3">
         <div className="flex items-center gap-3 min-w-0">
           {onBack && (
             <Button
@@ -362,26 +472,35 @@ export function ChatView({ conversationId, onBack, className = '' }: ChatViewPro
               variant="ghost"
               size="sm"
               onClick={onBack}
-              aria-label="Back to conversations list"
+              aria-label="Back to conversations"
               className="h-8 w-8 p-0 md:hidden shrink-0"
             >
-              <ArrowLeft className="h-5 w-5" />
+              <ArrowLeft className="h-4 w-4" />
             </Button>
           )}
 
-          <div className="relative">
+          <div className="relative shrink-0">
             <Avatar className="h-9 w-9">
-              {otherParticipant?.avatarUrl && (
-                <AvatarImage src={otherParticipant.avatarUrl} alt={otherParticipant.displayName} />
-              )}
+              <AvatarImage
+                src={otherParticipant?.avatarUrl || ''}
+                alt={otherParticipant?.displayName || 'User'}
+              />
               <AvatarFallback>{getInitials(otherParticipant?.displayName)}</AvatarFallback>
             </Avatar>
             <span
               className={`absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full ring-2 ring-background ${
-                otherUserOnline ? 'bg-emerald-500' : 'bg-muted-foreground/40'
+                otherUserOnline === true
+                  ? 'bg-emerald-500'
+                  : otherUserOnline === false
+                    ? 'bg-muted-foreground/40'
+                    : 'bg-muted-foreground/20'
               }`}
-              title={otherUserOnline ? 'Online' : 'Offline'}
-              aria-label={otherUserOnline ? 'Online' : 'Offline'}
+              title={
+                otherUserOnline === null ? 'Status unknown' : otherUserOnline ? 'Online' : 'Offline'
+              }
+              aria-label={
+                otherUserOnline === null ? 'Status unknown' : otherUserOnline ? 'Online' : 'Offline'
+              }
             />
           </div>
 
@@ -392,8 +511,8 @@ export function ChatView({ conversationId, onBack, className = '' }: ChatViewPro
             >
               {otherParticipant?.displayName ?? 'Conversation'}
             </Link>
-            <span className="text-[11px] text-muted-foreground">
-              {otherUserOnline ? 'Online' : 'Offline'}
+            <span className="text-[11px] text-muted-foreground capitalize">
+              {otherUserOnline === null ? 'unknown' : otherUserOnline ? 'Online' : 'Offline'}
             </span>
           </div>
         </div>
@@ -413,19 +532,21 @@ export function ChatView({ conversationId, onBack, className = '' }: ChatViewPro
         {conversationData?.agreementId && !conversationData?.listing && (
           <div className="flex items-center gap-2 shrink-0">
             <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded-md">
-              Agreement active
+              Agreement #{conversationData.agreementId.slice(-6)}
             </span>
           </div>
         )}
       </div>
 
-      {/* Messages Scroll Area */}
+      {/* Messages list */}
       <div
         ref={scrollContainerRef}
         onScroll={handleScroll}
         className="flex-1 overflow-y-auto px-4 py-4 space-y-4"
         role="log"
         aria-live="polite"
+        aria-relevant="additions"
+        aria-busy={isFetchingNextPage}
         aria-label="Messages list"
       >
         {/* Infinite loader at top */}
@@ -446,6 +567,12 @@ export function ChatView({ conversationId, onBack, className = '' }: ChatViewPro
                 Load older messages
               </Button>
             )}
+          </div>
+        )}
+
+        {allMessages.length === 0 && (
+          <div className="flex flex-col items-center justify-center h-full text-center p-8 text-muted-foreground">
+            <p className="text-sm">No messages yet. Send a message to start the conversation!</p>
           </div>
         )}
 
@@ -485,17 +612,19 @@ export function ChatView({ conversationId, onBack, className = '' }: ChatViewPro
               )}
 
               <div
-                className={`flex flex-col ${isOwn ? 'items-end' : 'items-start'} group`}
-                data-message-id={msg.id}
+                className={`flex flex-col ${
+                  isOwn ? 'items-end' : 'items-start'
+                } group relative max-w-[85%] sm:max-w-[75%]`}
               >
+                {/* Bubble container */}
                 <div
-                  className={`max-w-[85%] sm:max-w-[70%] rounded-2xl px-4 py-2.5 shadow-xs text-sm ${
+                  className={`rounded-2xl px-3.5 py-2 text-sm shadow-xs ${
                     isOwn
                       ? 'bg-primary text-primary-foreground rounded-br-xs'
-                      : 'bg-muted text-foreground rounded-bl-xs'
-                  } ${msg._status === 'pending' ? 'opacity-70' : ''}`}
+                      : 'bg-secondary text-secondary-foreground rounded-bl-xs'
+                  } ${msg._status === 'error' ? 'border-2 border-destructive bg-destructive/10' : ''}`}
                 >
-                  {/* Text content with linkify */}
+                  {/* Message body text */}
                   {msg.body && (
                     <div className="whitespace-pre-wrap break-words leading-relaxed">
                       <LinkifiedText text={msg.body} />
@@ -509,8 +638,9 @@ export function ChatView({ conversationId, onBack, className = '' }: ChatViewPro
                         <ImageAttachmentThumbnail
                           key={att.id}
                           src={att.url || ''}
+                          uploadId={att.id}
                           alt={att.fileName}
-                          onClick={() => setSelectedLightboxImage(att.url || '')}
+                          onClick={(url) => setSelectedLightboxImage(url || att.url || '')}
                         />
                       ))}
                     </div>
@@ -556,6 +686,7 @@ export function ChatView({ conversationId, onBack, className = '' }: ChatViewPro
                     <div className="mt-1">
                       <AudioPlayer
                         src={msg.attachments?.[0]?.url || ''}
+                        uploadId={msg.attachments?.[0]?.id}
                         durationSec={msg.voiceDurationSec}
                       />
                     </div>
@@ -569,33 +700,35 @@ export function ChatView({ conversationId, onBack, className = '' }: ChatViewPro
                   >
                     <span>{formatMessageTime(msgDate)}</span>
                     {msg._status === 'pending' && (
-                      <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+                      <span title="Sending...">
+                        <Loader2 className="h-3 w-3 animate-spin opacity-75" />
+                      </span>
+                    )}
+                    {isOwn && isLastSeen && (
+                      <span
+                        className="flex items-center gap-0.5 text-primary-foreground font-medium ml-1"
+                        title="Seen"
+                      >
+                        <CheckCheck className="h-3.5 w-3.5 text-emerald-300" />
+                        <span className="text-[9px]">Seen</span>
+                      </span>
                     )}
                   </div>
                 </div>
 
-                {/* Error retry button */}
+                {/* Error status with retry */}
                 {msg._status === 'error' && (
-                  <div className="flex items-center gap-1.5 mt-1 text-xs text-destructive">
+                  <div className="flex items-center gap-2 mt-1 text-xs text-destructive">
                     <AlertCircle className="h-3.5 w-3.5" />
-                    <span>Failed to send</span>
+                    <span>{msg._error || 'Failed to send'}</span>
                     <button
                       type="button"
-                      onClick={() => {
-                        void handleRetryMessage(msg);
-                      }}
-                      className="underline font-semibold hover:opacity-80 flex items-center gap-1 ml-1"
+                      onClick={() => void handleRetryMessage(msg)}
+                      className="font-semibold underline hover:text-destructive/80 flex items-center gap-1"
                     >
-                      <RefreshCw className="h-3 w-3" /> Retry
+                      <RefreshCw className="h-3 w-3" />
+                      Retry
                     </button>
-                  </div>
-                )}
-
-                {/* Read receipt "Seen" */}
-                {isLastSeen && (
-                  <div className="flex items-center gap-1 mt-0.5 text-[11px] text-muted-foreground font-medium">
-                    <CheckCheck className="h-3.5 w-3.5 text-primary" />
-                    <span>Seen</span>
                   </div>
                 )}
               </div>
@@ -603,19 +736,30 @@ export function ChatView({ conversationId, onBack, className = '' }: ChatViewPro
           );
         })}
 
-        {/* Typing indicator */}
+        {/* Live typing indicator */}
         {isOtherTyping && (
-          <div className="flex items-center gap-2 text-xs text-muted-foreground animate-pulse py-1">
-            <span className="h-2 w-2 rounded-full bg-primary animate-ping" />
+          <div
+            className="flex items-center gap-2 text-xs text-muted-foreground italic px-2 py-1 animate-pulse"
+            aria-live="polite"
+          >
+            <div className="flex gap-1 items-center">
+              <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground animate-bounce [animation-delay:-0.3s]" />
+              <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground animate-bounce [animation-delay:-0.15s]" />
+              <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground animate-bounce" />
+            </div>
             <span>{otherParticipant?.displayName ?? 'User'} is typing...</span>
           </div>
         )}
       </div>
 
-      {/* Lightbox Modal */}
-      <Lightbox src={selectedLightboxImage} onClose={() => setSelectedLightboxImage(null)} />
+      {/* Lightbox for image attachments */}
+      <Lightbox
+        src={selectedLightboxImage}
+        alt="Attached image preview"
+        onClose={() => setSelectedLightboxImage(null)}
+      />
 
-      {/* Composer */}
+      {/* Composer footer */}
       <Composer
         conversationId={conversationId}
         onSendMessage={handleSendMessage}

@@ -41,29 +41,45 @@ export function Composer({
   const textareaRef = React.useRef<HTMLTextAreaElement | null>(null);
   const typingTimerRef = React.useRef<NodeJS.Timeout | null>(null);
   const isTypingRef = React.useRef(false);
+  const lastTypingEmittedRef = React.useRef(0);
+  const onTypingRef = React.useRef(onTyping);
+  onTypingRef.current = onTyping;
 
-  // Clean up preview URLs
+  // Clean up timers and emit typing:false on unmount
   React.useEffect(() => {
     return () => {
       if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+      if (isTypingRef.current) {
+        isTypingRef.current = false;
+        onTypingRef.current?.(false);
+      }
     };
   }, []);
 
   const emitTyping = React.useCallback(
     (isTyping: boolean) => {
-      if (isTypingRef.current !== isTyping) {
-        isTypingRef.current = isTyping;
-        onTyping?.(isTyping);
+      const now = Date.now();
+      if (isTyping) {
+        // Emit immediately if starting, or throttle re-emits to every 2 seconds while continuing to type
+        if (!isTypingRef.current || now - lastTypingEmittedRef.current >= 2000) {
+          isTypingRef.current = true;
+          lastTypingEmittedRef.current = now;
+          onTyping?.(true);
+        }
+      } else {
+        if (isTypingRef.current) {
+          isTypingRef.current = false;
+          lastTypingEmittedRef.current = 0;
+          onTyping?.(false);
+        }
       }
     },
     [onTyping],
   );
 
   const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const val = e.target.value;
-    if (val.length <= 5000) {
-      setText(val);
-    }
+    const val = e.target.value.slice(0, 5000);
+    setText(val);
 
     if (val.trim()) {
       emitTyping(true);
@@ -144,16 +160,43 @@ export function Composer({
 
   const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const items = e.clipboardData?.items;
-    if (!items) return;
-
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i];
-      if (item && item.type.startsWith('image/')) {
-        const file = item.getAsFile();
-        if (file) {
-          e.preventDefault();
-          void uploadSingleFile(file);
+    let handledImage = false;
+    if (items) {
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item && item.type.startsWith('image/')) {
+          const file = item.getAsFile();
+          if (file) {
+            e.preventDefault();
+            handledImage = true;
+            void uploadSingleFile(file);
+          }
         }
+      }
+    }
+    if (handledImage) return;
+
+    // Truncate pasted text if it exceeds 5000 characters limit
+    const pastedText = e.clipboardData?.getData('text');
+    if (pastedText) {
+      e.preventDefault();
+      const target = e.currentTarget;
+      const start = target.selectionStart ?? text.length;
+      const end = target.selectionEnd ?? text.length;
+
+      const spaceLeft = 5000 - (text.length - (end - start));
+      if (spaceLeft <= 0) return;
+
+      const truncated = pastedText.slice(0, spaceLeft);
+      const newText = text.slice(0, start) + truncated + text.slice(end);
+      setText(newText);
+
+      if (newText.trim()) {
+        emitTyping(true);
+        if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+        typingTimerRef.current = setTimeout(() => {
+          emitTyping(false);
+        }, 3000);
       }
     }
   };
@@ -329,6 +372,7 @@ export function Composer({
 
           {text.length > 4000 && (
             <span
+              aria-live="polite"
               className={`absolute right-2 bottom-2 text-[10px] tabular-nums font-mono ${
                 text.length >= 5000 ? 'text-destructive font-bold' : 'text-muted-foreground'
               }`}

@@ -176,4 +176,57 @@ describe('VoiceRecorder', () => {
 
     expect(screen.getByText(/microphone permission denied/i)).toBeInTheDocument();
   });
+
+  it('stops tracks immediately if component unmounts while getUserMedia is pending', async () => {
+    let resolveStream!: (stream: MediaStream) => void;
+    getUserMediaMock.mockReturnValue(
+      new Promise<MediaStream>((resolve) => {
+        resolveStream = resolve;
+      }),
+    );
+
+    const { unmount } = render(<VoiceRecorder onSendVoice={vi.fn()} />);
+
+    // Click to start recording
+    fireEvent.click(screen.getByRole('button', { name: /record voice note/i }));
+
+    // Unmount before getUserMedia resolves
+    unmount();
+
+    // Now getUserMedia promise resolves
+    await act(async () => {
+      resolveStream(mockStream);
+      await Promise.resolve();
+    });
+
+    // The stream tracks must have been stopped immediately to prevent mic leak
+    expect(mockTracks[0]?.stop).toHaveBeenCalled();
+  });
+
+  it('surfaces error with role="alert" when onSendVoice rejects', async () => {
+    const handleSend = vi.fn().mockRejectedValue(new Error('Audio upload failed'));
+    render(<VoiceRecorder onSendVoice={handleSend} />);
+
+    // Start recording
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /record voice note/i }));
+      await Promise.resolve();
+    });
+
+    // Stop to preview
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: /stop recording and preview/i }));
+    });
+
+    // Click send
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /send voice note/i }));
+      await Promise.resolve();
+    });
+
+    // An error alert must be visible
+    const alert = screen.getByRole('alert');
+    expect(alert).toBeInTheDocument();
+    expect(screen.getByText('Audio upload failed')).toBeInTheDocument();
+  });
 });

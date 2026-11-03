@@ -37,6 +37,8 @@ export function Header() {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = React.useState('');
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
+  // Unread messages total: /dashboard/summary is not yet available on main,
+  // so this falls back to summing unread counts of active conversations up to limit 50.
   const totalUnreadMessages = useTotalUnreadMessages({ enabled: isAuthenticated });
 
   const handleSearch = (e: React.FormEvent) => {

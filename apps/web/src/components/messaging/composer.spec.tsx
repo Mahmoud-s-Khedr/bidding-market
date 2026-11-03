@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, createEvent, fireEvent, render, screen } from '@testing-library/react';
 import { Composer } from './composer';
 import * as uploadModule from '@/lib/upload';
 import { makeAttachment } from '../../../test/fixtures';
@@ -47,6 +47,76 @@ describe('Composer', () => {
 
     fireEvent.blur(textarea);
     expect(handleTyping).toHaveBeenCalledWith(false);
+  });
+
+  it('re-emits typing:true on throttle while user continues typing', () => {
+    vi.useFakeTimers();
+    const handleTyping = vi.fn();
+    render(<Composer conversationId="conv-1" onSendMessage={vi.fn()} onTyping={handleTyping} />);
+
+    const textarea = screen.getByPlaceholderText(/type a message/i);
+
+    fireEvent.change(textarea, { target: { value: 'A' } });
+    expect(handleTyping).toHaveBeenCalledTimes(1);
+    expect(handleTyping).toHaveBeenLastCalledWith(true);
+
+    // Typing again immediately within throttle window does not re-emit
+    fireEvent.change(textarea, { target: { value: 'AB' } });
+    expect(handleTyping).toHaveBeenCalledTimes(1);
+
+    // Advance past throttle duration (2000ms)
+    act(() => {
+      vi.advanceTimersByTime(2100);
+    });
+
+    // Continuing to type re-emits true
+    fireEvent.change(textarea, { target: { value: 'ABC' } });
+    expect(handleTyping).toHaveBeenCalledTimes(2);
+    expect(handleTyping).toHaveBeenLastCalledWith(true);
+
+    vi.useRealTimers();
+  });
+
+  it('emits typing:false when unmounted while typing', () => {
+    const handleTyping = vi.fn();
+    const { unmount } = render(
+      <Composer conversationId="conv-1" onSendMessage={vi.fn()} onTyping={handleTyping} />,
+    );
+
+    const textarea = screen.getByPlaceholderText(/type a message/i);
+    fireEvent.change(textarea, { target: { value: 'Still typing...' } });
+    expect(handleTyping).toHaveBeenCalledWith(true);
+
+    unmount();
+    expect(handleTyping).toHaveBeenCalledWith(false);
+  });
+
+  it('truncates pasted text to 5000 characters limit', () => {
+    render(<Composer conversationId="conv-1" onSendMessage={vi.fn()} />);
+    const textarea = screen.getByPlaceholderText<HTMLTextAreaElement>(/type a message/i);
+
+    const longText = 'A'.repeat(6000);
+    const event = createEvent.paste(textarea, {
+      clipboardData: {
+        items: [],
+        getData: (type: string) => (type === 'text' ? longText : ''),
+      },
+    });
+
+    fireEvent(textarea, event);
+    expect(textarea.value).toHaveLength(5000);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it('renders character counter with aria-live="polite" when text exceeds 4000 characters', () => {
+    render(<Composer conversationId="conv-1" onSendMessage={vi.fn()} />);
+    const textarea = screen.getByPlaceholderText(/type a message/i);
+
+    fireEvent.change(textarea, { target: { value: 'x'.repeat(4500) } });
+
+    const counter = screen.getByText('500');
+    expect(counter).toBeInTheDocument();
+    expect(counter).toHaveAttribute('aria-live', 'polite');
   });
 
   it('handles attachment upload and includes attachments in payload', async () => {

@@ -60,7 +60,6 @@ class MockSocket {
 
   connect() {
     this.connected = true;
-    this.trigger('connect');
     return this;
   }
 
@@ -90,6 +89,7 @@ describe('RealtimeProvider', () => {
 
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.clearAllMocks();
     queryClient = new QueryClient();
 
     mockSocket = new MockSocket({ token: 'test-token' });
@@ -127,7 +127,7 @@ describe('RealtimeProvider', () => {
     );
 
     act(() => {
-      mockSocket.connect();
+      mockSocket.trigger('connect');
     });
 
     expect(screen.getByText('Connected')).toBeInTheDocument();
@@ -193,9 +193,48 @@ describe('RealtimeProvider', () => {
       await Promise.resolve();
     });
 
-    expect(apiClient.executeRefresh).toHaveBeenCalled();
+    expect(apiClient.executeRefresh).toHaveBeenCalledTimes(1);
     expect(mockSocket.auth.token).toBe('refreshed-token');
     expect(connectSpy).toHaveBeenCalled();
+  });
+
+  it('does not loop on consecutive auth connect_errors without connecting in between', async () => {
+    vi.mocked(apiClient.executeRefresh).mockResolvedValue({
+      accessToken: 'second-token',
+      user: makeUser({
+        id: 'user-me',
+      }),
+    });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <RealtimeProvider>
+          <Consumer />
+        </RealtimeProvider>
+      </QueryClientProvider>,
+    );
+
+    const disconnectSpy = vi.spyOn(mockSocket, 'disconnect');
+
+    expect(apiClient.executeRefresh).toHaveBeenCalledTimes(0);
+
+    await act(async () => {
+      // First connect error triggers refresh
+      mockSocket.trigger('connect_error', new Error('Unauthorized'));
+      await Promise.resolve();
+    });
+
+    expect(apiClient.executeRefresh).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      // Second consecutive connect error without a successful connect event
+      mockSocket.trigger('connect_error', new Error('Unauthorized'));
+      await Promise.resolve();
+    });
+
+    // executeRefresh must NOT be called a second time (loop prevented)
+    expect(apiClient.executeRefresh).toHaveBeenCalledTimes(1);
+    expect(disconnectSpy).toHaveBeenCalled();
   });
 
   it('updates messages cache and reorders conversation list on message:new', () => {
@@ -251,10 +290,111 @@ describe('RealtimeProvider', () => {
     expect(updatedConversations?.pages[0]?.items[0]?.unreadCount).toBe(1);
   });
 
-  it('bumps unread count and prepends to notifications on notification:new', () => {
-    queryClient.setQueryData(queryKeys.notifications.unreadCount(), { count: 2 });
+  it('does not increment unreadCount when message arrives for open/active conversation', async () => {
+    const initialConv = makeConversation({
+      id: 'c-active',
+      unreadCount: 0,
+    });
+
+    queryClient.setQueryData(queryKeys.conversations.infinite(), {
+      pages: [{ items: [initialConv], nextCursor: null }],
+      pageParams: [undefined],
+    });
+
+    let realtimeCtx!: ReturnType<typeof useRealtime>;
+    function Helper() {
+      realtimeCtx = useRealtime();
+      return null;
+    }
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <RealtimeProvider>
+          <Helper />
+        </RealtimeProvider>
+      </QueryClientProvider>,
+    );
+
+    // Join conversation (marks it active)
+    await act(async () => {
+      await realtimeCtx.joinConversation('c-active');
+    });
+
+    const msg = makeMessage({
+      id: 'm-new',
+      conversationId: 'c-active',
+      sender: makePublicUser({ id: 'other-user' }),
+      body: 'Active chat message',
+    });
+
+    act(() => {
+      mockSocket.trigger('message:new', msg);
+    });
+
+    const updatedConversations = queryClient.getQueryData<{
+      pages: { items: (typeof initialConv)[] }[];
+    }>(queryKeys.conversations.infinite());
+
+    // unreadCount must stay 0 for the open conversation
+    expect(updatedConversations?.pages[0]?.items[0]?.unreadCount).toBe(0);
+  });
+
+  it('resets unreadCount to 0 and invalidates unreadTotal on message:read for me', () => {
+    const convWithUnread = makeConversation({
+      id: 'c-read',
+      unreadCount: 3,
+    });
+
+    queryClient.setQueryData(queryKeys.conversations.infinite(), {
+      pages: [{ items: [convWithUnread], nextCursor: null }],
+      pageParams: [undefined],
+    });
+
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <RealtimeProvider>
+          <Consumer />
+        </RealtimeProvider>
+      </QueryClientProvider>,
+    );
+
+    act(() => {
+      mockSocket.trigger('message:read', {
+        conversationId: 'c-read',
+        userId: 'user-me',
+        lastMessageId: 'msg-99',
+      });
+    });
+
+    const updated = queryClient.getQueryData<{
+      pages: { items: (typeof convWithUnread)[] }[];
+    }>(queryKeys.conversations.infinite());
+
+    expect(updated?.pages[0]?.items[0]?.unreadCount).toBe(0);
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: queryKeys.conversations.unreadTotal(),
+    });
+  });
+
+  it('coalesces notifications with the same id without bumping count if already unread', () => {
+    queryClient.setQueryData(queryKeys.notifications.unreadCount(), { count: 1 });
+    const existingNotif = makeNotification({
+      id: 'notif-coalesced',
+      title: 'New Message',
+      body: 'Message 1',
+      readAt: null,
+    });
+    const olderNotif = makeNotification({
+      id: 'notif-older',
+      title: 'Older',
+      body: 'Old',
+      readAt: null,
+    });
+
     queryClient.setQueryData(queryKeys.notifications.all, {
-      pages: [{ items: [], nextCursor: null }],
+      pages: [{ items: [olderNotif, existingNotif], nextCursor: null }],
       pageParams: [undefined],
     });
 
@@ -266,21 +406,58 @@ describe('RealtimeProvider', () => {
       </QueryClientProvider>,
     );
 
-    const notif = makeNotification({ id: 'notif-99', title: 'New Bid' });
-
-    act(() => {
-      mockSocket.trigger('notification:new', notif);
+    const updatedNotif = makeNotification({
+      id: 'notif-coalesced',
+      title: 'New Message',
+      body: 'Message 2 (updated)',
+      readAt: null,
     });
 
+    act(() => {
+      mockSocket.trigger('notification:new', updatedNotif);
+    });
+
+    // Unread count must NOT be bumped because it was already unread
     const unread = queryClient.getQueryData<{ count: number }>(
       queryKeys.notifications.unreadCount(),
     );
-    expect(unread?.count).toBe(3);
+    expect(unread?.count).toBe(1);
 
-    const list = queryClient.getQueryData<{ pages: { items: (typeof notif)[] }[] }>(
+    // List must replace the item and move it to top of page 0
+    const list = queryClient.getQueryData<{ pages: { items: (typeof updatedNotif)[] }[] }>(
       queryKeys.notifications.all,
     );
-    expect(list?.pages[0]?.items[0]?.id).toBe('notif-99');
+    expect(list?.pages[0]?.items[0]?.id).toBe('notif-coalesced');
+    expect(list?.pages[0]?.items[0]?.body).toBe('Message 2 (updated)');
+    expect(list?.pages[0]?.items).toHaveLength(2);
+  });
+
+  it('updates plain list query cache (bell dropdown shape { items, nextCursor }) on notification:new', () => {
+    // Plain query as used by useNotifications in bell
+    queryClient.setQueryData(queryKeys.notifications.list(), {
+      items: [makeNotification({ id: 'existing-1' })],
+      nextCursor: null,
+    });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <RealtimeProvider>
+          <Consumer />
+        </RealtimeProvider>
+      </QueryClientProvider>,
+    );
+
+    const newNotif = makeNotification({ id: 'notif-bell-live', title: 'Live Update' });
+
+    act(() => {
+      mockSocket.trigger('notification:new', newNotif);
+    });
+
+    const bellCache = queryClient.getQueryData<{ items: (typeof newNotif)[] }>(
+      queryKeys.notifications.list(),
+    );
+    expect(bellCache?.items[0]?.id).toBe('notif-bell-live');
+    expect(bellCache?.items).toHaveLength(2);
   });
 
   it('exposes joinConversation, leaveConversation, sendTyping, and sendRead', async () => {
