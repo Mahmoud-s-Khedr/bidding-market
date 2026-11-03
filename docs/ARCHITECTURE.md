@@ -20,7 +20,7 @@ packages/
 - Auth: JWT access token (Bearer, 15m) + rotating refresh token (httpOnly, Secure in prod,
   SameSite=Lax cookie `refresh_token`, HMAC-SHA-256 indexed in DB using `JWT_REFRESH_SECRET`). argon2 password hashing.
 - Validation: zod schemas from `@market/shared` via a `ZodValidationPipe`.
-- `JwtAuthGuard` is global and endpoints explicitly opt out with `@Public()`. The one-active-bid-per-user/listing rule and conversation participant/listing dedup are enforced transactionally in their services because they cannot be represented as portable plain unique constraints. Agreements retain historical rows, so a listing may be re-listed after cancellation rather than being permanently limited to one agreement.
+- `JwtAuthGuard` is global and endpoints explicitly opt out with `@Public()`. The one-active-bid-per-user/listing rule is enforced at the database level via a PostgreSQL partial unique index (`WHERE "status" IN ('PENDING', 'SHORTLISTED', 'COUNTERED')`), while conversation participant/listing dedup is enforced transactionally in its service. Agreements retain historical rows, so a listing may be re-listed after cancellation rather than being permanently limited to one agreement.
 - Refresh tokens are opaque high-entropy values stored as HMAC-SHA256 lookups, allowing constant-time database lookup and family reuse detection.
 - Config: env validated by zod at boot.
 - Module layout: `src/modules/<feature>/{<feature>.module.ts, .controller.ts, .service.ts, *.spec.ts}`.

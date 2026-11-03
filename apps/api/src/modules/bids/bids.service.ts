@@ -3,7 +3,9 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import type {
@@ -18,13 +20,14 @@ import type {
   BidUpdateInput,
   BidWithListing,
   MyBidsQueryInput,
-  PublicUser,
 } from '@market/shared';
 import { Prisma } from '../../generated/prisma/client.js';
 import type { AuthUser } from '../../common/auth.js';
 import { paginate, type PaginatedResult } from '../../common/pagination.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { StorageService } from '../../storage/storage.service.js';
+import { UserPresenter, publicUserSelect } from '../users/user.presenter.js';
+import { ListingPresenter } from '../listings/listing.presenter.js';
 import { decodeBidCursor, encodeBidCursor } from './bid.cursor.js';
 import {
   BID_EVENTS,
@@ -37,19 +40,7 @@ import {
 } from './bid.events.js';
 import { assertBidTransition } from './bid.state-machine.js';
 
-export const publicUserSelect = {
-  id: true,
-  displayName: true,
-  avatarKey: true,
-  bio: true,
-  location: true,
-  isBusiness: true,
-  companyName: true,
-  ratingAvg: true,
-  ratingCount: true,
-  completedCount: true,
-  createdAt: true,
-} as const;
+export { publicUserSelect };
 
 interface RawBidRow {
   id: string;
@@ -80,11 +71,28 @@ interface RawBidRow {
 
 @Injectable()
 export class BidsService {
+  private readonly logger = new Logger(BidsService.name);
+  private readonly userPresenter: UserPresenter;
+  private readonly listingPresenter: ListingPresenter;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
     private readonly eventEmitter: EventEmitter2,
-  ) {}
+    @Optional() userPresenter?: UserPresenter,
+    @Optional() listingPresenter?: ListingPresenter,
+  ) {
+    this.userPresenter = userPresenter ?? new UserPresenter(storage);
+    this.listingPresenter = listingPresenter ?? new ListingPresenter(storage, this.userPresenter);
+  }
+
+  private safeEmit(event: string, payload: unknown): void {
+    try {
+      this.eventEmitter.emit(event, payload);
+    } catch (err) {
+      this.logger.error(`Error emitting event ${event}: ${String(err)}`);
+    }
+  }
 
   async create(listingId: string, input: BidCreateInput, user: AuthUser): Promise<BidDetail> {
     const listing = await this.prisma.listing.findUnique({
@@ -146,6 +154,14 @@ export class BidsService {
 
     try {
       const bid = await this.prisma.$transaction(async (tx) => {
+        // Non-blocking (a): Lock/check listing row inside the transaction so close vs create cannot race
+        const openListing = await tx.$queryRaw<Array<{ id: string }>>`
+          SELECT id FROM "Listing" WHERE id = ${listingId} AND status = 'OPEN' FOR UPDATE
+        `;
+        if (openListing.length === 0) {
+          throw new ConflictException('Listing is not open for bidding');
+        }
+
         const createdBid = await tx.bid.create({
           data: {
             listingId,
@@ -184,14 +200,14 @@ export class BidsService {
             attachments: { include: { upload: true } },
             revisions: {
               include: { author: { select: publicUserSelect } },
-              orderBy: { createdAt: 'asc' },
+              orderBy: [{ createdAt: 'asc' }, { seq: 'asc' }],
             },
           },
         });
       });
 
       const detail = await this.mapBidDetail(bid);
-      this.eventEmitter.emit(BID_EVENTS.CREATED, new BidCreatedEvent(detail, user.id));
+      this.safeEmit(BID_EVENTS.CREATED, new BidCreatedEvent(detail, user.id));
       return detail;
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
@@ -221,8 +237,9 @@ export class BidsService {
       const myBidsCount = await this.prisma.bid.count({
         where: { listingId, bidderId: user.id },
       });
+      // Non-blocking (d): Return 404 to a user with no bid for consistency
       if (myBidsCount === 0) {
-        throw new ForbiddenException('You do not have access to bids on this listing');
+        throw new NotFoundException('Listing not found');
       }
     }
 
@@ -233,12 +250,8 @@ export class BidsService {
       conditions.push(Prisma.sql`b."bidderId" = ${user.id}`);
     }
 
-    if (query.status) {
-      conditions.push(Prisma.sql`b.status = ${query.status}::"BidStatus"`);
-    }
-
     if (query.cursor) {
-      const decoded = decodeBidCursor(query.cursor);
+      const decoded = decodeBidCursor(query.cursor, sort);
       const { sortValue, id } = decoded;
 
       if (sort === 'newest') {
@@ -299,8 +312,9 @@ export class BidsService {
 
     const limit = query.limit ?? 20;
     const take = limit + 1;
+    const whereClause = Prisma.sql`WHERE ${Prisma.join(conditions, ' AND ')}`;
 
-    const rows = await this.prisma.$queryRaw<RawBidRow[]>(Prisma.sql`
+    const rows = await this.prisma.$queryRaw<RawBidRow[]>`
       SELECT
         b.id,
         b."listingId",
@@ -327,15 +341,15 @@ export class BidsService {
         u."createdAt" AS "bidder_createdAt"
       FROM "Bid" b
       JOIN "User" u ON u.id = b."bidderId"
-      WHERE ${Prisma.join(conditions, ' AND ')}
+      ${whereClause}
       ${orderByClause}
       LIMIT ${take}
-    `);
+    `;
 
     const hasNextPage = rows.length > limit;
     const pageRows = hasNextPage ? rows.slice(0, limit) : rows;
-    const bidIds = pageRows.map((r) => r.id);
 
+    const bidIds = pageRows.map((r) => r.id);
     const attachments =
       bidIds.length > 0
         ? await this.prisma.bidAttachment.findMany({
@@ -357,22 +371,24 @@ export class BidsService {
     const items: BidDetail[] = await Promise.all(
       pageRows.map(async (row) => {
         const atts = await this.mapAttachments(attachmentsByBidId.get(row.id) ?? []);
+        const bidder = await this.userPresenter.toPublicUser({
+          id: row.bidder_id,
+          displayName: row.bidder_displayName,
+          avatarKey: row.bidder_avatarKey,
+          bio: row.bidder_bio,
+          location: row.bidder_location,
+          isBusiness: row.bidder_isBusiness,
+          companyName: row.bidder_companyName,
+          ratingAvg: row.bidder_ratingAvg,
+          ratingCount: row.bidder_ratingCount,
+          completedCount: row.bidder_completedCount,
+          createdAt: row.bidder_createdAt,
+        });
+
         return {
           id: row.id,
           listingId: row.listingId,
-          bidder: {
-            id: row.bidder_id,
-            displayName: row.bidder_displayName,
-            avatarUrl: row.bidder_avatarKey,
-            bio: row.bidder_bio,
-            location: row.bidder_location,
-            isBusiness: row.bidder_isBusiness,
-            companyName: row.bidder_companyName,
-            ratingAvg: row.bidder_ratingAvg,
-            ratingCount: row.bidder_ratingCount,
-            completedCount: row.bidder_completedCount,
-            createdAt: row.bidder_createdAt,
-          },
+          bidder,
           amountCents: row.amountCents,
           currency: row.currency,
           deliveryDays: row.deliveryDays,
@@ -402,7 +418,7 @@ export class BidsService {
         } else {
           sortValue = lastRow.createdAt.toISOString();
         }
-        nextCursor = encodeBidCursor(sortValue, lastRow.id);
+        nextCursor = encodeBidCursor(sort, sortValue, lastRow.id);
       }
     }
 
@@ -415,89 +431,108 @@ export class BidsService {
   ): Promise<PaginatedResult<BidWithListing>> {
     const limit = query.limit ?? 20;
 
-    const bids = await this.prisma.bid.findMany({
-      where: {
-        bidderId: user.id,
-        ...(query.status ? { status: query.status } : {}),
-      },
-      take: limit + 1,
-      cursor: query.cursor ? { id: query.cursor } : undefined,
-      skip: query.cursor ? 1 : 0,
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      include: {
-        bidder: { select: publicUserSelect },
-        attachments: { include: { upload: true } },
-        listing: {
-          include: {
-            owner: { select: publicUserSelect },
-            category: true,
-            _count: {
-              select: {
-                bids: {
-                  where: {
-                    status: { in: ['PENDING', 'SHORTLISTED', 'COUNTERED', 'ACCEPTED'] },
+    // Non-blocking (f): Reject NUL-byte or malformed cursor with 400
+    if (query.cursor) {
+      if (
+        query.cursor.includes('\0') ||
+        !/^[a-zA-Z0-9_-]+$/.test(query.cursor) ||
+        query.cursor.trim().length === 0
+      ) {
+        throw new BadRequestException('Invalid pagination cursor');
+      }
+    }
+
+    try {
+      const bids = await this.prisma.bid.findMany({
+        where: {
+          bidderId: user.id,
+          ...(query.status ? { status: query.status } : {}),
+        },
+        take: limit + 1,
+        cursor: query.cursor ? { id: query.cursor } : undefined,
+        skip: query.cursor ? 1 : 0,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        include: {
+          bidder: { select: publicUserSelect },
+          attachments: { include: { upload: true } },
+          listing: {
+            include: {
+              owner: { select: publicUserSelect },
+              category: true,
+              images: {
+                orderBy: { position: 'asc' },
+                take: 1,
+                include: { upload: true },
+              },
+              _count: {
+                select: {
+                  bids: {
+                    where: {
+                      status: { in: ['PENDING', 'SHORTLISTED', 'COUNTERED', 'ACCEPTED'] },
+                    },
                   },
                 },
               },
             },
           },
         },
-      },
-    });
+      });
 
-    const paginated = paginate(bids, limit);
+      const paginated = paginate(bids, limit);
 
-    const items: BidWithListing[] = await Promise.all(
-      paginated.items.map(async (bid) => {
-        const attachments = await this.mapAttachments(bid.attachments);
-        return {
-          id: bid.id,
-          listingId: bid.listingId,
-          bidder: this.mapPublicUser(bid.bidder),
-          amountCents: bid.amountCents,
-          currency: bid.currency,
-          deliveryDays: bid.deliveryDays,
-          message: bid.message,
-          status: bid.status,
-          rejectReason: bid.rejectReason,
-          lastCounterById: bid.lastCounterById,
-          attachments,
-          createdAt: bid.createdAt,
-          updatedAt: bid.updatedAt,
-          listing: {
+      const items: BidWithListing[] = await Promise.all(
+        paginated.items.map(async (bid) => {
+          const attachments = await this.mapAttachments(bid.attachments);
+          const bidder = await this.userPresenter.toPublicUser(bid.bidder);
+          const listing = await this.listingPresenter.toSummary({
             id: bid.listing.id,
-            owner: this.mapPublicUser(bid.listing.owner),
+            owner: bid.listing.owner,
             categoryId: bid.listing.categoryId,
-            category: {
-              id: bid.listing.category.id,
-              name: bid.listing.category.name,
-              slug: bid.listing.category.slug,
-              parentId: bid.listing.category.parentId,
-            },
+            category: bid.listing.category,
+            categoryName: bid.listing.category.name,
+            images: bid.listing.images,
             kind: bid.listing.kind,
             status: bid.listing.status,
             title: bid.listing.title,
-            description: bid.listing.description,
             priceType: bid.listing.priceType,
             priceMinCents: bid.listing.priceMinCents,
             priceMaxCents: bid.listing.priceMaxCents,
             currency: bid.listing.currency,
-            deliveryDays: bid.listing.deliveryDays,
             location: bid.listing.location,
-            tags: bid.listing.tags,
             expiresAt: bid.listing.expiresAt,
             bidCount: bid.listing._count.bids,
             createdAt: bid.listing.createdAt,
-            updatedAt: bid.listing.updatedAt,
-          },
-        };
-      }),
-    );
+          });
 
-    return {
-      items,
-      nextCursor: paginated.nextCursor,
-    };
+          return {
+            id: bid.id,
+            listingId: bid.listingId,
+            bidder,
+            amountCents: bid.amountCents,
+            currency: bid.currency,
+            deliveryDays: bid.deliveryDays,
+            message: bid.message,
+            status: bid.status,
+            rejectReason: bid.rejectReason,
+            lastCounterById: bid.lastCounterById,
+            attachments,
+            createdAt: bid.createdAt,
+            updatedAt: bid.updatedAt,
+            listing,
+          };
+        }),
+      );
+
+      return {
+        items,
+        nextCursor: paginated.nextCursor,
+      };
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
+        throw new BadRequestException('Invalid pagination cursor');
+      }
+      throw error;
+    }
   }
 
   async findById(id: string, user: AuthUser): Promise<BidDetail> {
@@ -523,7 +558,7 @@ export class BidsService {
         attachments: { include: { upload: true } },
         revisions: {
           include: { author: { select: publicUserSelect } },
-          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+          orderBy: [{ createdAt: 'asc' }, { seq: 'asc' }],
         },
       },
     });
@@ -544,29 +579,25 @@ export class BidsService {
   }
 
   async update(id: string, input: BidUpdateInput, user: AuthUser): Promise<BidDetail> {
-    const bid = await this.prisma.bid.findUnique({
+    const preBid = await this.prisma.bid.findUnique({
       where: { id },
       include: {
         listing: true,
       },
     });
 
-    if (!bid) {
+    if (!preBid) {
       throw new NotFoundException('Bid not found');
     }
 
-    if (bid.bidderId !== user.id) {
+    if (preBid.bidderId !== user.id) {
       throw new ForbiddenException('Only the bidder can edit this bid');
     }
 
-    const nextStatus = assertBidTransition(bid.status, 'EDIT', 'bidder');
+    assertBidTransition(preBid.status, 'EDIT', 'bidder');
 
-    if (bid.listing.status !== 'OPEN') {
+    if (preBid.listing.status !== 'OPEN') {
       throw new ConflictException('Listing is no longer open');
-    }
-
-    if (bid.listing.expiresAt && bid.listing.expiresAt < new Date()) {
-      throw new ConflictException('Listing has expired');
     }
 
     if (input.attachmentIds && input.attachmentIds.length > 0) {
@@ -587,14 +618,38 @@ export class BidsService {
     }
 
     const updated = await this.prisma.$transaction(async (tx) => {
-      const newAmount = input.amountCents ?? bid.amountCents;
-      const newDelivery = input.deliveryDays ?? bid.deliveryDays;
-      const newMessage = input.message ?? bid.message;
-      const newCurrency = input.currency ?? bid.currency;
+      // Row lock on bid
+      const lockedBids = await tx.$queryRaw<Array<Prisma.BidGetPayload<Record<string, never>>>>`
+        SELECT * FROM "Bid" WHERE id = ${id} FOR UPDATE
+      `;
+      const currentBid = lockedBids[0];
+      if (!currentBid) {
+        throw new NotFoundException('Bid not found');
+      }
+
+      // Re-verify transition under lock
+      assertBidTransition(currentBid.status, 'EDIT', 'bidder');
+
+      // Re-verify listing status inside tx
+      const listing = await tx.listing.findUnique({
+        where: { id: currentBid.listingId },
+        select: { status: true, expiresAt: true },
+      });
+      if (!listing || listing.status !== 'OPEN') {
+        throw new ConflictException('Listing is no longer open');
+      }
+      if (listing.expiresAt && listing.expiresAt < new Date()) {
+        throw new ConflictException('Listing has expired');
+      }
+
+      const newAmount = input.amountCents ?? currentBid.amountCents;
+      const newDelivery = input.deliveryDays ?? currentBid.deliveryDays;
+      const newMessage = input.message ?? currentBid.message;
+      const newCurrency = input.currency ?? currentBid.currency;
 
       await tx.bidRevision.create({
         data: {
-          bidId: bid.id,
+          bidId: currentBid.id,
           authorId: user.id,
           amountCents: newAmount,
           deliveryDays: newDelivery,
@@ -603,11 +658,11 @@ export class BidsService {
       });
 
       if (input.attachmentIds !== undefined) {
-        await tx.bidAttachment.deleteMany({ where: { bidId: bid.id } });
+        await tx.bidAttachment.deleteMany({ where: { bidId: currentBid.id } });
         if (input.attachmentIds.length > 0) {
           await tx.bidAttachment.createMany({
             data: input.attachmentIds.map((uploadId: string) => ({
-              bidId: bid.id,
+              bidId: currentBid.id,
               uploadId,
             })),
           });
@@ -615,167 +670,230 @@ export class BidsService {
       }
 
       await tx.bid.update({
-        where: { id: bid.id },
+        where: { id: currentBid.id },
         data: {
           amountCents: newAmount,
           currency: newCurrency,
           deliveryDays: newDelivery,
           message: newMessage,
-          status: nextStatus,
+          status: 'PENDING',
         },
       });
 
       return tx.bid.findUniqueOrThrow({
-        where: { id: bid.id },
+        where: { id: currentBid.id },
         include: {
           bidder: { select: publicUserSelect },
           attachments: { include: { upload: true } },
           revisions: {
             include: { author: { select: publicUserSelect } },
-            orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+            orderBy: [{ createdAt: 'asc' }, { seq: 'asc' }],
           },
         },
       });
     });
 
     const detail = await this.mapBidDetail(updated);
-    this.eventEmitter.emit(BID_EVENTS.UPDATED, new BidUpdatedEvent(detail, user.id));
+    this.safeEmit(BID_EVENTS.UPDATED, new BidUpdatedEvent(detail, user.id));
     return detail;
   }
 
   async withdraw(id: string, user: AuthUser): Promise<BidDetail> {
-    const bid = await this.prisma.bid.findUnique({
+    const preBid = await this.prisma.bid.findUnique({
       where: { id },
     });
 
-    if (!bid) {
+    if (!preBid) {
       throw new NotFoundException('Bid not found');
     }
 
-    if (bid.bidderId !== user.id) {
+    if (preBid.bidderId !== user.id) {
       throw new ForbiddenException('Only the bidder can withdraw this bid');
     }
 
-    const nextStatus = assertBidTransition(bid.status, 'WITHDRAW', 'bidder');
+    assertBidTransition(preBid.status, 'WITHDRAW', 'bidder');
 
-    const updated = await this.prisma.bid.update({
-      where: { id },
-      data: { status: nextStatus },
-      include: {
-        bidder: { select: publicUserSelect },
-        attachments: { include: { upload: true } },
-        revisions: {
-          include: { author: { select: publicUserSelect } },
-          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const lockedBids = await tx.$queryRaw<Array<Prisma.BidGetPayload<Record<string, never>>>>`
+        SELECT * FROM "Bid" WHERE id = ${id} FOR UPDATE
+      `;
+      const currentBid = lockedBids[0];
+      if (!currentBid) {
+        throw new NotFoundException('Bid not found');
+      }
+
+      const nextStatus = assertBidTransition(currentBid.status, 'WITHDRAW', 'bidder');
+
+      await tx.bid.update({
+        where: { id },
+        data: { status: nextStatus },
+      });
+
+      return tx.bid.findUniqueOrThrow({
+        where: { id },
+        include: {
+          bidder: { select: publicUserSelect },
+          attachments: { include: { upload: true } },
+          revisions: {
+            include: { author: { select: publicUserSelect } },
+            orderBy: [{ createdAt: 'asc' }, { seq: 'asc' }],
+          },
         },
-      },
+      });
     });
 
     const detail = await this.mapBidDetail(updated);
-    this.eventEmitter.emit(BID_EVENTS.WITHDRAWN, new BidWithdrawnEvent(detail, user.id));
+    this.safeEmit(BID_EVENTS.WITHDRAWN, new BidWithdrawnEvent(detail, user.id));
     return detail;
   }
 
   async shortlist(id: string, user: AuthUser): Promise<BidDetail> {
-    const bid = await this.prisma.bid.findUnique({
+    const preBid = await this.prisma.bid.findUnique({
       where: { id },
       include: { listing: true },
     });
 
-    if (!bid) {
+    if (!preBid) {
       throw new NotFoundException('Bid not found');
     }
 
-    if (bid.listing.ownerId !== user.id) {
+    if (preBid.listing.ownerId !== user.id) {
       throw new ForbiddenException('Only the listing owner can shortlist a bid');
     }
 
-    if (bid.listing.status !== 'OPEN') {
-      throw new ConflictException('Listing is no longer open');
-    }
+    assertBidTransition(preBid.status, 'SHORTLIST', 'owner');
 
-    const nextStatus = assertBidTransition(bid.status, 'SHORTLIST', 'owner');
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const lockedBids = await tx.$queryRaw<Array<Prisma.BidGetPayload<Record<string, never>>>>`
+        SELECT * FROM "Bid" WHERE id = ${id} FOR UPDATE
+      `;
+      const currentBid = lockedBids[0];
+      if (!currentBid) {
+        throw new NotFoundException('Bid not found');
+      }
 
-    const updated = await this.prisma.bid.update({
-      where: { id },
-      data: { status: nextStatus },
-      include: {
-        bidder: { select: publicUserSelect },
-        attachments: { include: { upload: true } },
-        revisions: {
-          include: { author: { select: publicUserSelect } },
-          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      const listing = await tx.listing.findUnique({
+        where: { id: currentBid.listingId },
+        select: { status: true },
+      });
+      if (!listing || listing.status !== 'OPEN') {
+        throw new ConflictException('Listing is no longer open');
+      }
+
+      const nextStatus = assertBidTransition(currentBid.status, 'SHORTLIST', 'owner');
+
+      await tx.bid.update({
+        where: { id },
+        data: { status: nextStatus },
+      });
+
+      return tx.bid.findUniqueOrThrow({
+        where: { id },
+        include: {
+          bidder: { select: publicUserSelect },
+          attachments: { include: { upload: true } },
+          revisions: {
+            include: { author: { select: publicUserSelect } },
+            orderBy: [{ createdAt: 'asc' }, { seq: 'asc' }],
+          },
         },
-      },
+      });
     });
 
     return this.mapBidDetail(updated);
   }
 
   async reject(id: string, input: { reason?: string }, user: AuthUser): Promise<BidDetail> {
-    const bid = await this.prisma.bid.findUnique({
+    const preBid = await this.prisma.bid.findUnique({
       where: { id },
       include: { listing: true },
     });
 
-    if (!bid) {
+    if (!preBid) {
       throw new NotFoundException('Bid not found');
     }
 
-    if (bid.listing.ownerId !== user.id) {
+    if (preBid.listing.ownerId !== user.id) {
       throw new ForbiddenException('Only the listing owner can reject a bid');
     }
 
-    const nextStatus = assertBidTransition(bid.status, 'REJECT', 'owner');
+    assertBidTransition(preBid.status, 'REJECT', 'owner');
 
-    const updated = await this.prisma.bid.update({
-      where: { id },
-      data: {
-        status: nextStatus,
-        rejectReason: input.reason ?? null,
-      },
-      include: {
-        bidder: { select: publicUserSelect },
-        attachments: { include: { upload: true } },
-        revisions: {
-          include: { author: { select: publicUserSelect } },
-          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const lockedBids = await tx.$queryRaw<Array<Prisma.BidGetPayload<Record<string, never>>>>`
+        SELECT * FROM "Bid" WHERE id = ${id} FOR UPDATE
+      `;
+      const currentBid = lockedBids[0];
+      if (!currentBid) {
+        throw new NotFoundException('Bid not found');
+      }
+
+      const nextStatus = assertBidTransition(currentBid.status, 'REJECT', 'owner');
+
+      await tx.bid.update({
+        where: { id },
+        data: {
+          status: nextStatus,
+          rejectReason: input.reason ?? null,
         },
-      },
+      });
+
+      return tx.bid.findUniqueOrThrow({
+        where: { id },
+        include: {
+          bidder: { select: publicUserSelect },
+          attachments: { include: { upload: true } },
+          revisions: {
+            include: { author: { select: publicUserSelect } },
+            orderBy: [{ createdAt: 'asc' }, { seq: 'asc' }],
+          },
+        },
+      });
     });
 
     const detail = await this.mapBidDetail(updated);
-    this.eventEmitter.emit(
-      BID_EVENTS.REJECTED,
-      new BidRejectedEvent(detail, user.id, input.reason ?? null),
-    );
+    this.safeEmit(BID_EVENTS.REJECTED, new BidRejectedEvent(detail, user.id, input.reason ?? null));
     return detail;
   }
 
   async counter(id: string, input: BidCounterInput, user: AuthUser): Promise<BidDetail> {
-    const bid = await this.prisma.bid.findUnique({
+    const preBid = await this.prisma.bid.findUnique({
       where: { id },
       include: { listing: true },
     });
 
-    if (!bid) {
+    if (!preBid) {
       throw new NotFoundException('Bid not found');
     }
 
-    if (bid.listing.ownerId !== user.id) {
+    if (preBid.listing.ownerId !== user.id) {
       throw new ForbiddenException('Only the listing owner can counter a bid');
     }
 
-    if (bid.listing.status !== 'OPEN') {
-      throw new ConflictException('Listing is no longer open');
-    }
-
-    const nextStatus = assertBidTransition(bid.status, 'COUNTER', 'owner');
+    assertBidTransition(preBid.status, 'COUNTER', 'owner');
 
     const updated = await this.prisma.$transaction(async (tx) => {
+      const lockedBids = await tx.$queryRaw<Array<Prisma.BidGetPayload<Record<string, never>>>>`
+        SELECT * FROM "Bid" WHERE id = ${id} FOR UPDATE
+      `;
+      const currentBid = lockedBids[0];
+      if (!currentBid) {
+        throw new NotFoundException('Bid not found');
+      }
+
+      const listing = await tx.listing.findUnique({
+        where: { id: currentBid.listingId },
+        select: { status: true },
+      });
+      if (!listing || listing.status !== 'OPEN') {
+        throw new ConflictException('Listing is no longer open');
+      }
+
+      const nextStatus = assertBidTransition(currentBid.status, 'COUNTER', 'owner');
+
       await tx.bidRevision.create({
         data: {
-          bidId: bid.id,
+          bidId: currentBid.id,
           authorId: user.id,
           amountCents: input.amountCents,
           deliveryDays: input.deliveryDays,
@@ -784,7 +902,7 @@ export class BidsService {
       });
 
       await tx.bid.update({
-        where: { id: bid.id },
+        where: { id: currentBid.id },
         data: {
           status: nextStatus,
           lastCounterById: user.id,
@@ -792,20 +910,20 @@ export class BidsService {
       });
 
       return tx.bid.findUniqueOrThrow({
-        where: { id: bid.id },
+        where: { id: currentBid.id },
         include: {
           bidder: { select: publicUserSelect },
           attachments: { include: { upload: true } },
           revisions: {
             include: { author: { select: publicUserSelect } },
-            orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+            orderBy: [{ createdAt: 'asc' }, { seq: 'asc' }],
           },
         },
       });
     });
 
     const detail = await this.mapBidDetail(updated);
-    this.eventEmitter.emit(BID_EVENTS.COUNTERED, new BidCounteredEvent(detail, user.id));
+    this.safeEmit(BID_EVENTS.COUNTERED, new BidCounteredEvent(detail, user.id));
     return detail;
   }
 
@@ -829,7 +947,15 @@ export class BidsService {
       throw new ConflictException('Listing is no longer open');
     }
 
-    return this.executeAcceptanceFlow(bid, bid.amountCents, bid.deliveryDays, user);
+    return this.executeAcceptanceFlow(
+      bid,
+      {
+        expectedStatus: ['PENDING', 'SHORTLISTED', 'COUNTERED'],
+        expectedAmountCents: bid.amountCents,
+        expectedDeliveryDays: bid.deliveryDays,
+      },
+      user,
+    );
   }
 
   async acceptCounter(id: string, user: AuthUser): Promise<BidAcceptResponse> {
@@ -861,7 +987,7 @@ export class BidsService {
         bidId: bid.id,
         authorId: bid.listing.ownerId,
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { seq: 'desc' }],
     });
 
     if (!lastCounterRevision) {
@@ -870,22 +996,30 @@ export class BidsService {
 
     return this.executeAcceptanceFlow(
       bid,
-      lastCounterRevision.amountCents,
-      lastCounterRevision.deliveryDays,
+      {
+        expectedStatus: ['COUNTERED'],
+        expectedAmountCents: lastCounterRevision.amountCents,
+        expectedDeliveryDays: lastCounterRevision.deliveryDays,
+        expectedRevisionId: lastCounterRevision.id,
+      },
       user,
     );
   }
 
   private async executeAcceptanceFlow(
-    bid: Prisma.BidGetPayload<{ include: { listing: true } }>,
-    finalAmountCents: number,
-    finalDeliveryDays: number,
+    preBid: Prisma.BidGetPayload<{ include: { listing: true } }>,
+    guard: {
+      expectedStatus: string[];
+      expectedAmountCents: number;
+      expectedDeliveryDays: number;
+      expectedRevisionId?: string;
+    },
     actor: AuthUser,
   ): Promise<BidAcceptResponse> {
     const result = await this.prisma.$transaction(async (tx) => {
       // 1. Conditional update on listing: OPEN -> IN_PROGRESS
       const listingUpdate = await tx.listing.updateMany({
-        where: { id: bid.listingId, status: 'OPEN' },
+        where: { id: preBid.listingId, status: 'OPEN' },
         data: { status: 'IN_PROGRESS' },
       });
 
@@ -893,12 +1027,52 @@ export class BidsService {
         throw new ConflictException('Listing is no longer open for acceptance');
       }
 
-      // 2. Conditional update on bid: status must be active
-      const bidUpdate = await tx.bid.updateMany({
-        where: {
-          id: bid.id,
-          status: { in: ['PENDING', 'SHORTLISTED', 'COUNTERED'] },
-        },
+      // 2. Lock and re-read the bid row
+      const lockedBids = await tx.$queryRaw<Array<Prisma.BidGetPayload<Record<string, never>>>>`
+        SELECT * FROM "Bid" WHERE id = ${preBid.id} FOR UPDATE
+      `;
+      const currentBid = lockedBids[0];
+      if (!currentBid) {
+        throw new NotFoundException('Bid not found');
+      }
+
+      if (!guard.expectedStatus.includes(currentBid.status)) {
+        throw new ConflictException(
+          `Bid is not in an acceptable status (current: ${currentBid.status})`,
+        );
+      }
+
+      let finalAmountCents = guard.expectedAmountCents;
+      let finalDeliveryDays = guard.expectedDeliveryDays;
+
+      if (guard.expectedRevisionId) {
+        // acceptCounter flow: verify latest counter revision has not changed concurrently
+        const latestCounter = await tx.bidRevision.findFirst({
+          where: {
+            bidId: currentBid.id,
+            authorId: preBid.listing.ownerId,
+          },
+          orderBy: [{ createdAt: 'desc' }, { seq: 'desc' }],
+        });
+
+        if (!latestCounter || latestCounter.id !== guard.expectedRevisionId) {
+          throw new ConflictException('Counter offer has changed');
+        }
+        finalAmountCents = latestCounter.amountCents;
+        finalDeliveryDays = latestCounter.deliveryDays;
+      } else {
+        // Direct accept flow: verify bidder did not edit amount or delivery concurrently
+        if (
+          currentBid.amountCents !== guard.expectedAmountCents ||
+          currentBid.deliveryDays !== guard.expectedDeliveryDays
+        ) {
+          throw new ConflictException('Bid details have changed');
+        }
+      }
+
+      // Update bid to ACCEPTED
+      await tx.bid.update({
+        where: { id: currentBid.id },
         data: {
           status: 'ACCEPTED',
           amountCents: finalAmountCents,
@@ -906,15 +1080,11 @@ export class BidsService {
         },
       });
 
-      if (bidUpdate.count === 0) {
-        throw new ConflictException('Bid is not in an acceptable status');
-      }
-
       // 3. Decline all other active bids on this listing
       await tx.bid.updateMany({
         where: {
-          listingId: bid.listingId,
-          id: { not: bid.id },
+          listingId: preBid.listingId,
+          id: { not: currentBid.id },
           status: { in: ['PENDING', 'SHORTLISTED', 'COUNTERED'] },
         },
         data: { status: 'DECLINED' },
@@ -923,33 +1093,33 @@ export class BidsService {
       // 4. Role derivation:
       // REQUEST listing: owner = buyer, bidder = provider
       // OFFER listing: owner = provider, bidder = buyer
-      const isRequest = bid.listing.kind === 'REQUEST';
-      const buyerId = isRequest ? bid.listing.ownerId : bid.bidderId;
-      const providerId = isRequest ? bid.bidderId : bid.listing.ownerId;
+      const isRequest = preBid.listing.kind === 'REQUEST';
+      const buyerId = isRequest ? preBid.listing.ownerId : currentBid.bidderId;
+      const providerId = isRequest ? currentBid.bidderId : preBid.listing.ownerId;
 
       // 5. Create Agreement & AgreementEvent CREATED
       const agreement = await tx.agreement.create({
         data: {
-          listingId: bid.listingId,
-          bidId: bid.id,
+          listingId: preBid.listingId,
+          bidId: currentBid.id,
           buyerId,
           providerId,
           status: 'ACTIVE',
           events: {
             create: {
-              type: 'CREATED',
               actorId: actor.id,
-            },
-          },
-        },
-        include: {
-          buyer: { select: publicUserSelect },
-          provider: { select: publicUserSelect },
-          events: true,
-          milestones: true,
-          deliverables: {
-            include: {
-              attachments: { include: { upload: true } },
+              type: 'CREATED',
+              data: {
+                initiatorRole: isRequest
+                  ? actor.id === buyerId
+                    ? 'buyer'
+                    : 'provider'
+                  : actor.id === providerId
+                    ? 'provider'
+                    : 'buyer',
+                finalAmountCents,
+                finalDeliveryDays,
+              },
             },
           },
         },
@@ -958,14 +1128,14 @@ export class BidsService {
       // 6. Reuse or create Conversation linked to listing/bid/agreement
       const existingConv = await tx.conversation.findFirst({
         where: {
-          listingId: bid.listingId,
+          listingId: preBid.listingId,
           participants: {
-            some: { userId: bid.listing.ownerId },
+            some: { userId: preBid.listing.ownerId },
           },
           AND: [
             {
               participants: {
-                some: { userId: bid.bidderId },
+                some: { userId: currentBid.bidderId },
               },
             },
           ],
@@ -977,41 +1147,55 @@ export class BidsService {
           where: { id: existingConv.id },
           data: {
             agreementId: agreement.id,
-            bidId: bid.id,
+            bidId: currentBid.id,
           },
         });
       } else {
         await tx.conversation.create({
           data: {
-            listingId: bid.listingId,
-            bidId: bid.id,
+            listingId: preBid.listingId,
+            bidId: currentBid.id,
             agreementId: agreement.id,
             participants: {
-              create: [{ userId: bid.listing.ownerId }, { userId: bid.bidderId }],
+              create: [{ userId: preBid.listing.ownerId }, { userId: currentBid.bidderId }],
             },
           },
         });
       }
 
       const updatedBid = await tx.bid.findUniqueOrThrow({
-        where: { id: bid.id },
+        where: { id: currentBid.id },
         include: {
           bidder: { select: publicUserSelect },
           attachments: { include: { upload: true } },
           revisions: {
             include: { author: { select: publicUserSelect } },
-            orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+            orderBy: [{ createdAt: 'asc' }, { seq: 'asc' }],
           },
         },
       });
 
-      return { updatedBid, agreement };
+      const fullAgreement = await tx.agreement.findUniqueOrThrow({
+        where: { id: agreement.id },
+        include: {
+          buyer: { select: publicUserSelect },
+          provider: { select: publicUserSelect },
+          events: true,
+          milestones: true,
+          deliverables: { include: { attachments: { include: { upload: true } } } },
+        },
+      });
+
+      return {
+        updatedBid,
+        agreement: fullAgreement,
+      };
     });
 
     const serializedBid = await this.mapBidDetail(result.updatedBid);
-    const serializedAgreement = this.mapAgreement(result.agreement);
+    const serializedAgreement = await this.mapAgreement(result.agreement);
 
-    this.eventEmitter.emit(
+    this.safeEmit(
       BID_EVENTS.ACCEPTED,
       new BidAcceptedEvent(serializedBid, serializedAgreement, actor.id),
     );
@@ -1037,34 +1221,6 @@ export class BidsService {
     );
   }
 
-  private mapPublicUser(user: {
-    id: string;
-    displayName: string;
-    avatarKey: string | null;
-    bio: string | null;
-    location: string | null;
-    isBusiness: boolean;
-    companyName: string | null;
-    ratingAvg: number;
-    ratingCount: number;
-    completedCount: number;
-    createdAt: Date;
-  }): PublicUser {
-    return {
-      id: user.id,
-      displayName: user.displayName,
-      avatarUrl: user.avatarKey,
-      bio: user.bio,
-      location: user.location,
-      isBusiness: user.isBusiness,
-      companyName: user.companyName,
-      ratingAvg: user.ratingAvg,
-      ratingCount: user.ratingCount,
-      completedCount: user.completedCount,
-      createdAt: user.createdAt,
-    };
-  }
-
   private async mapBidDetail(
     bid: Prisma.BidGetPayload<{
       include: {
@@ -1075,21 +1231,25 @@ export class BidsService {
     }>,
   ): Promise<BidDetail> {
     const attachments = await this.mapAttachments(bid.attachments);
-    const revisions = bid.revisions.map((r) => ({
-      id: r.id,
-      bidId: r.bidId,
-      authorId: r.authorId,
-      author: r.author ? this.mapPublicUser(r.author) : undefined,
-      amountCents: r.amountCents,
-      deliveryDays: r.deliveryDays,
-      message: r.message,
-      createdAt: r.createdAt,
-    }));
+    const revisions = await Promise.all(
+      bid.revisions.map(async (r) => ({
+        id: r.id,
+        bidId: r.bidId,
+        authorId: r.authorId,
+        author: r.author ? await this.userPresenter.toPublicUser(r.author) : undefined,
+        amountCents: r.amountCents,
+        deliveryDays: r.deliveryDays,
+        message: r.message,
+        createdAt: r.createdAt,
+      })),
+    );
+
+    const bidder = await this.userPresenter.toPublicUser(bid.bidder);
 
     return {
       id: bid.id,
       listingId: bid.listingId,
-      bidder: this.mapPublicUser(bid.bidder),
+      bidder,
       amountCents: bid.amountCents,
       currency: bid.currency,
       deliveryDays: bid.deliveryDays,
@@ -1104,7 +1264,7 @@ export class BidsService {
     };
   }
 
-  private mapAgreement(
+  private async mapAgreement(
     agreement: Prisma.AgreementGetPayload<{
       include: {
         buyer: { select: typeof publicUserSelect };
@@ -1114,13 +1274,16 @@ export class BidsService {
         deliverables: { include: { attachments: { include: { upload: true } } } };
       };
     }>,
-  ): Agreement {
+  ): Promise<Agreement> {
+    const buyer = await this.userPresenter.toPublicUser(agreement.buyer);
+    const provider = await this.userPresenter.toPublicUser(agreement.provider);
+
     return {
       id: agreement.id,
       listingId: agreement.listingId,
       bidId: agreement.bidId,
-      buyer: this.mapPublicUser(agreement.buyer),
-      provider: this.mapPublicUser(agreement.provider),
+      buyer,
+      provider,
       status: agreement.status,
       milestones: agreement.milestones.map((m) => ({
         id: m.id,

@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { INestApplication } from '@nestjs/common';
 import type { Server } from 'node:http';
 import request from 'supertest';
+import { encodeBidCursor } from '../src/modules/bids/bid.cursor.js';
 import { createTestApp } from './helpers/app.js';
 import { createUser, signToken } from './helpers/auth.js';
 import { prisma, resetDb } from './helpers/db.js';
@@ -302,11 +303,11 @@ describe('Bids endpoints', () => {
       await request(server).get(`/api/v1/listings/${openListingId}/bids`).expect(401);
     });
 
-    it('returns 403 when a third user with no bids accesses the listing bids', async () => {
+    it('returns 404 when a third user with no bids accesses the listing bids', async () => {
       await request(server)
         .get(`/api/v1/listings/${openListingId}/bids`)
         .set('Authorization', `Bearer ${thirdToken}`)
-        .expect(403);
+        .expect(404);
     });
 
     it('returns 404 when listing does not exist', async () => {
@@ -415,11 +416,53 @@ describe('Bids endpoints', () => {
       ];
       expect(new Set(allFetchedIds).size).toBe(3);
     });
+
+    it('returns 400 when cursor is malformed or sort value type mismatches', async () => {
+      // 1. Invalid base64 or non-JSON
+      await request(server)
+        .get(`/api/v1/listings/${openListingId}/bids?cursor=not-a-valid-cursor`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .expect(400);
+
+      // 2. Cursor with NUL byte
+      await request(server)
+        .get(`/api/v1/listings/${openListingId}/bids?cursor=bad%00cursor`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .expect(400);
+
+      // 3. Sort mismatch: cursor for newest (ISO string) used on amount_asc
+      const newestCursor = encodeBidCursor('newest', new Date().toISOString(), 'bid1');
+      await request(server)
+        .get(`/api/v1/listings/${openListingId}/bids?sort=amount_asc&cursor=${newestCursor}`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .expect(400);
+
+      // 4. Integer overflow or float on amount_asc
+      const overflowCursor = Buffer.from(JSON.stringify({ v: 99999999999, id: 'bid1' })).toString(
+        'base64url',
+      );
+      await request(server)
+        .get(`/api/v1/listings/${openListingId}/bids?sort=amount_asc&cursor=${overflowCursor}`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .expect(400);
+    });
   });
 
   describe('GET /api/v1/bids/mine', () => {
     it('returns 401 when unauthenticated', async () => {
       await request(server).get('/api/v1/bids/mine').expect(401);
+    });
+
+    it('returns 400 when cursor contains NUL byte or invalid characters', async () => {
+      await request(server)
+        .get('/api/v1/bids/mine?cursor=bad%00cursor')
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .expect(400);
+
+      await request(server)
+        .get('/api/v1/bids/mine?cursor=bad+cursor+with+spaces')
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .expect(400);
     });
 
     it('returns only the user bids with listing summary and filters by status', async () => {
@@ -571,6 +614,55 @@ describe('Bids endpoints', () => {
       expect(res.body.amountCents).toBe(37000);
       expect(res.body.revisions).toHaveLength(3);
     });
+
+    it('returns 409 when attempting to edit ACCEPTED, WITHDRAWN, or REJECTED bid', async () => {
+      // Test WITHDRAWN
+      await request(server)
+        .post(`/api/v1/bids/${bidId}/withdraw`)
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .expect(200);
+
+      await request(server)
+        .patch(`/api/v1/bids/${bidId}`)
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .send({ amountCents: 41000 })
+        .expect(409);
+
+      // Create new bid and REJECT it
+      const b2 = await request(server)
+        .post(`/api/v1/listings/${openListingId}/bids`)
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .send({ amountCents: 45000, currency: 'USD', deliveryDays: 10, message: 'Bid 2' })
+        .expect(201);
+      await request(server)
+        .post(`/api/v1/bids/${b2.body.id}/reject`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ reason: 'Rejected' })
+        .expect(200);
+
+      await request(server)
+        .patch(`/api/v1/bids/${b2.body.id}`)
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .send({ amountCents: 41000 })
+        .expect(409);
+
+      // Create new bid and ACCEPT it
+      const b3 = await request(server)
+        .post(`/api/v1/listings/${openListingId}/bids`)
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .send({ amountCents: 45000, currency: 'USD', deliveryDays: 10, message: 'Bid 3' })
+        .expect(201);
+      await request(server)
+        .post(`/api/v1/bids/${b3.body.id}/accept`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .expect(200);
+
+      await request(server)
+        .patch(`/api/v1/bids/${b3.body.id}`)
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .send({ amountCents: 41000 })
+        .expect(409);
+    });
   });
 
   describe('POST /api/v1/bids/:id/withdraw', () => {
@@ -585,11 +677,22 @@ describe('Bids endpoints', () => {
       bidId = b.body.id;
     });
 
+    it('returns 401 when unauthenticated', async () => {
+      await request(server).post(`/api/v1/bids/${bidId}/withdraw`).expect(401);
+    });
+
     it('returns 403 when non-bidder (owner) attempts to withdraw', async () => {
       await request(server)
         .post(`/api/v1/bids/${bidId}/withdraw`)
         .set('Authorization', `Bearer ${ownerToken}`)
         .expect(403);
+    });
+
+    it('returns 404 when bid does not exist', async () => {
+      await request(server)
+        .post('/api/v1/bids/nonexistent-id/withdraw')
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .expect(404);
     });
 
     it('allows bidder to withdraw bid -> WITHDRAWN', async () => {
@@ -603,6 +706,37 @@ describe('Bids endpoints', () => {
       // Second withdraw returns 409
       await request(server)
         .post(`/api/v1/bids/${bidId}/withdraw`)
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .expect(409);
+    });
+
+    it('returns 409 when attempting to withdraw an ACCEPTED or REJECTED bid', async () => {
+      // Reject bid -> withdraw returns 409
+      await request(server)
+        .post(`/api/v1/bids/${bidId}/reject`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ reason: 'Rejected' })
+        .expect(200);
+
+      await request(server)
+        .post(`/api/v1/bids/${bidId}/withdraw`)
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .expect(409);
+
+      // New bid and accept -> withdraw returns 409
+      const b2 = await request(server)
+        .post(`/api/v1/listings/${openListingId}/bids`)
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .send({ amountCents: 42000, currency: 'USD', deliveryDays: 5, message: 'New bid' })
+        .expect(201);
+
+      await request(server)
+        .post(`/api/v1/bids/${b2.body.id}/accept`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .expect(200);
+
+      await request(server)
+        .post(`/api/v1/bids/${b2.body.id}/withdraw`)
         .set('Authorization', `Bearer ${bidderToken}`)
         .expect(409);
     });
@@ -620,11 +754,22 @@ describe('Bids endpoints', () => {
       bidId = b.body.id;
     });
 
+    it('returns 401 when unauthenticated', async () => {
+      await request(server).post(`/api/v1/bids/${bidId}/shortlist`).expect(401);
+    });
+
     it('returns 403 when non-owner (bidder) attempts to shortlist', async () => {
       await request(server)
         .post(`/api/v1/bids/${bidId}/shortlist`)
         .set('Authorization', `Bearer ${bidderToken}`)
         .expect(403);
+    });
+
+    it('returns 404 when bid does not exist', async () => {
+      await request(server)
+        .post('/api/v1/bids/nonexistent-id/shortlist')
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .expect(404);
     });
 
     it('allows owner to shortlist bid -> SHORTLISTED', async () => {
@@ -636,6 +781,18 @@ describe('Bids endpoints', () => {
       expect(res.body.status).toBe('SHORTLISTED');
 
       // Shortlisting an already shortlisted bid returns 409
+      await request(server)
+        .post(`/api/v1/bids/${bidId}/shortlist`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .expect(409);
+    });
+
+    it('returns 409 when attempting to shortlist WITHDRAWN, REJECTED, or ACCEPTED bid', async () => {
+      await request(server)
+        .post(`/api/v1/bids/${bidId}/withdraw`)
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .expect(200);
+
       await request(server)
         .post(`/api/v1/bids/${bidId}/shortlist`)
         .set('Authorization', `Bearer ${ownerToken}`)
@@ -655,12 +812,32 @@ describe('Bids endpoints', () => {
       bidId = b.body.id;
     });
 
+    it('returns 401 when unauthenticated', async () => {
+      await request(server).post(`/api/v1/bids/${bidId}/reject`).send({ reason: 'No' }).expect(401);
+    });
+
     it('returns 403 when non-owner attempts to reject', async () => {
       await request(server)
         .post(`/api/v1/bids/${bidId}/reject`)
         .set('Authorization', `Bearer ${bidderToken}`)
         .send({ reason: 'No' })
         .expect(403);
+    });
+
+    it('returns 404 when bid does not exist', async () => {
+      await request(server)
+        .post('/api/v1/bids/nonexistent-id/reject')
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ reason: 'No' })
+        .expect(404);
+    });
+
+    it('returns 400 when reject body is invalid', async () => {
+      await request(server)
+        .post(`/api/v1/bids/${bidId}/reject`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ reason: 'x'.repeat(2001) })
+        .expect(400);
     });
 
     it('allows owner to reject bid with optional reason -> REJECTED', async () => {
@@ -680,6 +857,19 @@ describe('Bids endpoints', () => {
         .send({ reason: 'Again' })
         .expect(409);
     });
+
+    it('returns 409 when attempting to reject WITHDRAWN or ACCEPTED bid', async () => {
+      await request(server)
+        .post(`/api/v1/bids/${bidId}/withdraw`)
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .expect(200);
+
+      await request(server)
+        .post(`/api/v1/bids/${bidId}/reject`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ reason: 'Reject after withdraw' })
+        .expect(409);
+    });
   });
 
   describe('POST /api/v1/bids/:id/counter', () => {
@@ -694,12 +884,57 @@ describe('Bids endpoints', () => {
       bidId = b.body.id;
     });
 
+    it('returns 401 when unauthenticated', async () => {
+      await request(server)
+        .post(`/api/v1/bids/${bidId}/counter`)
+        .send({ amountCents: 35000, deliveryDays: 8, message: 'Counter' })
+        .expect(401);
+    });
+
     it('returns 403 when non-owner attempts to counter', async () => {
       await request(server)
         .post(`/api/v1/bids/${bidId}/counter`)
         .set('Authorization', `Bearer ${bidderToken}`)
         .send({ amountCents: 35000, deliveryDays: 8, message: 'Counter' })
         .expect(403);
+    });
+
+    it('returns 404 when bid does not exist', async () => {
+      await request(server)
+        .post('/api/v1/bids/nonexistent-id/counter')
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ amountCents: 35000, deliveryDays: 8, message: 'Counter' })
+        .expect(404);
+    });
+
+    it('returns 400 when counter body is invalid', async () => {
+      // Invalid negative amount
+      await request(server)
+        .post(`/api/v1/bids/${bidId}/counter`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ amountCents: -100, deliveryDays: 5, message: 'Counter' })
+        .expect(400);
+
+      // Missing deliveryDays
+      await request(server)
+        .post(`/api/v1/bids/${bidId}/counter`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ amountCents: 1000, message: 'Counter' })
+        .expect(400);
+
+      // Zero amount
+      await request(server)
+        .post(`/api/v1/bids/${bidId}/counter`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ amountCents: 0, deliveryDays: 5, message: 'Counter' })
+        .expect(400);
+
+      // Message too long (> 5000 chars)
+      await request(server)
+        .post(`/api/v1/bids/${bidId}/counter`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ amountCents: 1000, deliveryDays: 5, message: 'x'.repeat(5001) })
+        .expect(400);
     });
 
     it('allows owner to counter: sets COUNTERED, records revision and lastCounterById', async () => {
@@ -716,6 +951,122 @@ describe('Bids endpoints', () => {
       expect(res.body.revisions[1].amountCents).toBe(35000);
       expect(res.body.revisions[1].deliveryDays).toBe(8);
       expect(res.body.revisions[1].message).toBe('I offer 35000');
+    });
+
+    it('returns 409 when attempting to counter WITHDRAWN, REJECTED, or ACCEPTED bid', async () => {
+      await request(server)
+        .post(`/api/v1/bids/${bidId}/withdraw`)
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .expect(200);
+
+      await request(server)
+        .post(`/api/v1/bids/${bidId}/counter`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ amountCents: 35000, deliveryDays: 8, message: 'Counter' })
+        .expect(409);
+    });
+  });
+
+  describe('POST /api/v1/bids/:id/accept', () => {
+    let bidId: string;
+
+    beforeEach(async () => {
+      const b = await request(server)
+        .post(`/api/v1/listings/${openListingId}/bids`)
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .send({ amountCents: 40000, currency: 'USD', deliveryDays: 10, message: 'Initial' })
+        .expect(201);
+      bidId = b.body.id;
+    });
+
+    it('returns 401 when unauthenticated', async () => {
+      await request(server).post(`/api/v1/bids/${bidId}/accept`).expect(401);
+    });
+
+    it('returns 403 when non-owner (bidder or third user) attempts to accept', async () => {
+      await request(server)
+        .post(`/api/v1/bids/${bidId}/accept`)
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .expect(403);
+
+      await request(server)
+        .post(`/api/v1/bids/${bidId}/accept`)
+        .set('Authorization', `Bearer ${thirdToken}`)
+        .expect(403);
+    });
+
+    it('returns 404 when bid does not exist', async () => {
+      await request(server)
+        .post('/api/v1/bids/nonexistent-id/accept')
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .expect(404);
+    });
+
+    it('returns 409 when bid is in terminal status (WITHDRAWN or REJECTED)', async () => {
+      await request(server)
+        .post(`/api/v1/bids/${bidId}/withdraw`)
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .expect(200);
+
+      await request(server)
+        .post(`/api/v1/bids/${bidId}/accept`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .expect(409);
+    });
+
+    it('returns 409 when listing is closed (not OPEN)', async () => {
+      await request(server)
+        .post(`/api/v1/listings/${openListingId}/close`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .expect(201);
+
+      await request(server)
+        .post(`/api/v1/bids/${bidId}/accept`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .expect(409);
+    });
+  });
+
+  describe('POST /api/v1/bids/:id/accept-counter', () => {
+    let bidId: string;
+
+    beforeEach(async () => {
+      const b = await request(server)
+        .post(`/api/v1/listings/${openListingId}/bids`)
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .send({ amountCents: 40000, currency: 'USD', deliveryDays: 10, message: 'Initial' })
+        .expect(201);
+      bidId = b.body.id;
+    });
+
+    it('returns 401 when unauthenticated', async () => {
+      await request(server).post(`/api/v1/bids/${bidId}/accept-counter`).expect(401);
+    });
+
+    it('returns 403 when owner or third user attempts to accept-counter', async () => {
+      await request(server)
+        .post(`/api/v1/bids/${bidId}/accept-counter`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .expect(403);
+
+      await request(server)
+        .post(`/api/v1/bids/${bidId}/accept-counter`)
+        .set('Authorization', `Bearer ${thirdToken}`)
+        .expect(403);
+    });
+
+    it('returns 404 when bid does not exist', async () => {
+      await request(server)
+        .post('/api/v1/bids/nonexistent-id/accept-counter')
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .expect(404);
+    });
+
+    it('returns 409 when bid is not COUNTERED (e.g. still PENDING)', async () => {
+      await request(server)
+        .post(`/api/v1/bids/${bidId}/accept-counter`)
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .expect(409);
     });
   });
 
@@ -879,6 +1230,164 @@ describe('Bids endpoints', () => {
       });
       const dbStatuses = bidsInDb.map((b) => b.status).sort();
       expect(dbStatuses).toEqual(['ACCEPTED', 'DECLINED']);
+    });
+
+    it('concurrency: accept vs withdraw in parallel -> exactly one 200, one 409', async () => {
+      const b = await request(server)
+        .post(`/api/v1/listings/${openListingId}/bids`)
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .send({ amountCents: 45000, currency: 'USD', deliveryDays: 10, message: 'Bid' })
+        .expect(201);
+      const bidId = b.body.id;
+
+      const pAccept = request(server)
+        .post(`/api/v1/bids/${bidId}/accept`)
+        .set('Authorization', `Bearer ${ownerToken}`);
+
+      const pWithdraw = request(server)
+        .post(`/api/v1/bids/${bidId}/withdraw`)
+        .set('Authorization', `Bearer ${bidderToken}`);
+
+      const [rAccept, rWithdraw] = await Promise.all([pAccept, pWithdraw]);
+      const statuses = [rAccept.status, rWithdraw.status].sort();
+      expect(statuses).toEqual([200, 409]);
+
+      const bidInDb = await prisma.bid.findUnique({ where: { id: bidId } });
+      const listingInDb = await prisma.listing.findUnique({ where: { id: openListingId } });
+
+      if (rAccept.status === 200) {
+        expect(bidInDb?.status).toBe('ACCEPTED');
+        expect(listingInDb?.status).toBe('IN_PROGRESS');
+      } else {
+        expect(bidInDb?.status).toBe('WITHDRAWN');
+        expect(listingInDb?.status).toBe('OPEN');
+      }
+    });
+
+    it('concurrency: accept vs edit in parallel -> exactly one 200, one 409', async () => {
+      const b = await request(server)
+        .post(`/api/v1/listings/${openListingId}/bids`)
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .send({ amountCents: 45000, currency: 'USD', deliveryDays: 10, message: 'Bid' })
+        .expect(201);
+      const bidId = b.body.id;
+
+      const pAccept = request(server)
+        .post(`/api/v1/bids/${bidId}/accept`)
+        .set('Authorization', `Bearer ${ownerToken}`);
+
+      const pEdit = request(server)
+        .patch(`/api/v1/bids/${bidId}`)
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .send({ amountCents: 99999, message: 'Changed my price' });
+
+      const [rAccept, rEdit] = await Promise.all([pAccept, pEdit]);
+      const statuses = [rAccept.status, rEdit.status].sort();
+      expect(statuses).toEqual([200, 409]);
+    });
+
+    it('concurrency: accept vs reject in parallel -> exactly one 200, one 409', async () => {
+      const b = await request(server)
+        .post(`/api/v1/listings/${openListingId}/bids`)
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .send({ amountCents: 45000, currency: 'USD', deliveryDays: 10, message: 'Bid' })
+        .expect(201);
+      const bidId = b.body.id;
+
+      const pAccept = request(server)
+        .post(`/api/v1/bids/${bidId}/accept`)
+        .set('Authorization', `Bearer ${ownerToken}`);
+
+      const pReject = request(server)
+        .post(`/api/v1/bids/${bidId}/reject`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ reason: 'Too expensive' });
+
+      const [rAccept, rReject] = await Promise.all([pAccept, pReject]);
+      const statuses = [rAccept.status, rReject.status].sort();
+      expect(statuses).toEqual([200, 409]);
+
+      const bidInDb = await prisma.bid.findUnique({ where: { id: bidId } });
+      if (rAccept.status === 200) {
+        expect(bidInDb?.status).toBe('ACCEPTED');
+      } else {
+        expect(bidInDb?.status).toBe('REJECTED');
+      }
+    });
+
+    it('concurrency: accept vs counter in parallel -> exactly one 200, one 409', async () => {
+      const b = await request(server)
+        .post(`/api/v1/listings/${openListingId}/bids`)
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .send({ amountCents: 45000, currency: 'USD', deliveryDays: 10, message: 'Bid' })
+        .expect(201);
+      const bidId = b.body.id;
+
+      const pAccept = request(server)
+        .post(`/api/v1/bids/${bidId}/accept`)
+        .set('Authorization', `Bearer ${ownerToken}`);
+
+      const pCounter = request(server)
+        .post(`/api/v1/bids/${bidId}/counter`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ amountCents: 38000, deliveryDays: 7, message: 'Counter offer' });
+
+      const [rAccept, rCounter] = await Promise.all([pAccept, pCounter]);
+      const statuses = [rAccept.status, rCounter.status].sort();
+      expect(statuses).toEqual([200, 409]);
+    });
+
+    it('concurrency: accept vs close in parallel -> exactly one outcome, cannot both succeed', async () => {
+      const b = await request(server)
+        .post(`/api/v1/listings/${openListingId}/bids`)
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .send({ amountCents: 45000, currency: 'USD', deliveryDays: 10, message: 'Bid' })
+        .expect(201);
+      const bidId = b.body.id;
+
+      const pAccept = request(server)
+        .post(`/api/v1/bids/${bidId}/accept`)
+        .set('Authorization', `Bearer ${ownerToken}`);
+
+      const pClose = request(server)
+        .post(`/api/v1/listings/${openListingId}/close`)
+        .set('Authorization', `Bearer ${ownerToken}`);
+
+      const [rAccept, rClose] = await Promise.all([pAccept, pClose]);
+      const listingInDb = await prisma.listing.findUnique({ where: { id: openListingId } });
+      const bidInDb = await prisma.bid.findUnique({ where: { id: bidId } });
+
+      if (rAccept.status === 200) {
+        expect(rClose.status).toBe(409);
+        expect(listingInDb?.status).toBe('IN_PROGRESS');
+        expect(bidInDb?.status).toBe('ACCEPTED');
+      } else {
+        expect(rAccept.status).toBe(409);
+        expect(rClose.status).toBe(201);
+        expect(listingInDb?.status).toBe('CLOSED');
+        expect(bidInDb?.status).toBe('DECLINED');
+      }
+    });
+
+    it('concurrency: create bid vs close listing in parallel -> closed listing cannot have PENDING bid', async () => {
+      const pCreate = request(server)
+        .post(`/api/v1/listings/${openListingId}/bids`)
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .send({ amountCents: 45000, currency: 'USD', deliveryDays: 10, message: 'Bid' });
+
+      const pClose = request(server)
+        .post(`/api/v1/listings/${openListingId}/close`)
+        .set('Authorization', `Bearer ${ownerToken}`);
+
+      await Promise.all([pCreate, pClose]);
+
+      const listingInDb = await prisma.listing.findUnique({ where: { id: openListingId } });
+      const bidsInDb = await prisma.bid.findMany({ where: { listingId: openListingId } });
+
+      if (listingInDb?.status === 'CLOSED') {
+        const pendingBids = bidsInDb.filter((b) => b.status === 'PENDING');
+        expect(pendingBids).toHaveLength(0);
+      }
     });
   });
 

@@ -42,6 +42,7 @@ describe('BidsService', () => {
     };
     agreement: {
       create: MockFn;
+      findUniqueOrThrow: MockFn;
     };
     conversation: {
       findFirst: MockFn;
@@ -132,12 +133,25 @@ describe('BidsService', () => {
   beforeEach(() => {
     prisma = {
       listing: {
-        findUnique: vi.fn(),
+        findUnique: vi.fn().mockImplementation(() => Promise.resolve(mockListing('OPEN'))),
         updateMany: vi.fn(),
       },
       bid: {
         findUnique: vi.fn(),
-        findUniqueOrThrow: vi.fn(),
+        findUniqueOrThrow: vi.fn().mockImplementation(async () => {
+          let b = mockBid();
+          const lastFindUnique = prisma.bid.findUnique.mock.results.slice(-1)[0];
+          if (lastFindUnique) {
+            const val = (await lastFindUnique.value) as ReturnType<typeof mockBid> | undefined;
+            if (val) b = { ...val };
+          }
+          const updateCall = prisma.bid.update.mock.calls.slice(-1)[0] as
+            [{ data?: Partial<ReturnType<typeof mockBid>> }] | undefined;
+          if (updateCall && updateCall[0]?.data) {
+            b = { ...b, ...updateCall[0].data };
+          }
+          return b;
+        }),
         findFirst: vi.fn(),
         findMany: vi.fn(),
         count: vi.fn(),
@@ -159,6 +173,27 @@ describe('BidsService', () => {
       },
       agreement: {
         create: vi.fn(),
+        findUniqueOrThrow: vi.fn().mockImplementation(() => {
+          const lastCreated = prisma.agreement.create.mock.results.slice(-1)[0];
+          if (lastCreated && lastCreated.value) {
+            return Promise.resolve(lastCreated.value as object);
+          }
+          return Promise.resolve({
+            id: 'ag_1',
+            listingId: 'list_1',
+            bidId: 'bid_1',
+            buyerId: ownerUser.id,
+            providerId: bidderUser.id,
+            buyer: mockPublicUser(ownerUser.id, 'Owner'),
+            provider: mockPublicUser(bidderUser.id, 'Bidder'),
+            status: 'ACTIVE',
+            milestones: [],
+            deliverables: [],
+            events: [],
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          });
+        }),
       },
       conversation: {
         findFirst: vi.fn(),
@@ -166,7 +201,26 @@ describe('BidsService', () => {
         update: vi.fn(),
       },
       $transaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>) => cb(prisma)),
-      $queryRaw: vi.fn(),
+      $queryRaw: vi.fn().mockImplementation(async (strings: TemplateStringsArray) => {
+        const sql = Array.isArray(strings) ? strings.join('') : String(strings);
+        if (sql.includes('FROM "Listing"')) {
+          const lastListing = prisma.listing.findUnique.mock.results.slice(-1)[0];
+          if (lastListing) {
+            const l = (await lastListing.value) as ReturnType<typeof mockListing> | null;
+            if (!l || l.status !== 'OPEN') return [];
+          }
+          return [{ id: 'list_1' }];
+        }
+        if (sql.includes('FROM "Bid"')) {
+          const lastBid = prisma.bid.findUnique.mock.results.slice(-1)[0];
+          if (lastBid) {
+            const b = (await lastBid.value) as ReturnType<typeof mockBid> | null;
+            if (b) return [b];
+          }
+          return [mockBid()];
+        }
+        return [];
+      }),
     };
 
     storage = {
@@ -334,13 +388,13 @@ describe('BidsService', () => {
       ).rejects.toThrow(NotFoundException);
     });
 
-    it('throws ForbiddenException if non-owner has no bids on the listing', async () => {
+    it('throws NotFoundException if non-owner has no bids on the listing', async () => {
       prisma.listing.findUnique.mockResolvedValue(mockListing('OPEN'));
       prisma.bid.count.mockResolvedValue(0);
 
       await expect(
         service.findByListing('list_1', { sort: 'newest', limit: 20 }, thirdUser),
-      ).rejects.toThrow(ForbiddenException);
+      ).rejects.toThrow(NotFoundException);
     });
 
     it('returns paginated bids for owner', async () => {

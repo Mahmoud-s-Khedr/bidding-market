@@ -57,7 +57,7 @@ Scheduled lifecycle cleanup of uncompleted PENDING uploads is out of scope and s
 
 ## Bids
 
-| GET | /listings/:id/bids 🔒 | owner sees all (sort: `amount_asc|amount_desc|delivery|rating|newest`); bidder sees only own |
+| GET | /listings/:id/bids 🔒 | owner sees all (sort: `amount_asc|amount_desc|delivery|rating|newest`); bidder sees only own (returns 404 if caller has no bids on the listing) |
 |---|---|---|
 | POST | /listings/:id/bids 🔒 | `{amountCents, currency, deliveryDays, message(≤5000), attachmentIds?}`; 409 if own listing / not OPEN / already has active bid |
 | GET | /bids/mine 🔒 | my bids with listing summary, filter `status` |

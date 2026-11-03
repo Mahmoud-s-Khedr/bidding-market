@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
   UnauthorizedException,
 } from '@nestjs/common';
 import type {
@@ -21,6 +22,7 @@ import { StorageService } from '../../storage/storage.service.js';
 import { CategoriesService } from '../categories/categories.service.js';
 import { UserPresenter } from '../users/user.presenter.js';
 import { decodeCursor, encodeCursor, type ListingSort } from './listings.cursor.js';
+import { ListingPresenter, type ListingSummaryInput } from './listing.presenter.js';
 
 export function validatePriceRules(
   priceType: 'FIXED' | 'RANGE' | 'NEGOTIABLE',
@@ -91,12 +93,21 @@ interface RawListingRow {
 
 @Injectable()
 export class ListingsService {
+  private readonly listingPresenter: ListingPresenter;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
     private readonly categoriesService: CategoriesService,
     private readonly userPresenter: UserPresenter,
-  ) {}
+    @Optional() listingPresenter?: ListingPresenter,
+  ) {
+    this.listingPresenter = listingPresenter ?? new ListingPresenter(storage, userPresenter);
+  }
+
+  async toSummary(listing: ListingSummaryInput): Promise<ListingSummary> {
+    return this.listingPresenter.toSummary(listing);
+  }
 
   async validateUploads(
     userId: string,
@@ -784,36 +795,38 @@ export class ListingsService {
     );
 
     const items: ListingSummary[] = await Promise.all(
-      paginatedResult.items.map(async (r) => ({
-        id: r.id,
-        owner: await this.userPresenter.toPublicUser({
-          id: r.owner_id,
-          displayName: r.owner_displayName,
-          avatarKey: r.owner_avatarKey,
-          bio: r.owner_bio,
-          location: r.owner_location,
-          isBusiness: r.owner_isBusiness,
-          companyName: r.owner_companyName,
-          ratingAvg: r.owner_ratingAvg,
-          ratingCount: r.owner_ratingCount,
-          completedCount: r.owner_completedCount,
-          createdAt: r.owner_createdAt,
+      paginatedResult.items.map(async (r) =>
+        this.toSummary({
+          id: r.id,
+          owner: {
+            id: r.owner_id,
+            displayName: r.owner_displayName,
+            avatarKey: r.owner_avatarKey,
+            bio: r.owner_bio,
+            location: r.owner_location,
+            isBusiness: r.owner_isBusiness,
+            companyName: r.owner_companyName,
+            ratingAvg: r.owner_ratingAvg,
+            ratingCount: r.owner_ratingCount,
+            completedCount: r.owner_completedCount,
+            createdAt: r.owner_createdAt,
+          },
+          categoryId: r.categoryId,
+          categoryName: r.categoryName,
+          firstImageKey: r.firstImageKey,
+          kind: r.kind,
+          status: r.status,
+          title: r.title,
+          priceType: r.priceType,
+          priceMinCents: r.priceMinCents,
+          priceMaxCents: r.priceMaxCents,
+          currency: r.currency,
+          location: r.location,
+          expiresAt: r.expiresAt,
+          bidCount: r.bidCount,
+          createdAt: r.createdAt,
         }),
-        categoryId: r.categoryId,
-        categoryName: r.categoryName,
-        thumbnailUrl: r.firstImageKey ? await this.storage.presignGet(r.firstImageKey) : null,
-        kind: r.kind,
-        status: r.status,
-        title: r.title,
-        priceType: r.priceType,
-        priceMinCents: r.priceMinCents,
-        priceMaxCents: r.priceMaxCents,
-        currency: r.currency,
-        location: r.location,
-        expiresAt: r.expiresAt,
-        bidCount: r.bidCount,
-        createdAt: r.createdAt,
-      })),
+      ),
     );
 
     return {

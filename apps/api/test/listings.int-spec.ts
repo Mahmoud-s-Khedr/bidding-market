@@ -1397,10 +1397,17 @@ describe('Listings endpoints', () => {
         const count = bidCounts[i] ?? 0;
         const targetListing = listings[i]!;
         for (let b = 0; b < count; b++) {
+          const bidder = await prisma.user.create({
+            data: {
+              email: `bidder-mostbids-${i}-${b}-${Date.now()}@market.test`,
+              passwordHash: 'dummy',
+              displayName: `Bidder ${i}-${b}`,
+            },
+          });
           await prisma.bid.create({
             data: {
               listingId: targetListing.id,
-              bidderId: user2Id,
+              bidderId: bidder.id,
               amountCents: 1000 + b * 100,
               currency: 'USD',
               deliveryDays: 3,
