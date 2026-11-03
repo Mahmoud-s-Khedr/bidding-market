@@ -1157,50 +1157,22 @@ export class BidsService {
 
       // 6. Reuse or create Conversation linked to listing/bid/agreement
       const keys = conversationKeys(currentListing.ownerId, currentBid.bidderId, currentListing.id);
-      const existingConv = await tx.conversation.findUnique({
+      await tx.conversation.upsert({
         where: {
           participantPairKey_listingDedupKey: keys,
         },
-      });
-
-      if (existingConv) {
-        await tx.conversation.update({
-          where: { id: existingConv.id },
-          data: {
-            agreementId: agreement.id,
-            bidId: currentBid.id,
+        create: {
+          ...keys,
+          lastMessageAt: new Date(),
+          listingId: currentListing.id,
+          bidId: currentBid.id,
+          agreementId: agreement.id,
+          participants: {
+            create: [{ userId: currentListing.ownerId }, { userId: currentBid.bidderId }],
           },
-        });
-      } else {
-        try {
-          await tx.conversation.create({
-            data: {
-              ...keys,
-              lastMessageAt: new Date(),
-              listingId: currentListing.id,
-              bidId: currentBid.id,
-              agreementId: agreement.id,
-              participants: {
-                create: [{ userId: currentListing.ownerId }, { userId: currentBid.bidderId }],
-              },
-            },
-          });
-        } catch (error) {
-          if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-            await tx.conversation.update({
-              where: {
-                participantPairKey_listingDedupKey: keys,
-              },
-              data: {
-                agreementId: agreement.id,
-                bidId: currentBid.id,
-              },
-            });
-          } else {
-            throw error;
-          }
-        }
-      }
+        },
+        update: { agreementId: agreement.id, bidId: currentBid.id },
+      });
 
       const updatedBid = await tx.bid.findUniqueOrThrow({
         where: { id: currentBid.id },

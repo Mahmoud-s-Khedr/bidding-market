@@ -46,9 +46,10 @@ export class ConversationsService {
     private readonly events: EventEmitter2,
   ) {}
 
-  async create(caller: AuthUser | string, input: ConversationCreateInput) {
-    const userId = typeof caller === 'string' ? caller : caller.id;
-    let userRole = typeof caller === 'string' ? undefined : caller.role;
+  async create(caller: AuthUser, input: ConversationCreateInput) {
+    const userId = caller.id;
+    const userRole = caller.role;
+    let listingId = input.listingId;
     if (input.recipientId === userId) throw new BadRequestException('You cannot message yourself');
     const recipient = await this.prisma.user.findFirst({
       where: { id: input.recipientId, status: 'ACTIVE' },
@@ -59,13 +60,6 @@ export class ConversationsService {
       const listing = await this.prisma.listing.findUnique({ where: { id: input.listingId } });
       if (!listing) throw new NotFoundException('Listing not found');
       if (listing.status === 'DRAFT' || listing.status === 'REMOVED') {
-        if (!userRole) {
-          const callerRecord = await this.prisma.user.findUnique({
-            where: { id: userId },
-            select: { role: true },
-          });
-          userRole = callerRecord?.role ?? 'USER';
-        }
         const isOwner = userId === listing.ownerId;
         const isAdmin = userRole === 'ADMIN';
         if (!isOwner && !isAdmin) {
@@ -96,31 +90,33 @@ export class ConversationsService {
       if (input.listingId && input.listingId !== bid.listingId) {
         throw new NotFoundException('Bid not found');
       }
+      listingId ??= bid.listingId;
     }
 
-    const keys = conversationKeys(userId, input.recipientId, input.listingId);
-    try {
-      const conversation = await this.prisma.conversation.create({
-        data: {
-          ...keys,
-          listingId: input.listingId ?? null,
-          bidId: input.bidId ?? null,
-          lastMessageAt: new Date(),
-          participants: { create: [{ userId }, { userId: input.recipientId }] },
-        },
-      });
-      return this.get(userId, conversation.id);
-    } catch (error) {
-      if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002')
-        throw error;
-      const existing = await this.prisma.conversation.findUnique({
-        where: {
-          participantPairKey_listingDedupKey: keys,
-        },
-      });
-      if (!existing) throw error;
-      return this.get(userId, existing.id);
+    const keys = conversationKeys(userId, input.recipientId, listingId);
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const conversation = await this.prisma.conversation.create({
+          data: {
+            ...keys,
+            listingId: listingId ?? null,
+            bidId: input.bidId ?? null,
+            lastMessageAt: new Date(),
+            participants: { create: [{ userId }, { userId: input.recipientId }] },
+          },
+        });
+        return this.get(userId, conversation.id);
+      } catch (error) {
+        if (!(error instanceof Prisma.PrismaClientKnownRequestError)) throw error;
+        const existing = await this.prisma.conversation.findUnique({
+          where: { participantPairKey_listingDedupKey: keys },
+        });
+        if (existing) return this.get(userId, existing.id);
+        if (error.code !== 'P2034' || attempt === 2) throw error;
+        await new Promise<void>((resolve) => setTimeout(resolve, 25 * (attempt + 1)));
+      }
     }
+    throw new Error('Conversation creation retry exhausted');
   }
 
   async list(userId: string, query: { cursor?: string; limit: number }) {

@@ -1,9 +1,11 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Prisma } from '../../generated/prisma/client.js';
+import type { AuthUser } from '../../common/auth.js';
 import { describe, expect, it, vi } from 'vitest';
 import { ConversationsService } from './conversations.service.js';
 
 describe('ConversationsService', () => {
+  const user = (id: string): AuthUser => ({ id, role: 'USER' });
   const setup = () => {
     const prisma = {
       user: {
@@ -52,11 +54,11 @@ describe('ConversationsService', () => {
   };
   it('rejects self and missing recipients, and returns a unique conflict winner', async () => {
     const { service, prisma } = setup();
-    await expect(service.create('u1', { recipientId: 'u1' })).rejects.toBeInstanceOf(
+    await expect(service.create(user('u1'), { recipientId: 'u1' })).rejects.toBeInstanceOf(
       BadRequestException,
     );
     prisma.user.findFirst.mockResolvedValueOnce(null);
-    await expect(service.create('u1', { recipientId: 'u2' })).rejects.toBeInstanceOf(
+    await expect(service.create(user('u1'), { recipientId: 'u2' })).rejects.toBeInstanceOf(
       NotFoundException,
     );
     prisma.conversation.create.mockRejectedValueOnce(
@@ -64,7 +66,22 @@ describe('ConversationsService', () => {
     );
     prisma.conversation.findUnique.mockResolvedValueOnce({ id: 'c1' });
     vi.spyOn(service, 'get').mockResolvedValue({ id: 'c1' });
-    await expect(service.create('u1', { recipientId: 'u2' })).resolves.toEqual({ id: 'c1' });
+    await expect(service.create(user('u1'), { recipientId: 'u2' })).resolves.toEqual({ id: 'c1' });
+  });
+  it('retries a transient conversation write conflict', async () => {
+    const { service, prisma } = setup();
+    prisma.conversation.create
+      .mockRejectedValueOnce(
+        new Prisma.PrismaClientKnownRequestError('write conflict', {
+          code: 'P2034',
+          clientVersion: 'x',
+        }),
+      )
+      .mockResolvedValueOnce({ id: 'c1' });
+    vi.spyOn(service, 'get').mockResolvedValue({ id: 'c1' });
+
+    await expect(service.create(user('u1'), { recipientId: 'u2' })).resolves.toEqual({ id: 'c1' });
+    expect(prisma.conversation.create).toHaveBeenCalledTimes(2);
   });
   it('validates attachment type rules before creating a message', async () => {
     const { service, prisma } = setup();
@@ -114,7 +131,7 @@ describe('ConversationsService', () => {
     const { service, prisma } = setup();
     prisma.listing.findUnique.mockResolvedValueOnce(null);
     await expect(
-      service.create('u1', { recipientId: 'u2', listingId: 'l_missing' }),
+      service.create(user('u1'), { recipientId: 'u2', listingId: 'l_missing' }),
     ).rejects.toBeInstanceOf(NotFoundException);
 
     // DRAFT listing, caller is not owner and not admin
@@ -123,9 +140,8 @@ describe('ConversationsService', () => {
       ownerId: 'u_other',
       status: 'DRAFT',
     });
-    prisma.user.findUnique.mockResolvedValueOnce({ id: 'u1', role: 'USER' });
     await expect(
-      service.create('u1', { recipientId: 'u2', listingId: 'l1' }),
+      service.create(user('u1'), { recipientId: 'u2', listingId: 'l1' }),
     ).rejects.toBeInstanceOf(NotFoundException);
 
     // REMOVED listing, caller is not owner and not admin
@@ -134,16 +150,17 @@ describe('ConversationsService', () => {
       ownerId: 'u_other',
       status: 'REMOVED',
     });
-    prisma.user.findUnique.mockResolvedValueOnce({ id: 'u1', role: 'USER' });
     await expect(
-      service.create('u1', { recipientId: 'u2', listingId: 'l1' }),
+      service.create(user('u1'), { recipientId: 'u2', listingId: 'l1' }),
     ).rejects.toBeInstanceOf(NotFoundException);
 
     // DRAFT listing, caller is owner
     prisma.listing.findUnique.mockResolvedValueOnce({ id: 'l1', ownerId: 'u1', status: 'DRAFT' });
     prisma.conversation.create.mockResolvedValueOnce({ id: 'c1' });
     vi.spyOn(service, 'get').mockResolvedValueOnce({ id: 'c1' });
-    await expect(service.create('u1', { recipientId: 'u2', listingId: 'l1' })).resolves.toEqual({
+    await expect(
+      service.create(user('u1'), { recipientId: 'u2', listingId: 'l1' }),
+    ).resolves.toEqual({
       id: 'c1',
     });
 
@@ -164,7 +181,7 @@ describe('ConversationsService', () => {
     const { service, prisma } = setup();
     prisma.bid.findUnique.mockResolvedValueOnce(null);
     await expect(
-      service.create('u1', { recipientId: 'u2', bidId: 'b_missing' }),
+      service.create(user('u1'), { recipientId: 'u2', bidId: 'b_missing' }),
     ).rejects.toBeInstanceOf(NotFoundException);
 
     // Caller is neither bidder nor listing owner
@@ -175,7 +192,7 @@ describe('ConversationsService', () => {
       listing: { id: 'l1', ownerId: 'u_owner' },
     });
     await expect(
-      service.create('u_stranger', { recipientId: 'u_owner', bidId: 'b1' }),
+      service.create(user('u_stranger'), { recipientId: 'u_owner', bidId: 'b1' }),
     ).rejects.toBeInstanceOf(NotFoundException);
 
     // Caller is bidder, but recipient is not owner
@@ -186,7 +203,7 @@ describe('ConversationsService', () => {
       listing: { id: 'l1', ownerId: 'u_owner' },
     });
     await expect(
-      service.create('u_bidder', { recipientId: 'u_other', bidId: 'b1' }),
+      service.create(user('u_bidder'), { recipientId: 'u_other', bidId: 'b1' }),
     ).rejects.toBeInstanceOf(NotFoundException);
 
     // Caller is bidder, recipient is owner -> success
@@ -199,8 +216,13 @@ describe('ConversationsService', () => {
     prisma.conversation.create.mockResolvedValueOnce({ id: 'c_bid' });
     vi.spyOn(service, 'get').mockResolvedValueOnce({ id: 'c_bid' });
     await expect(
-      service.create('u_bidder', { recipientId: 'u_owner', bidId: 'b1' }),
+      service.create(user('u_bidder'), { recipientId: 'u_owner', bidId: 'b1' }),
     ).resolves.toEqual({ id: 'c_bid' });
+    expect(prisma.conversation.create).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ listingId: 'l1', listingDedupKey: 'l1' }),
+      }),
+    );
 
     // Caller is owner, recipient is bidder -> success
     prisma.bid.findUnique.mockResolvedValueOnce({
@@ -212,14 +234,16 @@ describe('ConversationsService', () => {
     prisma.conversation.create.mockResolvedValueOnce({ id: 'c_owner' });
     vi.spyOn(service, 'get').mockResolvedValueOnce({ id: 'c_owner' });
     await expect(
-      service.create('u_owner', { recipientId: 'u_bidder', bidId: 'b1' }),
+      service.create(user('u_owner'), { recipientId: 'u_bidder', bidId: 'b1' }),
     ).resolves.toEqual({ id: 'c_owner' });
   });
 
-  it('updates conversation lastMessageAt with updateMany lt created.createdAt', async () => {
+  it('does not regress a conversation lastMessageAt that is already in the future', async () => {
     const { service, prisma } = setup();
     prisma.conversationParticipant.findMany.mockResolvedValue([{ userId: 'u1' }, { userId: 'u2' }]);
     const mockCreatedAt = new Date('2026-11-03T10:00:00Z');
+    const futureLastMessageAt = new Date('2026-11-04T10:00:00Z');
+    prisma.conversation.updateMany.mockResolvedValueOnce({ count: 0 });
     prisma.message.create.mockResolvedValue({
       id: 'm1',
       conversationId: 'c1',
@@ -241,5 +265,6 @@ describe('ConversationsService', () => {
       },
       data: { lastMessageAt: mockCreatedAt },
     });
+    expect(mockCreatedAt.getTime()).toBeLessThan(futureLastMessageAt.getTime());
   });
 });
