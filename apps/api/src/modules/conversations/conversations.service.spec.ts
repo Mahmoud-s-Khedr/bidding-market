@@ -27,6 +27,7 @@ describe('ConversationsService', () => {
       upload: { findMany: vi.fn() },
       messageAttachment: { findFirst: vi.fn().mockResolvedValue(null) },
       $executeRaw: vi.fn(),
+      $queryRaw: vi.fn().mockResolvedValue([{ count: 3n }]),
       $transaction: vi.fn((fn: (tx: typeof prisma) => unknown) => Promise.resolve(fn(prisma))),
     };
     const storage = { presignGet: vi.fn().mockResolvedValue('url') };
@@ -98,5 +99,10 @@ describe('ConversationsService', () => {
     prisma.message.findUnique.mockResolvedValue({ id: 'new', createdAt: recent });
     await service.read('u1', 'c1', 'old');
     expect(prisma.conversationParticipant.update).not.toHaveBeenCalled();
+  });
+  it('counts unread messages across conversations for a user', async () => {
+    const { service, prisma } = setup();
+    await expect(service.countUnreadForUser('u1')).resolves.toBe(3);
+    expect(prisma.$queryRaw).toHaveBeenCalled();
   });
 });

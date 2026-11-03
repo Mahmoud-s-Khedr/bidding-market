@@ -9,6 +9,13 @@ import { Prisma } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { StorageService } from '../../storage/storage.service.js';
 import { UserPresenter, publicUserSelect } from '../users/user.presenter.js';
+import {
+  conversationKeys,
+  NO_LISTING_DEDUP_KEY,
+  type ConversationDedupKeys,
+} from './conversations.keys.js';
+
+export { conversationKeys, NO_LISTING_DEDUP_KEY, type ConversationDedupKeys };
 
 const imageMime = /^image\//;
 const audioMime = /^audio\//;
@@ -51,13 +58,11 @@ export class ConversationsService {
       throw new NotFoundException('Listing not found');
     if (input.bidId && !(await this.prisma.bid.findUnique({ where: { id: input.bidId } })))
       throw new NotFoundException('Bid not found');
-    const pair = [userId, input.recipientId].sort().join(':');
-    const listingKey = input.listingId ?? '__none__';
+    const keys = conversationKeys(userId, input.recipientId, input.listingId);
     try {
       const conversation = await this.prisma.conversation.create({
         data: {
-          participantPairKey: pair,
-          listingDedupKey: listingKey,
+          ...keys,
           listingId: input.listingId ?? null,
           bidId: input.bidId ?? null,
           lastMessageAt: new Date(),
@@ -70,10 +75,7 @@ export class ConversationsService {
         throw error;
       const existing = await this.prisma.conversation.findUnique({
         where: {
-          participantPairKey_listingDedupKey: {
-            participantPairKey: pair,
-            listingDedupKey: listingKey,
-          },
+          participantPairKey_listingDedupKey: keys,
         },
       });
       if (!existing) throw error;
@@ -212,6 +214,21 @@ export class ConversationsService {
         });
     });
     this.events.emit('message.read', { conversationId, userId, lastMessageId });
+  }
+
+  async countUnreadForUser(userId: string): Promise<number> {
+    const rows = await this.prisma.$queryRaw<Array<{ count: bigint }>>(Prisma.sql`
+      SELECT COUNT(*) AS count FROM "ConversationParticipant" cp
+      JOIN "Message" m ON m."conversationId" = cp."conversationId"
+      LEFT JOIN "Message" lr ON lr.id = cp."lastReadMessageId"
+      WHERE cp."userId" = ${userId} AND m."senderId" <> ${userId}
+        AND (
+          lr.id IS NULL
+          OR m."createdAt" > lr."createdAt"
+          OR (m."createdAt" = lr."createdAt" AND m.id > lr.id)
+        )
+    `);
+    return Number(rows[0]?.count ?? 0n);
   }
 
   private include() {

@@ -29,6 +29,7 @@ import { StorageService } from '../../storage/storage.service.js';
 import { CategoriesService } from '../categories/categories.service.js';
 import { UserPresenter, publicUserSelect } from '../users/user.presenter.js';
 import { ListingPresenter } from '../listings/listing.presenter.js';
+import { conversationKeys } from '../conversations/conversations.keys.js';
 import { decodeBidCursor, encodeBidCursor } from './bid.cursor.js';
 import {
   BID_EVENTS,
@@ -1180,12 +1181,14 @@ export class BidsService {
           },
         });
       } else {
-        const pair = [currentListing.ownerId, currentBid.bidderId].sort().join(':');
-        const listingKey = currentListing.id;
+        const keys = conversationKeys(
+          currentListing.ownerId,
+          currentBid.bidderId,
+          currentListing.id,
+        );
         await tx.conversation.create({
           data: {
-            participantPairKey: pair,
-            listingDedupKey: listingKey,
+            ...keys,
             lastMessageAt: new Date(),
             listingId: currentListing.id,
             bidId: currentBid.id,

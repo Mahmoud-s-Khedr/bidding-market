@@ -122,7 +122,7 @@ update the existing notification body, message id and timestamp instead of addin
 Dashboard semantics:
 
 - `agreements.active`: counts agreements in both `ACTIVE` and `DELIVERED` status for the authenticated user.
-- `unreadMessages`: counts every message sent by someone else in each conversation the user participates in whose `createdAt` is later than the message referenced by that participant's `lastReadMessageId`; when it is null (or references no row), all messages from other participants count as unread. Messages with the same timestamp as the read marker do not count.
+- `unreadMessages`: counts every message sent by someone else in each conversation the user participates in that is newer than the message referenced by that participant's `lastReadMessageId` (ordered by `createdAt` ascending with `id` breaking ties monotonically); when `lastReadMessageId` is null (or references no row), all messages from other participants count as unread.
 
 ## Reports
 
