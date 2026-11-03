@@ -45,4 +45,21 @@ export const queryKeys = {
       ['bids', 'detail', id, viewerId ?? 'anon'] as const,
     detailAll: (id: string) => ['bids', 'detail', id] as const,
   },
+  conversations: {
+    all: ['conversations'] as const,
+    lists: () => ['conversations', 'list'] as const,
+    list: () => ['conversations', 'list'] as const,
+    infinite: () => ['conversations', 'infinite'] as const,
+    details: () => ['conversations', 'detail'] as const,
+    detail: (id: string) => ['conversations', 'detail', id] as const,
+    messages: (id: string) => ['conversations', 'messages', id] as const,
+    unreadTotal: () => ['conversations', 'unread-total'] as const,
+  },
+  notifications: {
+    all: ['notifications'] as const,
+    lists: () => ['notifications', 'list'] as const,
+    list: (unread?: boolean) => ['notifications', 'list', { unread }] as const,
+    infinite: (unread?: boolean) => ['notifications', 'infinite', { unread }] as const,
+    unreadCount: () => ['notifications', 'unread-count'] as const,
+  },
 };

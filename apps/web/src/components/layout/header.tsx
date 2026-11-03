@@ -21,6 +21,7 @@ import {
 import { useAuth } from '@/components/auth/auth-provider';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { safeMediaUrl } from '@/lib/safe-url';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -30,12 +31,17 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Badge } from '@/components/ui/badge';
+import { NotificationsBell } from '@/components/notifications/notifications-bell';
+import { useTotalUnreadMessages } from '@/lib/api/conversations';
 
 export function Header() {
   const { user, isAuthenticated, isAdmin, logout } = useAuth();
   const router = useRouter();
   const [searchQuery, setSearchQuery] = React.useState('');
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
+  // Unread messages total: /dashboard/summary is not yet available on main,
+  // so this falls back to summing unread counts of active conversations up to limit 50.
+  const totalUnreadMessages = useTotalUnreadMessages({ enabled: isAuthenticated });
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -117,18 +123,29 @@ export function Header() {
         <div className="hidden md:flex items-center gap-3">
           {isAuthenticated ? (
             <>
-              {/* Notification bell placeholder */}
-              <button
-                type="button"
+              {/* Messages button with unread count */}
+              <Link
+                href="/messages"
                 className="relative rounded-full p-2 text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                aria-label="Notifications"
+                aria-label={
+                  totalUnreadMessages > 0 ? `Messages (${totalUnreadMessages} unread)` : 'Messages'
+                }
               >
-                <Bell className="h-5 w-5" />
-                <span className="absolute top-1.5 right-1.5 flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
-                </span>
-              </button>
+                <MessageSquare className="h-5 w-5" />
+                {totalUnreadMessages > 0 && (
+                  <span className="absolute top-1 right-1 flex items-center justify-center">
+                    <Badge
+                      variant="default"
+                      className="h-4 min-w-[16px] px-1 text-[10px] font-bold leading-none bg-primary text-primary-foreground"
+                    >
+                      {totalUnreadMessages > 99 ? '99+' : totalUnreadMessages}
+                    </Badge>
+                  </span>
+                )}
+              </Link>
+
+              {/* Notification bell dropdown */}
+              <NotificationsBell />
 
               {/* User Dropdown */}
               <DropdownMenu>
@@ -140,7 +157,7 @@ export function Header() {
                   >
                     <Avatar className="h-8 w-8">
                       {user?.avatarUrl && (
-                        <AvatarImage src={user.avatarUrl} alt={user.displayName} />
+                        <AvatarImage src={safeMediaUrl(user.avatarUrl)} alt={user.displayName} />
                       )}
                       <AvatarFallback>{getInitials(user?.displayName)}</AvatarFallback>
                     </Avatar>
@@ -308,10 +325,25 @@ export function Header() {
                 <Link
                   href="/messages"
                   onClick={() => setMobileMenuOpen(false)}
+                  className="rounded-md px-3 py-2 text-base font-medium text-foreground hover:bg-secondary flex items-center justify-between"
+                >
+                  <span className="flex items-center gap-2">
+                    <MessageSquare className="h-4 w-4" />
+                    Messages
+                  </span>
+                  {totalUnreadMessages > 0 && (
+                    <Badge variant="default" className="text-xs">
+                      {totalUnreadMessages}
+                    </Badge>
+                  )}
+                </Link>
+                <Link
+                  href="/notifications"
+                  onClick={() => setMobileMenuOpen(false)}
                   className="rounded-md px-3 py-2 text-base font-medium text-foreground hover:bg-secondary flex items-center gap-2"
                 >
-                  <MessageSquare className="h-4 w-4" />
-                  Messages
+                  <Bell className="h-4 w-4" />
+                  Notifications
                 </Link>
                 {isAdmin && (
                   <Link

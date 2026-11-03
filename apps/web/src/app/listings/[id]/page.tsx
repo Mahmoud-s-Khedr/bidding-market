@@ -40,10 +40,12 @@ import { useAuth } from '@/components/auth/auth-provider';
 import { useToast } from '@/components/ui/toast';
 import { useCloseListing, useDeleteListing, useListing } from '@/lib/api/listings';
 import { useBid, useCreateBid, useUpdateBid, useWithdrawBid } from '@/lib/api/bids';
+import { useCreateConversation } from '@/lib/api/conversations';
 import { getAttachmentUrl } from '@/lib/api/uploads';
 import { formatDate, formatMoney } from '@/lib/format';
 import { ApiError } from '@/lib/api/client';
 import type { Attachment, BidCreateInput } from '@/lib/api/types';
+import { safeMediaUrl } from '@/lib/safe-url';
 
 export default function ListingDetailPage() {
   const params = useParams();
@@ -82,20 +84,51 @@ export default function ListingDetailPage() {
   const { data: myBidDetail, isLoading: isLoadingMyBid } = useBid(myBidId, {
     enabled: Boolean(myBidId),
   });
+  const createConversationMutation = useCreateConversation();
 
   const [closeDialogOpen, setCloseDialogOpen] = React.useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
-  const [placeholderDialogOpen, setPlaceholderDialogOpen] = React.useState<string | null>(null);
   const [bidDialogOpen, setBidDialogOpen] = React.useState(false);
   const [isEditingBid, setIsEditingBid] = React.useState(false);
   const [withdrawDialogOpen, setWithdrawDialogOpen] = React.useState(false);
 
   const isOwner = Boolean(user && listing && user.id === listing.owner.id);
 
+  const handleMessageOwner = async () => {
+    if (!listing) return;
+    if (!user) {
+      router.push(`/login?next=/listings/${listing.id}`);
+      return;
+    }
+    try {
+      const conv = await createConversationMutation.mutateAsync({
+        recipientId: listing.owner.id,
+        listingId: listing.id,
+      });
+      router.push(`/messages/${conv.id}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Unable to start conversation';
+      toast({
+        title: 'Error',
+        description: msg,
+        variant: 'error',
+      });
+    }
+  };
+
   const handleDownloadAttachment = async (attachment: Attachment) => {
     try {
       const res = await getAttachmentUrl(attachment.id);
-      window.open(res.url, '_blank', 'noopener,noreferrer');
+      const safeUrl = safeMediaUrl(res.url);
+      if (safeUrl) {
+        window.open(safeUrl, '_blank', 'noopener,noreferrer');
+      } else {
+        toast({
+          title: 'Download failed',
+          description: 'Invalid download URL',
+          variant: 'error',
+        });
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to retrieve download URL';
       toast({
@@ -576,10 +609,15 @@ export default function ListingDetailPage() {
                       variant="outline"
                       size="lg"
                       className="w-full"
-                      onClick={() => setPlaceholderDialogOpen('message')}
+                      disabled={createConversationMutation.isPending}
+                      onClick={() => {
+                        void handleMessageOwner();
+                      }}
                     >
                       <MessageSquare className="h-4 w-4 mr-2" />
-                      Message Owner
+                      {createConversationMutation.isPending
+                        ? 'Starting Conversation...'
+                        : 'Message Owner'}
                     </Button>
                   </div>
                 )}
@@ -596,7 +634,7 @@ export default function ListingDetailPage() {
             <Link href={`/users/${listing.owner.id}`} className="group flex items-center gap-3">
               <Avatar className="h-12 w-12 border border-border">
                 <AvatarImage
-                  src={listing.owner.avatarUrl || undefined}
+                  src={safeMediaUrl(listing.owner.avatarUrl)}
                   alt={listing.owner.displayName}
                 />
                 <AvatarFallback className="text-sm font-semibold">
@@ -724,16 +762,6 @@ export default function ListingDetailPage() {
         variant="destructive"
         isLoading={withdrawBidMutation.isPending}
         onConfirm={handleConfirmWithdraw}
-      />
-
-      {/* Placeholder dialog for WEB-04 Messaging */}
-      <ConfirmDialog
-        open={Boolean(placeholderDialogOpen)}
-        onOpenChange={(open) => !open && setPlaceholderDialogOpen(null)}
-        title="Message Owner"
-        description="Direct 1:1 real-time messaging and chat will be implemented in task WEB-04."
-        confirmText="Got it"
-        onConfirm={() => setPlaceholderDialogOpen(null)}
       />
     </div>
   );
