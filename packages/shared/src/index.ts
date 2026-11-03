@@ -105,7 +105,7 @@ export const listingCreateSchema = z
       .string()
       .regex(/^[A-Z]{3}$/)
       .default('USD'),
-    deliveryDays: z.number().int().positive().optional(),
+    deliveryDays: z.number().int().positive().max(3650).optional(),
     location: z.string().max(120).optional(),
     tags: z.array(z.string().trim().min(1).max(40)).max(10).optional(),
     imageIds: z.array(z.string()).optional(),
@@ -166,7 +166,7 @@ export const listingUpdateSchema = z
       .string()
       .regex(/^[A-Z]{3}$/)
       .optional(),
-    deliveryDays: z.number().int().positive().nullable().optional(),
+    deliveryDays: z.number().int().positive().max(3650).nullable().optional(),
     location: z.string().max(120).nullable().optional(),
     tags: z.array(z.string().trim().min(1).max(40)).max(10).optional(),
     imageIds: z.array(z.string()).optional(),
@@ -215,7 +215,7 @@ export const bidCreateSchema = z.object({
     .string()
     .regex(/^[A-Z]{3}$/)
     .default('USD'),
-  deliveryDays: z.number().int().positive(),
+  deliveryDays: z.number().int().positive().max(3650),
   message: z.string().trim().max(5000),
   attachmentIds: z.array(z.string()).optional(),
 });
@@ -302,7 +302,7 @@ export const bidQuerySchema = paginationSchema.extend({
 export const myBidsQuerySchema = paginationSchema.extend({ status: BidStatus.optional() });
 export const bidCounterSchema = z.object({
   amountCents: z.number().int().positive().max(MAX_INT4),
-  deliveryDays: z.number().int().positive(),
+  deliveryDays: z.number().int().positive().max(3650),
   message: z.string().max(5000),
 });
 export const milestoneSchema = z.object({
