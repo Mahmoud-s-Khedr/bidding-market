@@ -14,6 +14,8 @@ describe('NotificationsService', () => {
         updateMany: vi.fn(),
         update: vi.fn(),
       },
+      $executeRaw: vi.fn(),
+      $transaction: vi.fn((fn: (tx: unknown) => unknown) => Promise.resolve(fn(prisma))),
     };
     const realtime = { emitToUser: vi.fn() };
     return {

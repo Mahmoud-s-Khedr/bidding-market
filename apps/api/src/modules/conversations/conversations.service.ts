@@ -18,14 +18,14 @@ const parseCursor = (value?: string): { date: Date; id: string } | undefined => 
   if (!value) return undefined;
   try {
     const raw: unknown = JSON.parse(Buffer.from(value, 'base64url').toString('utf8'));
-    if (!raw || typeof raw !== 'object') return undefined;
+    if (!raw || typeof raw !== 'object') throw new BadRequestException('Invalid cursor');
     const item = raw as { date?: unknown; id?: unknown };
     const date = new Date(typeof item.date === 'string' ? item.date : '');
-    return !Number.isNaN(date.valueOf()) && typeof item.id === 'string'
-      ? { date, id: item.id }
-      : undefined;
+    if (Number.isNaN(date.valueOf()) || typeof item.id !== 'string')
+      throw new BadRequestException('Invalid cursor');
+    return { date, id: item.id };
   } catch {
-    return undefined;
+    throw new BadRequestException('Invalid cursor');
   }
 };
 
@@ -60,6 +60,7 @@ export class ConversationsService {
           listingDedupKey: listingKey,
           listingId: input.listingId ?? null,
           bidId: input.bidId ?? null,
+          lastMessageAt: new Date(),
           participants: { create: [{ userId }, { userId: input.recipientId }] },
         },
       });
@@ -81,32 +82,30 @@ export class ConversationsService {
   }
 
   async list(userId: string, query: { cursor?: string; limit: number }) {
-    const all = await this.prisma.conversation.findMany({
-      where: { participants: { some: { userId } } },
+    const decoded = parseCursor(query.cursor);
+    const rows = await this.prisma.conversation.findMany({
+      where: {
+        participants: { some: { userId } },
+        ...(decoded
+          ? {
+              OR: [
+                { lastMessageAt: { lt: decoded.date } },
+                { lastMessageAt: decoded.date, id: { lt: decoded.id } },
+              ],
+            }
+          : {}),
+      },
       include: this.include(),
       orderBy: [{ lastMessageAt: 'desc' }, { id: 'desc' }],
+      take: query.limit + 1,
     });
-    const decoded = parseCursor(query.cursor);
-    const filtered = decoded
-      ? all.filter((row) => {
-          const activity = row.lastMessageAt ?? row.createdAt;
-          return (
-            activity < decoded.date ||
-            (activity.getTime() === decoded.date.getTime() && row.id < decoded.id)
-          );
-        })
-      : all;
-    const rows = filtered.slice(0, query.limit + 1);
     const items = await Promise.all(
       rows.slice(0, query.limit).map((row) => this.presentConversation(row, userId)),
     );
     const last = rows[query.limit - 1];
     return {
       items,
-      nextCursor:
-        rows.length > query.limit && last
-          ? cursor(last.lastMessageAt ?? last.createdAt, last.id)
-          : null,
+      nextCursor: rows.length > query.limit && last ? cursor(last.lastMessageAt, last.id) : null,
     };
   }
 
@@ -121,20 +120,23 @@ export class ConversationsService {
 
   async messages(userId: string, conversationId: string, query: MessagesQueryInput) {
     await this.assertParticipant(userId, conversationId);
-    const all = await this.prisma.message.findMany({
-      where: { conversationId },
+    const decoded = parseCursor(query.cursor);
+    const rows = await this.prisma.message.findMany({
+      where: {
+        conversationId,
+        ...(decoded
+          ? {
+              OR: [
+                { createdAt: { lt: decoded.date } },
+                { createdAt: decoded.date, id: { lt: decoded.id } },
+              ],
+            }
+          : {}),
+      },
       include: { sender: { select: publicUserSelect }, attachments: { include: { upload: true } } },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: query.limit + 1,
     });
-    const decoded = parseCursor(query.cursor);
-    const filtered = decoded
-      ? all.filter(
-          (row) =>
-            row.createdAt < decoded.date ||
-            (row.createdAt.getTime() === decoded.date.getTime() && row.id < decoded.id),
-        )
-      : all;
-    const rows = filtered.slice(0, query.limit + 1);
     const items = await Promise.all(
       rows.slice(0, query.limit).map((row) => this.presentMessage(row)),
     );
@@ -193,6 +195,7 @@ export class ConversationsService {
         where: { conversationId_userId: { conversationId, userId } },
         data: { lastReadMessageId: lastMessageId },
       });
+      this.events.emit('message.read', { conversationId, userId, lastMessageId });
       return;
     }
     const prior = await this.prisma.message.findUnique({
@@ -207,6 +210,7 @@ export class ConversationsService {
         where: { conversationId_userId: { conversationId, userId } },
         data: { lastReadMessageId: lastMessageId },
       });
+    this.events.emit('message.read', { conversationId, userId, lastMessageId });
   }
 
   private include() {
@@ -246,6 +250,8 @@ export class ConversationsService {
     const uploads = await this.prisma.upload.findMany({ where: { id: { in: ids } } });
     if (uploads.length !== ids.length)
       throw new BadRequestException('One or more uploads not found');
+    if (await this.prisma.messageAttachment.findFirst({ where: { uploadId: { in: ids } } }))
+      throw new BadRequestException('Upload is already attached to a message');
     for (const upload of uploads) {
       if (
         upload.uploaderId !== userId ||

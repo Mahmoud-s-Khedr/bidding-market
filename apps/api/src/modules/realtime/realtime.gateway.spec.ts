@@ -9,7 +9,16 @@ describe('RealtimeGateway', () => {
       conversationParticipant: { findUnique: vi.fn(), findMany: vi.fn(), update: vi.fn() },
       message: { findFirst: vi.fn() },
     };
-    const redis = { incr: vi.fn(), decr: vi.fn(), del: vi.fn(), duplicate: vi.fn(() => ({})) };
+    const redis = {
+      incr: vi.fn(),
+      decr: vi.fn(),
+      del: vi.fn(),
+      sadd: vi.fn(),
+      srem: vi.fn(),
+      scard: vi.fn().mockResolvedValue(1),
+      expire: vi.fn(),
+      duplicate: vi.fn(() => ({})),
+    };
     const realtime = { setServer: vi.fn(), emitToUsers: vi.fn() };
     return {
       gateway: new RealtimeGateway(
@@ -17,6 +26,7 @@ describe('RealtimeGateway', () => {
         prisma as never,
         redis as never,
         realtime as never,
+        { read: vi.fn() } as never,
       ),
       jwt,
       prisma,
@@ -58,16 +68,14 @@ describe('RealtimeGateway', () => {
     const { gateway, prisma, redis, realtime } = setup();
     const one = socket() as ReturnType<typeof socket> & { data: { userId?: string } };
     one.data.userId = 'u1';
-    redis.incr.mockResolvedValue(1);
+    redis.scard.mockResolvedValueOnce(1).mockResolvedValueOnce(1).mockResolvedValueOnce(0);
     prisma.conversationParticipant.findMany.mockResolvedValue([
       { conversation: { participants: [{ userId: 'u1' }, { userId: 'u2' }] } },
     ]);
     await gateway.handleConnection(one as never);
     expect(one.join).toHaveBeenCalledWith('user:u1');
-    redis.decr.mockResolvedValue(1);
     await gateway.handleDisconnect(one as never);
     expect(redis.del).not.toHaveBeenCalled();
-    redis.decr.mockResolvedValue(0);
     await gateway.handleDisconnect(one as never);
     expect(redis.del).toHaveBeenCalled();
     prisma.conversationParticipant.findUnique.mockResolvedValue(null);

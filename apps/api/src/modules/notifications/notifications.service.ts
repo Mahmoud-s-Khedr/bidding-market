@@ -44,7 +44,7 @@ export class NotificationsService {
     const marker = query.cursor
       ? await this.prisma.notification.findFirst({
           where: { id: query.cursor, userId },
-          select: { createdAt: true, id: true },
+          select: { updatedAt: true, id: true },
         })
       : null;
     const rows = await this.prisma.notification.findMany({
@@ -54,13 +54,13 @@ export class NotificationsService {
         ...(marker
           ? {
               OR: [
-                { createdAt: { lt: marker.createdAt } },
-                { createdAt: marker.createdAt, id: { lt: marker.id } },
+                { updatedAt: { lt: marker.updatedAt } },
+                { updatedAt: marker.updatedAt, id: { lt: marker.id } },
               ],
             }
           : {}),
       },
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
       take: query.limit + 1,
     });
     const items = rows.slice(0, query.limit);
@@ -94,29 +94,33 @@ export class NotificationsService {
     const recipientId = event.participantIds.find((id) => id !== event.senderId);
     if (!recipientId) return;
     const data = { conversationId: event.message.conversationId, messageId: event.message.id };
-    const existing = await this.prisma.notification.findFirst({
-      where: {
-        userId: recipientId,
-        type: 'MESSAGE_RECEIVED',
-        readAt: null,
-        data: { path: ['conversationId'], equals: event.message.conversationId },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
-    if (existing) {
-      const notification = await this.prisma.notification.update({
-        where: { id: existing.id },
-        data: { body: event.message.body || 'Sent an attachment', data, createdAt: new Date() },
+    const notification = await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`${recipientId}:${event.message.conversationId}`}))`;
+      const existing = await tx.notification.findFirst({
+        where: {
+          userId: recipientId,
+          type: 'MESSAGE_RECEIVED',
+          conversationId: event.message.conversationId,
+          readAt: null,
+        },
       });
-      this.realtime.emitToUser(recipientId, 'notification:new', notification);
-      return;
-    }
-    await this.notify(recipientId, {
-      type: 'MESSAGE_RECEIVED',
-      title: 'New message',
-      body: event.message.body || 'Sent an attachment',
-      link: `/conversations/${event.message.conversationId}`,
-      data,
+      if (existing)
+        return tx.notification.update({
+          where: { id: existing.id },
+          data: { body: event.message.body || 'Sent an attachment', data },
+        });
+      return tx.notification.create({
+        data: {
+          userId: recipientId,
+          type: 'MESSAGE_RECEIVED',
+          title: 'New message',
+          body: event.message.body || 'Sent an attachment',
+          link: `/conversations/${event.message.conversationId}`,
+          data,
+          conversationId: event.message.conversationId,
+        },
+      });
     });
+    this.realtime.emitToUser(recipientId, 'notification:new', notification);
   }
 }

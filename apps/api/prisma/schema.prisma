@@ -321,7 +321,7 @@ participants ConversationParticipant[]
 messages Message[]
 createdAt DateTime @default(now())
 updatedAt DateTime @updatedAt
-lastMessageAt DateTime?
+lastMessageAt DateTime
 @@index([listingId])
 @@index([bidId])
 @@unique([participantPairKey,listingDedupKey])
@@ -354,7 +354,7 @@ model MessageAttachment {
 id String @id @default(cuid())
 messageId String
 message Message @relation(fields:[messageId],references:[id],onDelete:Cascade)
-uploadId String
+uploadId String @unique
 upload Upload @relation(fields:[uploadId],references:[id],onDelete:Restrict)
 @@unique([messageId,uploadId])
 }
@@ -454,9 +454,12 @@ title String
 body String
 link String?
 data Json?
+conversationId String?
 readAt DateTime?
 createdAt DateTime @default(now())
+updatedAt DateTime @updatedAt
 @@index([userId,readAt,createdAt])
+@@index([userId,conversationId])
 }
 model Report {
 id String @id @default(cuid())
