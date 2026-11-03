@@ -1,7 +1,12 @@
 import { Inject, OnApplicationShutdown } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { OnEvent } from '@nestjs/event-emitter';
-import { SubscribeMessage, WebSocketGateway, WebSocketServer } from '@nestjs/websockets';
+import {
+  MessageBody,
+  SubscribeMessage,
+  WebSocketGateway,
+  WebSocketServer,
+} from '@nestjs/websockets';
 import { createAdapter } from '@socket.io/redis-adapter';
 import { wsPayloadSchemas } from '@market/shared';
 import type Redis from 'ioredis';
@@ -10,12 +15,19 @@ import { PrismaService } from '../../prisma/prisma.service.js';
 import { REDIS } from '../../redis/redis.module.js';
 import { RealtimeService } from './realtime.service.js';
 import { ConversationsService } from '../conversations/conversations.service.js';
+import { APP_CONFIG, type Env } from '../../common/env.js';
 
 interface AuthedSocket extends Socket {
-  data: { userId?: string; lastTypingAt?: number; presenceTracked?: boolean; expiresAt?: number };
+  data: {
+    userId?: string;
+    lastTypingAt?: number;
+    presenceTracked?: boolean;
+    expiresAt?: number;
+    presenceHeartbeat?: NodeJS.Timeout;
+  };
 }
 
-@WebSocketGateway({ namespace: '/rt', cors: { origin: process.env.WEB_ORIGIN, credentials: true } })
+@WebSocketGateway({ namespace: '/rt' })
 export class RealtimeGateway implements OnApplicationShutdown {
   @WebSocketServer() server!: Server;
   private publisher?: Redis;
@@ -27,9 +39,11 @@ export class RealtimeGateway implements OnApplicationShutdown {
     @Inject(REDIS) private readonly redis: Redis,
     private readonly realtime: RealtimeService,
     private readonly conversations: ConversationsService,
+    @Inject(APP_CONFIG) private readonly env: Env,
   ) {}
 
   afterInit(namespace: Namespace): void {
+    namespace.server.engine.opts.cors = { origin: this.env.WEB_ORIGIN, credentials: true };
     this.realtime.setServer(namespace as unknown as Server);
     this.publisher = this.redis.duplicate();
     this.subscriber = this.redis.duplicate();
@@ -53,6 +67,9 @@ export class RealtimeGateway implements OnApplicationShutdown {
       await this.redis.sadd(`rt:presence:${userId}`, socket.id);
       await this.redis.expire(`rt:presence:${userId}`, 90);
       socket.data.presenceTracked = true;
+      socket.data.presenceHeartbeat = setInterval(() => {
+        void this.redis.expire(`rt:presence:${userId}`, 90);
+      }, 30_000);
       if ((await this.redis.scard(`rt:presence:${userId}`)) === 1)
         await this.emitPresence(userId, true);
     } catch {
@@ -77,6 +94,7 @@ export class RealtimeGateway implements OnApplicationShutdown {
   }
 
   async handleDisconnect(socket: AuthedSocket): Promise<void> {
+    if (socket.data.presenceHeartbeat) clearInterval(socket.data.presenceHeartbeat);
     const userId = socket.data.userId;
     if (!userId || !socket.data.presenceTracked) return;
     await this.redis.srem(`rt:presence:${userId}`, socket.id);
@@ -87,7 +105,7 @@ export class RealtimeGateway implements OnApplicationShutdown {
   }
 
   @SubscribeMessage('conversation:join')
-  async join(socket: AuthedSocket, raw: unknown): Promise<{ ok: boolean }> {
+  async join(socket: AuthedSocket, @MessageBody() raw: unknown): Promise<{ ok: boolean }> {
     const payload = wsPayloadSchemas.conversationJoin.safeParse(raw);
     if (
       !payload.success ||
@@ -100,7 +118,7 @@ export class RealtimeGateway implements OnApplicationShutdown {
   }
 
   @SubscribeMessage('conversation:leave')
-  async leave(socket: AuthedSocket, raw: unknown): Promise<{ ok: boolean }> {
+  async leave(socket: AuthedSocket, @MessageBody() raw: unknown): Promise<{ ok: boolean }> {
     const payload = wsPayloadSchemas.conversationJoin.safeParse(raw);
     if (!payload.success || !(await this.ensureActive(socket))) return { ok: false };
     await socket.leave(`conversation:${payload.data.conversationId}`);
@@ -108,7 +126,7 @@ export class RealtimeGateway implements OnApplicationShutdown {
   }
 
   @SubscribeMessage('typing')
-  async typing(socket: AuthedSocket, raw: unknown): Promise<{ ok: boolean }> {
+  async typing(socket: AuthedSocket, @MessageBody() raw: unknown): Promise<{ ok: boolean }> {
     const payload = wsPayloadSchemas.typing.safeParse(raw);
     const now = Date.now();
     if (
@@ -130,7 +148,7 @@ export class RealtimeGateway implements OnApplicationShutdown {
   }
 
   @SubscribeMessage('message:read')
-  async read(socket: AuthedSocket, raw: unknown): Promise<{ ok: boolean }> {
+  async read(socket: AuthedSocket, @MessageBody() raw: unknown): Promise<{ ok: boolean }> {
     const payload = wsPayloadSchemas.read.safeParse(raw);
     if (
       !payload.success ||

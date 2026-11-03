@@ -27,6 +27,7 @@ describe('RealtimeGateway', () => {
         redis as never,
         realtime as never,
         { read: vi.fn() } as never,
+        { WEB_ORIGIN: 'http://localhost:3000' } as never,
       ),
       jwt,
       prisma,
