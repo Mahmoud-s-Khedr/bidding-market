@@ -359,7 +359,9 @@ export const agreementCancelSchema = z.object({ reason: z.string().min(1).max(20
 export const bidRejectSchema = z.object({ reason: z.string().max(2000).optional() });
 export type BidRejectInput = z.infer<typeof bidRejectSchema>;
 export const acceptCounterSchema = z.object({});
-export const milestoneUpdateSchema = milestoneSchema.partial();
+export const milestoneUpdateSchema = milestoneSchema
+  .partial()
+  .refine((value) => Object.keys(value).length > 0, { message: 'At least one field is required' });
 export type MilestoneUpdateInput = z.infer<typeof milestoneUpdateSchema>;
 export const disputeSchema = agreementCancelSchema;
 export const adminListingActionSchema = z.object({ reason: z.string().min(1).max(2000) });
