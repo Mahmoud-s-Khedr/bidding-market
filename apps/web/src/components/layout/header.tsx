@@ -91,6 +91,14 @@ export function Header() {
             >
               Browse
             </Link>
+            {isAuthenticated && (
+              <Link
+                href="/dashboard"
+                className="px-3 py-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                Dashboard
+              </Link>
+            )}
             <Link
               href="/listings/new"
               className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"

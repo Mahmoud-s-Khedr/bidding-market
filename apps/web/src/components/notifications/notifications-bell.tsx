@@ -16,6 +16,7 @@ import {
 import { Spinner } from '@/components/ui/spinner';
 import { formatRelativeTime } from '@/lib/format';
 import {
+  getNotificationLink,
   useMarkAllNotificationsRead,
   useMarkNotificationRead,
   useNotifications,
@@ -43,8 +44,9 @@ export function NotificationsBell() {
       markRead.mutate(item.id);
     }
     setOpen(false);
-    if (item.link) {
-      router.push(item.link);
+    const link = getNotificationLink(item);
+    if (link) {
+      router.push(link);
     }
   };
 

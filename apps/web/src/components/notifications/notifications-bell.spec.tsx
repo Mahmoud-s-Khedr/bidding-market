@@ -16,12 +16,16 @@ vi.mock('next/navigation', () => ({
   }),
 }));
 
-vi.mock('@/lib/api/notifications', () => ({
-  useUnreadNotificationCount: vi.fn(),
-  useNotifications: vi.fn(),
-  useMarkNotificationRead: vi.fn(),
-  useMarkAllNotificationsRead: vi.fn(),
-}));
+vi.mock('@/lib/api/notifications', async () => {
+  const actual = await vi.importActual<typeof notificationsApi>('@/lib/api/notifications');
+  return {
+    ...actual,
+    useUnreadNotificationCount: vi.fn(),
+    useNotifications: vi.fn(),
+    useMarkNotificationRead: vi.fn(),
+    useMarkAllNotificationsRead: vi.fn(),
+  };
+});
 
 describe('NotificationsBell', () => {
   const markReadMutate = vi.fn();
