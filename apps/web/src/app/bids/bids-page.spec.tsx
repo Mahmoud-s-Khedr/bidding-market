@@ -107,21 +107,34 @@ describe('MyBidsPage (/bids)', () => {
   it('renders tabs with correct badge counts and filters proposals by tab', async () => {
     const user = userEvent.setup();
 
-    vi.spyOn(bidsApi, 'useMyBids').mockReturnValue({
-      data: {
-        pages: [
-          {
-            items: [bidActivePending, bidActiveCountered, bidAccepted, bidClosedRejected],
-            nextCursor: null,
-          },
-        ],
-        pageParams: [null],
-      },
-      isLoading: false,
-      isFetchingNextPage: false,
-      hasNextPage: false,
-      fetchNextPage: vi.fn(),
-    } as unknown as ReturnType<typeof bidsApi.useMyBids>);
+    const bidsByStatus: Record<string, (typeof bidActivePending)[]> = {
+      PENDING: [bidActivePending],
+      COUNTERED: [bidActiveCountered],
+      SHORTLISTED: [],
+      ACCEPTED: [bidAccepted],
+      REJECTED: [bidClosedRejected],
+      WITHDRAWN: [],
+      DECLINED: [],
+    };
+
+    vi.spyOn(bidsApi, 'useMyBids').mockImplementation((status?: string) => {
+      const items = status ? (bidsByStatus[status] ?? []) : [];
+      return {
+        data: {
+          pages: [
+            {
+              items,
+              nextCursor: null,
+            },
+          ],
+          pageParams: [null],
+        },
+        isLoading: false,
+        isFetchingNextPage: false,
+        hasNextPage: false,
+        fetchNextPage: vi.fn(),
+      } as unknown as ReturnType<typeof bidsApi.useMyBids>;
+    });
 
     renderWithToast(<MyBidsPage />);
 
@@ -148,16 +161,19 @@ describe('MyBidsPage (/bids)', () => {
   });
 
   it('renders links to bid detail and listing on each row', () => {
-    vi.spyOn(bidsApi, 'useMyBids').mockReturnValue({
-      data: {
-        pages: [{ items: [bidActivePending], nextCursor: null }],
-        pageParams: [null],
-      },
-      isLoading: false,
-      isFetchingNextPage: false,
-      hasNextPage: false,
-      fetchNextPage: vi.fn(),
-    } as unknown as ReturnType<typeof bidsApi.useMyBids>);
+    vi.spyOn(bidsApi, 'useMyBids').mockImplementation((status?: string) => {
+      const items = status === 'PENDING' ? [bidActivePending] : [];
+      return {
+        data: {
+          pages: [{ items, nextCursor: null }],
+          pageParams: [null],
+        },
+        isLoading: false,
+        isFetchingNextPage: false,
+        hasNextPage: false,
+        fetchNextPage: vi.fn(),
+      } as unknown as ReturnType<typeof bidsApi.useMyBids>;
+    });
 
     renderWithToast(<MyBidsPage />);
 
@@ -171,16 +187,18 @@ describe('MyBidsPage (/bids)', () => {
   it('renders empty states when no bids exist for a tab', async () => {
     const user = userEvent.setup();
 
-    vi.spyOn(bidsApi, 'useMyBids').mockReturnValue({
-      data: {
-        pages: [{ items: [], nextCursor: null }],
-        pageParams: [null],
-      },
-      isLoading: false,
-      isFetchingNextPage: false,
-      hasNextPage: false,
-      fetchNextPage: vi.fn(),
-    } as unknown as ReturnType<typeof bidsApi.useMyBids>);
+    vi.spyOn(bidsApi, 'useMyBids').mockImplementation(() => {
+      return {
+        data: {
+          pages: [{ items: [], nextCursor: null }],
+          pageParams: [null],
+        },
+        isLoading: false,
+        isFetchingNextPage: false,
+        hasNextPage: false,
+        fetchNextPage: vi.fn(),
+      } as unknown as ReturnType<typeof bidsApi.useMyBids>;
+    });
 
     renderWithToast(<MyBidsPage />);
 
@@ -197,16 +215,20 @@ describe('MyBidsPage (/bids)', () => {
     const user = userEvent.setup();
     const fetchNextPage = vi.fn();
 
-    vi.spyOn(bidsApi, 'useMyBids').mockReturnValue({
-      data: {
-        pages: [{ items: [bidActivePending], nextCursor: 'cur-next' }],
-        pageParams: [null],
-      },
-      isLoading: false,
-      isFetchingNextPage: false,
-      hasNextPage: true,
-      fetchNextPage,
-    } as unknown as ReturnType<typeof bidsApi.useMyBids>);
+    vi.spyOn(bidsApi, 'useMyBids').mockImplementation((status?: string) => {
+      const hasNext = status === 'PENDING';
+      const items = status === 'PENDING' ? [bidActivePending] : [];
+      return {
+        data: {
+          pages: [{ items, nextCursor: hasNext ? 'cur-next' : null }],
+          pageParams: [null],
+        },
+        isLoading: false,
+        isFetchingNextPage: false,
+        hasNextPage: hasNext,
+        fetchNextPage,
+      } as unknown as ReturnType<typeof bidsApi.useMyBids>;
+    });
 
     renderWithToast(<MyBidsPage />);
 
@@ -214,5 +236,44 @@ describe('MyBidsPage (/bids)', () => {
     await user.click(loadMoreBtn);
 
     expect(fetchNextPage).toHaveBeenCalledTimes(1);
+  });
+
+  it('prevents pagination starvation by querying per status group (Finding 3)', () => {
+    // Scenario: User has active bids, but query receives calls with specific status keys
+    const calledStatuses: string[] = [];
+
+    vi.spyOn(bidsApi, 'useMyBids').mockImplementation((status?: string) => {
+      if (status) calledStatuses.push(status);
+      return {
+        data: {
+          pages: [
+            {
+              items: status === 'PENDING' ? [bidActivePending] : [],
+              nextCursor: null,
+            },
+          ],
+          pageParams: [null],
+        },
+        isLoading: false,
+        isFetchingNextPage: false,
+        hasNextPage: false,
+        fetchNextPage: vi.fn(),
+      } as unknown as ReturnType<typeof bidsApi.useMyBids>;
+    });
+
+    renderWithToast(<MyBidsPage />);
+
+    // Verify all 7 bid statuses are queried independently
+    expect(calledStatuses).toContain('PENDING');
+    expect(calledStatuses).toContain('SHORTLISTED');
+    expect(calledStatuses).toContain('COUNTERED');
+    expect(calledStatuses).toContain('ACCEPTED');
+    expect(calledStatuses).toContain('REJECTED');
+    expect(calledStatuses).toContain('WITHDRAWN');
+    expect(calledStatuses).toContain('DECLINED');
+
+    // Active tab shows the pending bid without being masked by closed bids
+    expect(screen.getByTestId('tab-active')).toHaveTextContent('Active (1)');
+    expect(screen.getByText('Active Website Development')).toBeInTheDocument();
   });
 });

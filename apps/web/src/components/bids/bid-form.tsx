@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { useForm } from 'react-hook-form';
+import { Controller, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { AlertCircle, Clock } from 'lucide-react';
@@ -9,6 +9,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { FormField } from '@/components/ui/form-field';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { FileDropzone } from '@/components/ui/file-dropzone';
 import { PriceTag } from '@/components/shared/price-tag';
 import { ApiError } from '@/lib/api/client';
@@ -67,8 +74,15 @@ export function BidForm({
 }: BidFormProps) {
   const isEditing = Boolean(initialBid?.id);
   const [attachments, setAttachments] = React.useState<Attachment[]>(initialBid?.attachments || []);
+  const [attachmentsTouched, setAttachmentsTouched] = React.useState(false);
   const [inFlightUploads, setInFlightUploads] = React.useState(0);
   const [serverError, setServerError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (initialBid?.attachments && !attachmentsTouched) {
+      setAttachments(initialBid.attachments);
+    }
+  }, [initialBid?.attachments, attachmentsTouched]);
 
   const initialAmountMajor =
     initialBid?.amountCents !== undefined && initialBid.amountCents !== null
@@ -89,13 +103,18 @@ export function BidForm({
   const {
     register,
     handleSubmit,
+    control,
     watch,
     formState: { errors },
   } = form;
 
   const watchedMessage = watch('message') || '';
   const messageLength = watchedMessage.length;
-  const currencySymbol = getCurrencySymbol(listing.currency || 'USD');
+  const watchedCurrency = watch('currency') || listing.currency || 'USD';
+  const currencySymbol = getCurrencySymbol(watchedCurrency);
+  const currencyOptions = Array.from<string>(
+    new Set(['USD', 'EUR', 'GBP', listing.currency].filter(Boolean)),
+  );
 
   const handleFormSubmit = async (values: BidFormOutput) => {
     setServerError(null);
@@ -105,7 +124,11 @@ export function BidForm({
       currency: values.currency || listing.currency || 'USD',
       deliveryDays: values.deliveryDays,
       message: values.message,
-      attachmentIds: attachments.map((att) => att.id),
+      ...(isEditing && !attachmentsTouched
+        ? initialBid?.attachments !== undefined
+          ? { attachmentIds: initialBid.attachments.map((a) => a.id) }
+          : {}
+        : { attachmentIds: attachments.map((att) => att.id) }),
     };
 
     try {
@@ -113,6 +136,9 @@ export function BidForm({
     } catch (err: unknown) {
       if (err instanceof ApiError && err.status === 409) {
         setServerError('This bid changed or the listing is no longer open. Please refresh.');
+        if (onCancel) {
+          onCancel();
+        }
       } else {
         const msg = err instanceof Error ? err.message : 'Failed to submit bid';
         setServerError(msg);
@@ -163,8 +189,8 @@ export function BidForm({
         </div>
       )}
 
-      {/* Amount and Delivery days */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      {/* Amount, Currency, and Delivery days */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <FormField id="bid-amount" label="Your Bid Amount" error={errors.amount?.message} required>
           {({ id: fieldId }) => (
             <div className="relative">
@@ -187,6 +213,27 @@ export function BidForm({
               />
             </div>
           )}
+        </FormField>
+
+        <FormField id="bid-currency" label="Currency" error={errors.currency?.message}>
+          <Controller
+            name="currency"
+            control={control}
+            render={({ field }) => (
+              <Select value={field.value} onValueChange={field.onChange}>
+                <SelectTrigger id="bid-currency" aria-label="Select currency">
+                  <SelectValue placeholder={listing.currency || 'USD'} />
+                </SelectTrigger>
+                <SelectContent>
+                  {currencyOptions.map((cur) => (
+                    <SelectItem key={cur} value={cur}>
+                      {cur} ({getCurrencySymbol(cur)})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          />
         </FormField>
 
         <FormField
@@ -243,7 +290,10 @@ export function BidForm({
         <FileDropzone
           purpose="BID_ATTACHMENT"
           value={attachments}
-          onChange={setAttachments}
+          onChange={(newFiles) => {
+            setAttachments(newFiles);
+            setAttachmentsTouched(true);
+          }}
           onUploadStateChange={({ inFlightCount }) => setInFlightUploads(inFlightCount)}
           maxFiles={5}
           description="PDF, text, or zip archives up to 25MB each."

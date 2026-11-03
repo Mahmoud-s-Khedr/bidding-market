@@ -119,13 +119,16 @@ export function useCreateBid() {
   return useMutation({
     mutationFn: ({ listingId, data }: { listingId: string; data: BidCreateInput }) =>
       createBid(listingId, data),
-    onSuccess: (_, variables) => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.listings.all });
+    onSuccess: (result, variables) => {
+      const listingId = variables.listingId;
+      void queryClient.invalidateQueries({ queryKey: ['listings', 'detail', listingId] });
       void queryClient.invalidateQueries({
-        queryKey: queryKeys.bids.byListing(variables.listingId),
+        queryKey: ['bids', 'listing', listingId],
       });
       void queryClient.invalidateQueries({ queryKey: queryKeys.bids.mineAll() });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.bids.all });
+      if (result?.id) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.bids.detail(result.id) });
+      }
     },
   });
 }
@@ -134,10 +137,15 @@ export function useUpdateBid() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: BidUpdateInput }) => updateBid(id, data),
-    onSuccess: (_, variables) => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.listings.all });
+    onSuccess: (result, variables) => {
+      if (result?.listingId) {
+        void queryClient.invalidateQueries({ queryKey: ['listings', 'detail', result.listingId] });
+        void queryClient.invalidateQueries({
+          queryKey: ['bids', 'listing', result.listingId],
+        });
+      }
       void queryClient.invalidateQueries({ queryKey: queryKeys.bids.detail(variables.id) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.bids.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.bids.mineAll() });
     },
   });
 }
@@ -146,10 +154,15 @@ export function useWithdrawBid() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => withdrawBid(id),
-    onSuccess: (_, id) => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.listings.all });
+    onSuccess: (result, id) => {
+      if (result?.listingId) {
+        void queryClient.invalidateQueries({ queryKey: ['listings', 'detail', result.listingId] });
+        void queryClient.invalidateQueries({
+          queryKey: ['bids', 'listing', result.listingId],
+        });
+      }
       void queryClient.invalidateQueries({ queryKey: queryKeys.bids.detail(id) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.bids.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.bids.mineAll() });
     },
   });
 }
@@ -158,10 +171,15 @@ export function useShortlistBid() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => shortlistBid(id),
-    onSuccess: (_, id) => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.listings.all });
+    onSuccess: (result, id) => {
+      if (result?.listingId) {
+        void queryClient.invalidateQueries({ queryKey: ['listings', 'detail', result.listingId] });
+        void queryClient.invalidateQueries({
+          queryKey: ['bids', 'listing', result.listingId],
+        });
+      }
       void queryClient.invalidateQueries({ queryKey: queryKeys.bids.detail(id) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.bids.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.bids.mineAll() });
     },
   });
 }
@@ -170,10 +188,15 @@ export function useRejectBid() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data?: BidRejectInput }) => rejectBid(id, data),
-    onSuccess: (_, variables) => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.listings.all });
+    onSuccess: (result, variables) => {
+      if (result?.listingId) {
+        void queryClient.invalidateQueries({ queryKey: ['listings', 'detail', result.listingId] });
+        void queryClient.invalidateQueries({
+          queryKey: ['bids', 'listing', result.listingId],
+        });
+      }
       void queryClient.invalidateQueries({ queryKey: queryKeys.bids.detail(variables.id) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.bids.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.bids.mineAll() });
     },
   });
 }
@@ -182,10 +205,15 @@ export function useCounterBid() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: BidCounterInput }) => counterBid(id, data),
-    onSuccess: (_, variables) => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.listings.all });
+    onSuccess: (result, variables) => {
+      if (result?.listingId) {
+        void queryClient.invalidateQueries({ queryKey: ['listings', 'detail', result.listingId] });
+        void queryClient.invalidateQueries({
+          queryKey: ['bids', 'listing', result.listingId],
+        });
+      }
       void queryClient.invalidateQueries({ queryKey: queryKeys.bids.detail(variables.id) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.bids.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.bids.mineAll() });
     },
   });
 }
@@ -194,10 +222,16 @@ export function useAcceptCounter() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => acceptCounter(id),
-    onSuccess: (_, id) => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.listings.all });
+    onSuccess: (result, id) => {
+      const listingId = result?.bid?.listingId;
+      if (listingId) {
+        void queryClient.invalidateQueries({ queryKey: ['listings', 'detail', listingId] });
+        void queryClient.invalidateQueries({
+          queryKey: ['bids', 'listing', listingId],
+        });
+      }
       void queryClient.invalidateQueries({ queryKey: queryKeys.bids.detail(id) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.bids.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.bids.mineAll() });
     },
   });
 }
@@ -206,10 +240,16 @@ export function useAcceptBid() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => acceptBid(id),
-    onSuccess: (_, id) => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.listings.all });
+    onSuccess: (result, id) => {
+      const listingId = result?.bid?.listingId;
+      if (listingId) {
+        void queryClient.invalidateQueries({ queryKey: ['listings', 'detail', listingId] });
+        void queryClient.invalidateQueries({
+          queryKey: ['bids', 'listing', listingId],
+        });
+      }
       void queryClient.invalidateQueries({ queryKey: queryKeys.bids.detail(id) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.bids.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.bids.mineAll() });
     },
   });
 }

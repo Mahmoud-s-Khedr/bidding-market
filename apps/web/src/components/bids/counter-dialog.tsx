@@ -17,6 +17,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { FormField } from '@/components/ui/form-field';
 import { getCurrencySymbol } from '@/lib/format';
+import { ApiError } from '@/lib/api/client';
 import type { Bid, BidCounterInput } from '@/lib/api/types';
 
 export const counterFormSchema = z.object({
@@ -85,12 +86,20 @@ export function CounterDialog({
 
   const handleFormSubmit = async (values: CounterFormOutput) => {
     const amountCents = Math.round(values.amount * 100);
-    await onConfirm({
-      amountCents,
-      deliveryDays: values.deliveryDays,
-      message: values.message,
-    });
-    reset();
+    try {
+      await onConfirm({
+        amountCents,
+        deliveryDays: values.deliveryDays,
+        message: values.message,
+      });
+      reset();
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        onOpenChange(false);
+        return;
+      }
+      throw err;
+    }
   };
 
   return (

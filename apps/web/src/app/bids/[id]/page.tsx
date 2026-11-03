@@ -98,6 +98,12 @@ function BidDetailPageContent() {
 
   const handleConflictError = async (err: unknown) => {
     if (err instanceof ApiError && err.status === 409) {
+      setEditDialogOpen(false);
+      setWithdrawDialogOpen(false);
+      setRejectDialogOpen(false);
+      setCounterDialogOpen(false);
+      setAcceptBidDialogOpen(false);
+      setAcceptCounterDialogOpen(false);
       toast({
         title: 'Action Conflict',
         description: 'This bid changed, refresh.',

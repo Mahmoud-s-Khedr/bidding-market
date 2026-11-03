@@ -331,4 +331,58 @@ describe('BidDetailPage (Negotiation Thread)', () => {
 
     expect(screen.getByText('Proposal not found')).toBeInTheDocument();
   });
+
+  it('closes action dialog and refetches when encountering 409 conflict', async () => {
+    const user = userEvent.setup();
+    const mockRefetch = vi.fn();
+    const conflictError = new ApiError(409, 'Conflict', 'CONFLICT');
+
+    vi.spyOn(authContext, 'useAuth').mockReturnValue({
+      user: {
+        id: 'user-bidder',
+        email: 'bob@bidder.test',
+        displayName: 'Bob Bidder',
+        role: 'USER',
+        isBusiness: false,
+        createdAt: '2026-01-01T00:00:00Z',
+      },
+      token: 'jwt-bidder',
+      isLoading: false,
+      isAuthenticated: true,
+      isAdmin: false,
+      login: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+      refresh: vi.fn(),
+    });
+
+    vi.spyOn(bidsApi, 'useBid').mockReturnValue({
+      data: mockBidCountered,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: mockRefetch,
+    } as unknown as ReturnType<typeof bidsApi.useBid>);
+
+    vi.spyOn(bidsApi, 'useWithdrawBid').mockReturnValue({
+      mutateAsync: vi.fn().mockRejectedValue(conflictError),
+      isPending: false,
+    } as unknown as ReturnType<typeof bidsApi.useWithdrawBid>);
+
+    renderWithToast(<BidDetailPage />);
+
+    await user.click(screen.getByRole('button', { name: /withdraw proposal/i }));
+    expect(screen.getByText(/Are you sure you want to withdraw this bid\?/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /^withdraw bid$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('This bid changed, refresh.')).toBeInTheDocument();
+      expect(mockRefetch).toHaveBeenCalled();
+    });
+
+    expect(
+      screen.queryByText(/Are you sure you want to withdraw this bid\?/i),
+    ).not.toBeInTheDocument();
+  });
 });

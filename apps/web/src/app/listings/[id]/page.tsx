@@ -39,7 +39,7 @@ import { ListingBidsSection } from '@/components/bids/listing-bids-section';
 import { useAuth } from '@/components/auth/auth-provider';
 import { useToast } from '@/components/ui/toast';
 import { useCloseListing, useDeleteListing, useListing } from '@/lib/api/listings';
-import { useCreateBid, useUpdateBid, useWithdrawBid } from '@/lib/api/bids';
+import { useBid, useCreateBid, useUpdateBid, useWithdrawBid } from '@/lib/api/bids';
 import { getAttachmentUrl } from '@/lib/api/uploads';
 import { formatDate, formatMoney } from '@/lib/format';
 import { ApiError } from '@/lib/api/client';
@@ -71,6 +71,11 @@ export default function ListingDetailPage() {
   const createBidMutation = useCreateBid();
   const updateBidMutation = useUpdateBid();
   const withdrawBidMutation = useWithdrawBid();
+
+  const myBidId = listing?.myBid?.id ?? '';
+  const { data: myBidDetail, isLoading: isLoadingMyBid } = useBid(myBidId, {
+    enabled: Boolean(myBidId),
+  });
 
   const [closeDialogOpen, setCloseDialogOpen] = React.useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
@@ -147,26 +152,39 @@ export default function ListingDetailPage() {
   };
 
   const handleBidSubmit = async (payload: BidCreateInput) => {
-    if (isEditingBid && listing?.myBid) {
-      await updateBidMutation.mutateAsync({
-        id: listing.myBid.id,
-        data: payload,
-      });
-      setBidDialogOpen(false);
-      toast({
-        title: 'Bid updated',
-        description: 'Your proposal has been updated successfully.',
-      });
-    } else {
-      await createBidMutation.mutateAsync({
-        listingId: id,
-        data: payload,
-      });
-      setBidDialogOpen(false);
-      toast({
-        title: 'Bid placed',
-        description: 'Your proposal was submitted to the listing owner.',
-      });
+    try {
+      if (isEditingBid && listing?.myBid) {
+        await updateBidMutation.mutateAsync({
+          id: listing.myBid.id,
+          data: payload,
+        });
+        setBidDialogOpen(false);
+        toast({
+          title: 'Bid updated',
+          description: 'Your proposal has been updated successfully.',
+        });
+      } else {
+        await createBidMutation.mutateAsync({
+          listingId: id,
+          data: payload,
+        });
+        setBidDialogOpen(false);
+        toast({
+          title: 'Bid placed',
+          description: 'Your proposal was submitted to the listing owner.',
+        });
+      }
+    } catch (err: unknown) {
+      if (err instanceof ApiError && err.status === 409) {
+        setBidDialogOpen(false);
+        toast({
+          title: 'Action Conflict',
+          description: 'This bid changed or the listing is no longer open. Refreshing...',
+          variant: 'error',
+        });
+        await refetch();
+      }
+      throw err;
     }
   };
 
@@ -180,12 +198,22 @@ export default function ListingDetailPage() {
         description: 'Your proposal has been withdrawn.',
       });
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Failed to withdraw bid';
-      toast({
-        title: 'Action failed',
-        description: msg,
-        variant: 'error',
-      });
+      if (err instanceof ApiError && err.status === 409) {
+        setWithdrawDialogOpen(false);
+        toast({
+          title: 'Action Conflict',
+          description: 'This bid changed or was already closed. Refreshing...',
+          variant: 'error',
+        });
+        await refetch();
+      } else {
+        const msg = err instanceof Error ? err.message : 'Failed to withdraw bid';
+        toast({
+          title: 'Action failed',
+          description: msg,
+          variant: 'error',
+        });
+      }
     }
   };
 
@@ -646,13 +674,21 @@ export default function ListingDetailPage() {
             </DialogDescription>
           </DialogHeader>
 
-          <BidForm
-            listing={listing}
-            initialBid={isEditingBid ? listing.myBid : null}
-            onSubmit={handleBidSubmit}
-            onCancel={() => setBidDialogOpen(false)}
-            isLoading={createBidMutation.isPending || updateBidMutation.isPending}
-          />
+          {isEditingBid && isLoadingMyBid && !myBidDetail ? (
+            <div className="py-8 space-y-4">
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-24 w-full" />
+            </div>
+          ) : (
+            <BidForm
+              key={isEditingBid ? (myBidDetail?.id ?? listing.myBid?.id) : 'new-bid'}
+              listing={listing}
+              initialBid={isEditingBid ? (myBidDetail ?? listing.myBid) : null}
+              onSubmit={handleBidSubmit}
+              onCancel={() => setBidDialogOpen(false)}
+              isLoading={createBidMutation.isPending || updateBidMutation.isPending}
+            />
+          )}
         </DialogContent>
       </Dialog>
 

@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { ApiError } from '@/lib/api/client';
 import {
   Dialog,
   DialogContent,
@@ -30,8 +31,16 @@ export function RejectDialog({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    await onConfirm(reason.trim() || undefined);
-    setReason('');
+    try {
+      await onConfirm(reason.trim() || undefined);
+      setReason('');
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        onOpenChange(false);
+        return;
+      }
+      throw err;
+    }
   };
 
   return (

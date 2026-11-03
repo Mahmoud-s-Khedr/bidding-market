@@ -186,12 +186,128 @@ describe('BidForm Schema & Component', () => {
       expect(handleCancel).toHaveBeenCalledTimes(1);
     });
 
-    it('shows graceful 409 conflict error when submission rejects with 409', async () => {
+    it('defaults currency to listing currency and includes currency in submission', async () => {
+      const user = userEvent.setup();
+      const handleSubmit = vi.fn().mockResolvedValue(undefined);
+      const eurListing = { ...mockListing, currency: 'EUR' };
+
+      render(<BidForm listing={eurListing} onSubmit={handleSubmit} />);
+
+      expect(screen.getByLabelText(/select currency/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/select currency/i)).toHaveTextContent('EUR (€)');
+
+      const amountInput = screen.getByLabelText(/your bid amount/i);
+      const deliveryInput = screen.getByLabelText(/delivery timeline/i);
+      await user.type(amountInput, '200');
+      await user.type(deliveryInput, '5');
+
+      await user.click(screen.getByRole('button', { name: /submit bid/i }));
+
+      await waitFor(() => {
+        expect(handleSubmit).toHaveBeenCalledWith(
+          expect.objectContaining({
+            currency: 'EUR',
+            amountCents: 20000,
+          }),
+        );
+      });
+    });
+
+    it('preserves initialBid attachments in edit mode when user does not touch dropzone', async () => {
+      const user = userEvent.setup();
+      const handleSubmit = vi.fn().mockResolvedValue(undefined);
+      const initialBidWithAttachments = makeBid({
+        id: 'bid-edit-with-attachments',
+        amountCents: 20000,
+        deliveryDays: 7,
+        attachments: [
+          {
+            id: 'att-1',
+            key: 'uploads/att-1.pdf',
+            fileName: 'specs.pdf',
+            sizeBytes: 1024,
+            mimeType: 'application/pdf',
+          },
+          {
+            id: 'att-2',
+            key: 'uploads/att-2.png',
+            fileName: 'design.png',
+            sizeBytes: 2048,
+            mimeType: 'image/png',
+          },
+        ],
+      });
+
+      render(
+        <BidForm
+          listing={mockListing}
+          initialBid={initialBidWithAttachments}
+          onSubmit={handleSubmit}
+        />,
+      );
+
+      // Existing attachments should be displayed
+      expect(screen.getByText('specs.pdf')).toBeInTheDocument();
+      expect(screen.getByText('design.png')).toBeInTheDocument();
+
+      // Change only the amount
+      const amountInput = screen.getByLabelText(/your bid amount/i);
+      await user.clear(amountInput);
+      await user.type(amountInput, '220');
+
+      await user.click(screen.getByRole('button', { name: /update bid/i }));
+
+      await waitFor(() => {
+        expect(handleSubmit).toHaveBeenCalledWith(
+          expect.objectContaining({
+            amountCents: 22000,
+            attachmentIds: ['att-1', 'att-2'],
+          }),
+        );
+      });
+    });
+
+    it('omits attachmentIds in edit mode if initialBid attachments were not provided and dropzone not touched', async () => {
+      const user = userEvent.setup();
+      const handleSubmit = vi.fn().mockResolvedValue(undefined);
+      const initialBidWithoutAttachments = makeBid({
+        id: 'bid-edit-no-att',
+        amountCents: 15000,
+        deliveryDays: 3,
+        attachments: undefined,
+      });
+
+      render(
+        <BidForm
+          listing={mockListing}
+          initialBid={initialBidWithoutAttachments}
+          onSubmit={handleSubmit}
+        />,
+      );
+
+      const amountInput = screen.getByLabelText(/your bid amount/i);
+      await user.clear(amountInput);
+      await user.type(amountInput, '180');
+
+      await user.click(screen.getByRole('button', { name: /update bid/i }));
+
+      await waitFor(() => {
+        expect(handleSubmit).toHaveBeenCalledWith({
+          amountCents: 18000,
+          currency: 'USD',
+          deliveryDays: 3,
+          message: 'I can deliver this project within schedule and high quality.',
+        });
+      });
+    });
+
+    it('shows graceful 409 conflict error and closes dialog when submission rejects with 409', async () => {
       const user = userEvent.setup();
       const conflictError = new ApiError(409, 'Conflict', 'CONFLICT');
       const handleSubmit = vi.fn().mockRejectedValue(conflictError);
+      const handleCancel = vi.fn();
 
-      render(<BidForm listing={mockListing} onSubmit={handleSubmit} />);
+      render(<BidForm listing={mockListing} onSubmit={handleSubmit} onCancel={handleCancel} />);
 
       await user.type(screen.getByLabelText(/your bid amount/i), '100');
       await user.type(screen.getByLabelText(/delivery timeline/i), '5');
@@ -201,6 +317,7 @@ describe('BidForm Schema & Component', () => {
         expect(
           screen.getByText('This bid changed or the listing is no longer open. Please refresh.'),
         ).toBeInTheDocument();
+        expect(handleCancel).toHaveBeenCalled();
       });
     });
 

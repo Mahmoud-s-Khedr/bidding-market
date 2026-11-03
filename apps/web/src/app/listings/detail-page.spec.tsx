@@ -376,6 +376,140 @@ describe('Listing Detail Page', () => {
     });
   });
 
+  it('handles 409 conflict gracefully during withdraw by closing dialog, toasting, and refetching', async () => {
+    const user = userEvent.setup();
+    const mockRefetch = vi.fn();
+    const conflictError = new ApiError(409, 'Conflict', 'CONFLICT');
+    const mockWithdraw = vi.fn().mockRejectedValue(conflictError);
+
+    vi.spyOn(authContext, 'useAuth').mockReturnValue({
+      user: {
+        id: 'user-bidder',
+        email: 'bidder@test.com',
+        displayName: 'Bidder User',
+        role: 'USER',
+        isBusiness: false,
+        createdAt: '2026-01-01T00:00:00Z',
+      },
+      token: 'jwt-bidder',
+      isLoading: false,
+      isAuthenticated: true,
+      isAdmin: false,
+      login: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+      refresh: vi.fn(),
+    });
+
+    const listingWithMyBid: ListingDetail = {
+      ...mockListing,
+      myBid: makeBid({
+        id: 'bid-my-1',
+        amountCents: 11000,
+        status: 'PENDING',
+      }),
+    };
+
+    vi.spyOn(listingsApi, 'useListing').mockReturnValue({
+      data: listingWithMyBid,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: mockRefetch,
+    } as unknown as ReturnType<typeof listingsApi.useListing>);
+
+    vi.spyOn(bidsApi, 'useWithdrawBid').mockReturnValue({
+      mutateAsync: mockWithdraw,
+      isPending: false,
+    } as unknown as ReturnType<typeof bidsApi.useWithdrawBid>);
+
+    renderWithToast(<ListingDetailPage />);
+
+    await user.click(screen.getByRole('button', { name: /withdraw/i }));
+    expect(screen.getByText(/Are you sure you want to withdraw your bid\?/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /^withdraw bid$/i }));
+
+    await waitFor(() => {
+      expect(mockWithdraw).toHaveBeenCalledWith('bid-my-1');
+      expect(
+        screen.getByText(/This bid changed or was already closed\. Refreshing\.\.\./i),
+      ).toBeInTheDocument();
+      expect(mockRefetch).toHaveBeenCalled();
+    });
+    expect(
+      screen.queryByText(/Are you sure you want to withdraw your bid\?/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it('loads full bid detail with attachments when opening Edit Bid dialog', async () => {
+    const user = userEvent.setup();
+
+    vi.spyOn(authContext, 'useAuth').mockReturnValue({
+      user: {
+        id: 'user-bidder',
+        email: 'bidder@test.com',
+        displayName: 'Bidder User',
+        role: 'USER',
+        isBusiness: false,
+        createdAt: '2026-01-01T00:00:00Z',
+      },
+      token: 'jwt-bidder',
+      isLoading: false,
+      isAuthenticated: true,
+      isAdmin: false,
+      login: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+      refresh: vi.fn(),
+    });
+
+    const listingWithMyBid: ListingDetail = {
+      ...mockListing,
+      myBid: makeBid({
+        id: 'bid-my-1',
+        amountCents: 11000,
+        status: 'PENDING',
+        attachments: undefined,
+      }),
+    };
+
+    vi.spyOn(listingsApi, 'useListing').mockReturnValue({
+      data: listingWithMyBid,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof listingsApi.useListing>);
+
+    vi.spyOn(bidsApi, 'useBid').mockReturnValue({
+      data: {
+        ...listingWithMyBid.myBid,
+        attachments: [
+          {
+            id: 'att-edit-1',
+            key: 'uploads/att-edit-1.pdf',
+            fileName: 'portfolio.pdf',
+            sizeBytes: 2048,
+            mimeType: 'application/pdf',
+          },
+        ],
+        revisions: [],
+      },
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof bidsApi.useBid>);
+
+    renderWithToast(<ListingDetailPage />);
+
+    await user.click(screen.getByRole('button', { name: /edit bid/i }));
+
+    expect(screen.getByRole('heading', { name: /edit your proposal/i })).toBeInTheDocument();
+    expect(screen.getByText('portfolio.pdf')).toBeInTheDocument();
+  });
+
   it('renders owner bids compare section when viewer is listing owner', () => {
     vi.spyOn(authContext, 'useAuth').mockReturnValue({
       user: {

@@ -164,6 +164,8 @@ export type BidAcceptResponse = {
 
 /**
  * Client validation for bid state transitions.
+ * Mirror and client-side guard for the canonical server state machine in:
+ * `apps/api/src/modules/bids/bid.state-machine.ts`
  */
 export function canBidTransition(
   from: BidStatus,

@@ -213,7 +213,7 @@ describe('Bids API client & hooks', () => {
       expect(result.current.data?.id).toBe('bid-123');
     });
 
-    it('useCreateBid invalidates listings and bids cache on success', async () => {
+    it('useCreateBid invalidates listing detail, bids and mine list', async () => {
       vi.spyOn(api, 'post').mockResolvedValue(mockBidDetail);
       const { wrapper, queryClient } = createWrapper();
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
@@ -225,15 +225,17 @@ describe('Bids API client & hooks', () => {
         data: { amountCents: 10000, currency: 'USD', deliveryDays: 5, message: 'msg' },
       });
 
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.listings.all });
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['listings', 'detail', 'listing-1'] });
       expect(invalidateSpy).toHaveBeenCalledWith({
-        queryKey: queryKeys.bids.byListing('listing-1'),
+        queryKey: ['bids', 'listing', 'listing-1'],
       });
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.bids.mineAll() });
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.bids.all });
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: queryKeys.bids.detail(mockBidDetail.id),
+      });
     });
 
-    it('useUpdateBid invalidates bid details and listings cache', async () => {
+    it('useUpdateBid invalidates bid details and listing queries', async () => {
       vi.spyOn(api, 'patch').mockResolvedValue(mockBidDetail);
       const { wrapper, queryClient } = createWrapper();
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
@@ -245,12 +247,17 @@ describe('Bids API client & hooks', () => {
         data: { amountCents: 15000 },
       });
 
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.listings.all });
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: ['listings', 'detail', mockBidDetail.listingId],
+      });
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: ['bids', 'listing', mockBidDetail.listingId],
+      });
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.bids.detail('bid-123') });
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.bids.all });
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.bids.mineAll() });
     });
 
-    it('useWithdrawBid invalidates bid details and listings cache', async () => {
+    it('useWithdrawBid invalidates bid details and listing queries', async () => {
       vi.spyOn(api, 'post').mockResolvedValue(mockBidDetail);
       const { wrapper, queryClient } = createWrapper();
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
@@ -259,8 +266,14 @@ describe('Bids API client & hooks', () => {
 
       await result.current.mutateAsync('bid-123');
 
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.listings.all });
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: ['listings', 'detail', mockBidDetail.listingId],
+      });
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: ['bids', 'listing', mockBidDetail.listingId],
+      });
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.bids.detail('bid-123') });
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.bids.mineAll() });
     });
 
     it('useShortlistBid invalidates queries', async () => {

@@ -2,8 +2,7 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { ArrowUpDown, Check, ExternalLink, Gavel, Sparkles, X } from 'lucide-react';
+import { ExternalLink, Gavel } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
@@ -16,131 +15,50 @@ import {
 import { RatingStars } from '@/components/shared/rating-stars';
 import { EmptyState } from '@/components/ui/empty-state';
 import { ConfirmDialog } from '@/components/shared/confirm-dialog';
-import { useToast } from '@/components/ui/toast';
 import { BidStatusBadge } from '@/components/bids/bid-status-badge';
+import { BidActionBar } from '@/components/bids/bid-action-bar';
+import { useBidActions } from '@/components/bids/use-bid-actions';
 import { CounterDialog } from '@/components/bids/counter-dialog';
 import { RejectDialog } from '@/components/bids/reject-dialog';
-import {
-  useAcceptBid,
-  useCounterBid,
-  useListingBids,
-  useRejectBid,
-  useShortlistBid,
-} from '@/lib/api/bids';
-import { canBidTransition } from '@/lib/api/bid-types';
+import { useListingBids } from '@/lib/api/bids';
 import { formatDate, formatMoney } from '@/lib/format';
-import { ApiError } from '@/lib/api/client';
-import type { Bid, BidCounterInput, BidSort, ListingDetail } from '@/lib/api/types';
+import type { BidSort, ListingDetail } from '@/lib/api/types';
 
 export interface ListingBidsSectionProps {
   listing: ListingDetail;
 }
 
 export function ListingBidsSection({ listing }: ListingBidsSectionProps) {
-  const router = useRouter();
-  const { toast } = useToast();
   const [sort, setSort] = React.useState<BidSort>('newest');
 
-  // Dialog states
-  const [selectedBidForAction, setSelectedBidForAction] = React.useState<Bid | null>(null);
-  const [rejectDialogOpen, setRejectDialogOpen] = React.useState(false);
-  const [counterDialogOpen, setCounterDialogOpen] = React.useState(false);
-  const [acceptDialogOpen, setAcceptDialogOpen] = React.useState(false);
-
-  // Queries & Mutations
+  // Queries
   const { data, isLoading, isFetchingNextPage, hasNextPage, fetchNextPage, refetch } =
     useListingBids(listing.id, sort);
 
-  const shortlistMutation = useShortlistBid();
-  const rejectMutation = useRejectBid();
-  const counterMutation = useCounterBid();
-  const acceptMutation = useAcceptBid();
+  const {
+    selectedBid: selectedBidForAction,
+    rejectDialogOpen,
+    setRejectDialogOpen,
+    counterDialogOpen,
+    setCounterDialogOpen,
+    acceptDialogOpen,
+    setAcceptDialogOpen,
+    openCounter,
+    openReject,
+    openAccept,
+    handleShortlist,
+    handleConfirmReject,
+    handleConfirmCounter,
+    handleConfirmAccept,
+    isShortlisting,
+    isRejecting,
+    isCountering,
+    isAccepting,
+  } = useBidActions({ refetch });
 
   const allBids = React.useMemo(() => {
     return data?.pages.flatMap((page) => page.items) ?? [];
   }, [data]);
-
-  const handleConflictError = async (err: unknown) => {
-    if (err instanceof ApiError && err.status === 409) {
-      toast({
-        title: 'Action Conflict',
-        description: 'This bid changed, refresh.',
-        variant: 'error',
-      });
-      await refetch();
-    } else {
-      const msg = err instanceof Error ? err.message : 'Action failed';
-      toast({
-        title: 'Error',
-        description: msg,
-        variant: 'error',
-      });
-    }
-  };
-
-  const handleShortlist = async (bid: Bid) => {
-    try {
-      await shortlistMutation.mutateAsync(bid.id);
-      toast({
-        title: 'Bid shortlisted',
-        description: `${bid.bidder.displayName}'s bid has been shortlisted.`,
-      });
-    } catch (err) {
-      await handleConflictError(err);
-    }
-  };
-
-  const handleConfirmReject = async (reason?: string) => {
-    if (!selectedBidForAction) return;
-    try {
-      await rejectMutation.mutateAsync({
-        id: selectedBidForAction.id,
-        data: { reason },
-      });
-      setRejectDialogOpen(false);
-      toast({
-        title: 'Bid rejected',
-        description: `${selectedBidForAction.bidder.displayName}'s bid was rejected.`,
-      });
-    } catch (err) {
-      await handleConflictError(err);
-    }
-  };
-
-  const handleConfirmCounter = async (payload: BidCounterInput) => {
-    if (!selectedBidForAction) return;
-    try {
-      await counterMutation.mutateAsync({
-        id: selectedBidForAction.id,
-        data: payload,
-      });
-      setCounterDialogOpen(false);
-      toast({
-        title: 'Counter-offer sent',
-        description: 'Your counter-offer has been sent to the bidder.',
-      });
-    } catch (err) {
-      await handleConflictError(err);
-    }
-  };
-
-  const handleConfirmAccept = async () => {
-    if (!selectedBidForAction) return;
-    try {
-      const res = await acceptMutation.mutateAsync(selectedBidForAction.id);
-      setAcceptDialogOpen(false);
-      toast({
-        title: 'Bid Accepted!',
-        description: 'Agreement created. Other active bids have been declined.',
-        variant: 'default',
-      });
-      if (res?.agreement?.id) {
-        router.push(`/agreements/${res.agreement.id}`);
-      }
-    } catch (err) {
-      await handleConflictError(err);
-    }
-  };
 
   return (
     <section
@@ -221,11 +139,6 @@ export function ListingBidsSection({ listing }: ListingBidsSectionProps) {
               </thead>
               <tbody className="divide-y divide-border">
                 {allBids.map((bid) => {
-                  const canShortlist = canBidTransition(bid.status, 'SHORTLIST', 'owner');
-                  const canCounter = canBidTransition(bid.status, 'COUNTER', 'owner');
-                  const canReject = canBidTransition(bid.status, 'REJECT', 'owner');
-                  const canAccept = canBidTransition(bid.status, 'ACCEPT', 'owner');
-
                   return (
                     <tr
                       key={bid.id}
@@ -291,69 +204,17 @@ export function ListingBidsSection({ listing }: ListingBidsSectionProps) {
                       </td>
 
                       <td className="px-4 py-3 text-right whitespace-nowrap">
-                        <div className="inline-flex items-center gap-1.5">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            title="Shortlist bid"
-                            aria-label={`Shortlist ${bid.bidder.displayName}'s bid`}
-                            disabled={!canShortlist || shortlistMutation.isPending}
-                            onClick={() => {
-                              void handleShortlist(bid);
-                            }}
-                            className="h-8 px-2 text-xs"
-                          >
-                            <Sparkles className="h-3.5 w-3.5 mr-1" />
-                            Shortlist
-                          </Button>
-
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            title="Counter-offer"
-                            aria-label={`Counter ${bid.bidder.displayName}'s bid`}
-                            disabled={!canCounter}
-                            onClick={() => {
-                              setSelectedBidForAction(bid);
-                              setCounterDialogOpen(true);
-                            }}
-                            className="h-8 px-2 text-xs"
-                          >
-                            <ArrowUpDown className="h-3.5 w-3.5 mr-1" />
-                            Counter
-                          </Button>
-
-                          <Button
-                            size="sm"
-                            variant="destructive"
-                            title="Reject bid"
-                            aria-label={`Reject ${bid.bidder.displayName}'s bid`}
-                            disabled={!canReject}
-                            onClick={() => {
-                              setSelectedBidForAction(bid);
-                              setRejectDialogOpen(true);
-                            }}
-                            className="h-8 px-2 text-xs"
-                          >
-                            <X className="h-3.5 w-3.5 mr-1" />
-                            Reject
-                          </Button>
-
-                          <Button
-                            size="sm"
-                            title="Accept bid"
-                            aria-label={`Accept ${bid.bidder.displayName}'s bid`}
-                            disabled={!canAccept}
-                            onClick={() => {
-                              setSelectedBidForAction(bid);
-                              setAcceptDialogOpen(true);
-                            }}
-                            className="h-8 px-2.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white"
-                          >
-                            <Check className="h-3.5 w-3.5 mr-1" />
-                            Accept
-                          </Button>
-                        </div>
+                        <BidActionBar
+                          bid={bid}
+                          listingIsOpen={listing.status === 'OPEN'}
+                          isOwner={true}
+                          onShortlist={handleShortlist}
+                          onCounter={openCounter}
+                          onReject={openReject}
+                          onAccept={openAccept}
+                          isShortlisting={isShortlisting}
+                          layout="table"
+                        />
                       </td>
                     </tr>
                   );
@@ -365,11 +226,6 @@ export function ListingBidsSection({ listing }: ListingBidsSectionProps) {
           {/* Compare Cards for Mobile / Small Screens */}
           <div className="lg:hidden space-y-4">
             {allBids.map((bid) => {
-              const canShortlist = canBidTransition(bid.status, 'SHORTLIST', 'owner');
-              const canCounter = canBidTransition(bid.status, 'COUNTER', 'owner');
-              const canReject = canBidTransition(bid.status, 'REJECT', 'owner');
-              const canAccept = canBidTransition(bid.status, 'ACCEPT', 'owner');
-
               return (
                 <div
                   key={bid.id}
@@ -437,55 +293,17 @@ export function ListingBidsSection({ listing }: ListingBidsSectionProps) {
                   </div>
 
                   {/* Actions Bar */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-border">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={!canShortlist || shortlistMutation.isPending}
-                      onClick={() => {
-                        void handleShortlist(bid);
-                      }}
-                    >
-                      <Sparkles className="h-3.5 w-3.5 mr-1" />
-                      Shortlist
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={!canCounter}
-                      onClick={() => {
-                        setSelectedBidForAction(bid);
-                        setCounterDialogOpen(true);
-                      }}
-                    >
-                      <ArrowUpDown className="h-3.5 w-3.5 mr-1" />
-                      Counter
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      disabled={!canReject}
-                      onClick={() => {
-                        setSelectedBidForAction(bid);
-                        setRejectDialogOpen(true);
-                      }}
-                    >
-                      <X className="h-3.5 w-3.5 mr-1" />
-                      Reject
-                    </Button>
-                    <Button
-                      size="sm"
-                      disabled={!canAccept}
-                      onClick={() => {
-                        setSelectedBidForAction(bid);
-                        setAcceptDialogOpen(true);
-                      }}
-                      className="bg-emerald-600 hover:bg-emerald-700 text-white"
-                    >
-                      <Check className="h-3.5 w-3.5 mr-1" />
-                      Accept
-                    </Button>
-                  </div>
+                  <BidActionBar
+                    bid={bid}
+                    listingIsOpen={listing.status === 'OPEN'}
+                    isOwner={true}
+                    onShortlist={handleShortlist}
+                    onCounter={openCounter}
+                    onReject={openReject}
+                    onAccept={openAccept}
+                    isShortlisting={isShortlisting}
+                    layout="grid"
+                  />
                 </div>
               );
             })}
@@ -512,7 +330,7 @@ export function ListingBidsSection({ listing }: ListingBidsSectionProps) {
         open={rejectDialogOpen}
         onOpenChange={setRejectDialogOpen}
         onConfirm={handleConfirmReject}
-        isLoading={rejectMutation.isPending}
+        isLoading={isRejecting}
       />
 
       {/* Counter Dialog */}
@@ -521,7 +339,7 @@ export function ListingBidsSection({ listing }: ListingBidsSectionProps) {
         onOpenChange={setCounterDialogOpen}
         bid={selectedBidForAction}
         onConfirm={handleConfirmCounter}
-        isLoading={counterMutation.isPending}
+        isLoading={isCountering}
       />
 
       {/* Accept Confirmation Dialog */}
@@ -532,7 +350,7 @@ export function ListingBidsSection({ listing }: ListingBidsSectionProps) {
         description="Are you sure you want to accept this bid? All other active proposals for this listing will be declined and a formal project agreement will be created."
         confirmText="Accept Proposal"
         variant="primary"
-        isLoading={acceptMutation.isPending}
+        isLoading={isAccepting}
         onConfirm={handleConfirmAccept}
       />
     </section>

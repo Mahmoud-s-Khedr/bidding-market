@@ -18,27 +18,83 @@ import type { BidWithListing } from '@/lib/api/types';
 function MyBidsPageContent() {
   const [activeTab, setActiveTab] = React.useState<'active' | 'accepted' | 'closed'>('active');
 
-  const { data, isLoading, isFetchingNextPage, hasNextPage, fetchNextPage } = useMyBids();
+  // Query per status group so pagination does not cause cross-tab starvation
+  const pendingQuery = useMyBids('PENDING');
+  const shortlistedQuery = useMyBids('SHORTLISTED');
+  const counteredQuery = useMyBids('COUNTERED');
 
-  const allBids = React.useMemo(() => {
-    return data?.pages.flatMap((page) => page.items) ?? [];
-  }, [data]);
+  const acceptedQuery = useMyBids('ACCEPTED');
+
+  const rejectedQuery = useMyBids('REJECTED');
+  const withdrawnQuery = useMyBids('WITHDRAWN');
+  const declinedQuery = useMyBids('DECLINED');
 
   const activeBids = React.useMemo(() => {
-    return allBids.filter(
-      (b) => b.status === 'PENDING' || b.status === 'SHORTLISTED' || b.status === 'COUNTERED',
+    const p = pendingQuery.data?.pages.flatMap((page) => page.items) ?? [];
+    const s = shortlistedQuery.data?.pages.flatMap((page) => page.items) ?? [];
+    const c = counteredQuery.data?.pages.flatMap((page) => page.items) ?? [];
+    return [...p, ...s, ...c].sort(
+      (a, b) =>
+        new Date(b.updatedAt || b.createdAt).getTime() -
+        new Date(a.updatedAt || a.createdAt).getTime(),
     );
-  }, [allBids]);
+  }, [pendingQuery.data, shortlistedQuery.data, counteredQuery.data]);
 
   const acceptedBids = React.useMemo(() => {
-    return allBids.filter((b) => b.status === 'ACCEPTED');
-  }, [allBids]);
+    const a = acceptedQuery.data?.pages.flatMap((page) => page.items) ?? [];
+    return [...a].sort(
+      (a, b) =>
+        new Date(b.updatedAt || b.createdAt).getTime() -
+        new Date(a.updatedAt || a.createdAt).getTime(),
+    );
+  }, [acceptedQuery.data]);
 
   const closedBids = React.useMemo(() => {
-    return allBids.filter(
-      (b) => b.status === 'REJECTED' || b.status === 'WITHDRAWN' || b.status === 'DECLINED',
+    const r = rejectedQuery.data?.pages.flatMap((page) => page.items) ?? [];
+    const w = withdrawnQuery.data?.pages.flatMap((page) => page.items) ?? [];
+    const d = declinedQuery.data?.pages.flatMap((page) => page.items) ?? [];
+    return [...r, ...w, ...d].sort(
+      (a, b) =>
+        new Date(b.updatedAt || b.createdAt).getTime() -
+        new Date(a.updatedAt || a.createdAt).getTime(),
     );
-  }, [allBids]);
+  }, [rejectedQuery.data, withdrawnQuery.data, declinedQuery.data]);
+
+  const isActiveLoading =
+    pendingQuery.isLoading || shortlistedQuery.isLoading || counteredQuery.isLoading;
+  const isAcceptedLoading = acceptedQuery.isLoading;
+  const isClosedLoading =
+    rejectedQuery.isLoading || withdrawnQuery.isLoading || declinedQuery.isLoading;
+
+  const activeHasNextPage =
+    pendingQuery.hasNextPage || shortlistedQuery.hasNextPage || counteredQuery.hasNextPage;
+  const isActiveFetchingNext =
+    pendingQuery.isFetchingNextPage ||
+    shortlistedQuery.isFetchingNextPage ||
+    counteredQuery.isFetchingNextPage;
+  const handleFetchNextActive = () => {
+    if (pendingQuery.hasNextPage) void pendingQuery.fetchNextPage();
+    if (shortlistedQuery.hasNextPage) void shortlistedQuery.fetchNextPage();
+    if (counteredQuery.hasNextPage) void counteredQuery.fetchNextPage();
+  };
+
+  const acceptedHasNextPage = acceptedQuery.hasNextPage;
+  const isAcceptedFetchingNext = acceptedQuery.isFetchingNextPage;
+  const handleFetchNextAccepted = () => {
+    if (acceptedQuery.hasNextPage) void acceptedQuery.fetchNextPage();
+  };
+
+  const closedHasNextPage =
+    rejectedQuery.hasNextPage || withdrawnQuery.hasNextPage || declinedQuery.hasNextPage;
+  const isClosedFetchingNext =
+    rejectedQuery.isFetchingNextPage ||
+    withdrawnQuery.isFetchingNextPage ||
+    declinedQuery.isFetchingNextPage;
+  const handleFetchNextClosed = () => {
+    if (rejectedQuery.hasNextPage) void rejectedQuery.fetchNextPage();
+    if (withdrawnQuery.hasNextPage) void withdrawnQuery.fetchNextPage();
+    if (declinedQuery.hasNextPage) void declinedQuery.fetchNextPage();
+  };
 
   const renderBidRow = (bid: BidWithListing) => {
     const listing = bid.listing;
@@ -160,7 +216,7 @@ function MyBidsPageContent() {
 
           {/* Active Tab */}
           <TabsContent value="active" className="space-y-4">
-            {isLoading ? (
+            {isActiveLoading ? (
               <div className="space-y-4">
                 <Skeleton className="h-24 w-full rounded-lg" />
                 <Skeleton className="h-24 w-full rounded-lg" />
@@ -179,13 +235,27 @@ function MyBidsPageContent() {
                 }
               />
             ) : (
-              <div className="space-y-3">{activeBids.map(renderBidRow)}</div>
+              <>
+                <div className="space-y-3">{activeBids.map(renderBidRow)}</div>
+                {activeHasNextPage && (
+                  <div className="text-center pt-4">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleFetchNextActive}
+                      isLoading={isActiveFetchingNext}
+                    >
+                      Load more bids
+                    </Button>
+                  </div>
+                )}
+              </>
             )}
           </TabsContent>
 
           {/* Accepted Tab */}
           <TabsContent value="accepted" className="space-y-4">
-            {isLoading ? (
+            {isAcceptedLoading ? (
               <div className="space-y-4">
                 <Skeleton className="h-24 w-full rounded-lg" />
               </div>
@@ -196,13 +266,27 @@ function MyBidsPageContent() {
                 description="When an owner accepts your proposal or you accept their counter-offer, it will be listed here."
               />
             ) : (
-              <div className="space-y-3">{acceptedBids.map(renderBidRow)}</div>
+              <>
+                <div className="space-y-3">{acceptedBids.map(renderBidRow)}</div>
+                {acceptedHasNextPage && (
+                  <div className="text-center pt-4">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleFetchNextAccepted}
+                      isLoading={isAcceptedFetchingNext}
+                    >
+                      Load more bids
+                    </Button>
+                  </div>
+                )}
+              </>
             )}
           </TabsContent>
 
           {/* Closed Tab */}
           <TabsContent value="closed" className="space-y-4">
-            {isLoading ? (
+            {isClosedLoading ? (
               <div className="space-y-4">
                 <Skeleton className="h-24 w-full rounded-lg" />
               </div>
@@ -213,24 +297,24 @@ function MyBidsPageContent() {
                 description="Rejected, withdrawn, or declined proposals will be archived here."
               />
             ) : (
-              <div className="space-y-3">{closedBids.map(renderBidRow)}</div>
+              <>
+                <div className="space-y-3">{closedBids.map(renderBidRow)}</div>
+                {closedHasNextPage && (
+                  <div className="text-center pt-4">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleFetchNextClosed}
+                      isLoading={isClosedFetchingNext}
+                    >
+                      Load more bids
+                    </Button>
+                  </div>
+                )}
+              </>
             )}
           </TabsContent>
         </Tabs>
-
-        {/* Pagination / Load more */}
-        {hasNextPage && (
-          <div className="text-center pt-4">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => void fetchNextPage()}
-              isLoading={isFetchingNextPage}
-            >
-              Load more bids
-            </Button>
-          </div>
-        )}
       </div>
     </RequireAuth>
   );
