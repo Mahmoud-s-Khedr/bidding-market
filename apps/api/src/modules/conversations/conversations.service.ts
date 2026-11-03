@@ -182,34 +182,27 @@ export class ConversationsService {
   }
 
   async read(userId: string, conversationId: string, lastMessageId: string) {
-    await this.assertParticipant(userId, conversationId);
-    const message = await this.prisma.message.findFirst({
-      where: { id: lastMessageId, conversationId },
-    });
-    if (!message) throw new BadRequestException('Message does not belong to conversation');
-    const participant = await this.prisma.conversationParticipant.findUnique({
-      where: { conversationId_userId: { conversationId, userId } },
-    });
-    if (!participant || !participant.lastReadMessageId) {
-      await this.prisma.conversationParticipant.update({
+    await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`${conversationId}:${userId}`}))`;
+      const participant = await tx.conversationParticipant.findUnique({
         where: { conversationId_userId: { conversationId, userId } },
-        data: { lastReadMessageId: lastMessageId },
       });
-      this.events.emit('message.read', { conversationId, userId, lastMessageId });
-      return;
-    }
-    const prior = await this.prisma.message.findUnique({
-      where: { id: participant.lastReadMessageId },
+      if (!participant) throw new NotFoundException('Conversation not found');
+      const message = await tx.message.findFirst({ where: { id: lastMessageId, conversationId } });
+      if (!message) throw new BadRequestException('Message does not belong to conversation');
+      const prior = participant.lastReadMessageId
+        ? await tx.message.findUnique({ where: { id: participant.lastReadMessageId } })
+        : null;
+      if (
+        !prior ||
+        message.createdAt > prior.createdAt ||
+        (message.createdAt.getTime() === prior.createdAt.getTime() && message.id > prior.id)
+      )
+        await tx.conversationParticipant.update({
+          where: { conversationId_userId: { conversationId, userId } },
+          data: { lastReadMessageId: lastMessageId },
+        });
     });
-    if (
-      !prior ||
-      message.createdAt > prior.createdAt ||
-      (message.createdAt.getTime() === prior.createdAt.getTime() && message.id > prior.id)
-    )
-      await this.prisma.conversationParticipant.update({
-        where: { conversationId_userId: { conversationId, userId } },
-        data: { lastReadMessageId: lastMessageId },
-      });
     this.events.emit('message.read', { conversationId, userId, lastMessageId });
   }
 
@@ -307,6 +300,7 @@ export class ConversationsService {
       bidId: string | null;
       agreementId: string | null;
       createdAt: Date;
+      updatedAt: Date;
       participants: {
         userId: string;
         lastReadMessageId: string | null;
@@ -345,7 +339,7 @@ export class ConversationsService {
       unreadCount,
       listing: c.listing,
       createdAt: c.createdAt,
-      updatedAt: c.createdAt,
+      updatedAt: c.updatedAt,
     };
   }
 }
