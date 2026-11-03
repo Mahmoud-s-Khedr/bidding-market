@@ -56,7 +56,7 @@ describe('RealtimeGateway', () => {
   });
   it('counts multiple sockets before announcing offline and validates join/typing', async () => {
     const { gateway, prisma, redis, realtime } = setup();
-    const one = socket();
+    const one = socket() as ReturnType<typeof socket> & { data: { userId?: string } };
     one.data.userId = 'u1';
     redis.incr.mockResolvedValue(1);
     prisma.conversationParticipant.findMany.mockResolvedValue([
