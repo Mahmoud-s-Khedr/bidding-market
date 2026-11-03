@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Header } from './header';
 import { Footer } from './footer';
 import * as AuthContextModule from '@/components/auth/auth-provider';
@@ -12,6 +13,13 @@ vi.mock('next/navigation', () => ({
   usePathname: () => '/',
   useSearchParams: () => new URLSearchParams(),
 }));
+
+function renderWithClient(ui: React.ReactElement) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>);
+}
 
 describe('Header & Footer layout components', () => {
   beforeEach(() => {
@@ -31,7 +39,7 @@ describe('Header & Footer layout components', () => {
       refresh: vi.fn(),
     });
 
-    render(<Header />);
+    renderWithClient(<Header />);
 
     expect(screen.getByLabelText('BidMarket Home')).toBeInTheDocument();
     expect(screen.getByText('Browse')).toBeInTheDocument();
@@ -54,7 +62,7 @@ describe('Header & Footer layout components', () => {
       refresh: vi.fn(),
     });
 
-    render(<Header />);
+    renderWithClient(<Header />);
 
     const searchInputs = screen.getAllByLabelText('Search listings');
     const desktopSearch = searchInputs[0];
@@ -88,7 +96,7 @@ describe('Header & Footer layout components', () => {
       refresh: vi.fn(),
     });
 
-    render(<Header />);
+    renderWithClient(<Header />);
 
     expect(screen.getByLabelText('Notifications')).toBeInTheDocument();
     const userMenuButton = screen.getByLabelText('User menu');
@@ -128,7 +136,7 @@ describe('Header & Footer layout components', () => {
       refresh: vi.fn(),
     });
 
-    render(<Header />);
+    renderWithClient(<Header />);
 
     // Open mobile menu
     await user.click(screen.getByLabelText('Toggle navigation menu'));
@@ -153,7 +161,7 @@ describe('Header & Footer layout components', () => {
       refresh: vi.fn(),
     });
 
-    render(<Header />);
+    renderWithClient(<Header />);
 
     const toggleButton = screen.getByLabelText('Toggle navigation menu');
     expect(toggleButton).toHaveAttribute('aria-expanded', 'false');
