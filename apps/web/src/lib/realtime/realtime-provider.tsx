@@ -306,7 +306,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
       queryClient.setQueriesData<{
         pages: Array<PaginatedResponse<Notification>>;
         pageParams: unknown[];
-      }>({ queryKey: queryKeys.notifications.infinite() }, (old) => {
+      }>({ queryKey: queryKeys.notifications.all }, (old) => {
         if (!old || !old.pages || old.pages.length === 0) return old;
 
         const newPages = old.pages.map((page) => ({
@@ -329,7 +329,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
       });
 
       queryClient.setQueriesData<PaginatedResponse<Notification>>(
-        { queryKey: queryKeys.notifications.lists() },
+        { queryKey: queryKeys.notifications.all },
         (old) => {
           if (!old || !old.items) return old;
           const filtered = old.items.filter((n) => n.id !== notification.id);
