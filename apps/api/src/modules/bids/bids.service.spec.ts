@@ -814,6 +814,37 @@ describe('BidsService', () => {
       expect(categoriesService.invalidateCache).toHaveBeenCalled();
     });
 
+    it('returns the committed acceptance when category cache invalidation fails', async () => {
+      const bid = mockBid('PENDING');
+      prisma.bid.findUnique.mockResolvedValue(bid);
+      prisma.listing.updateMany.mockResolvedValue({ count: 1 });
+      prisma.bid.updateMany.mockResolvedValue({ count: 1 });
+      prisma.agreement.create.mockResolvedValue({
+        id: 'ag_cache_failure',
+        listingId: 'list_1',
+        bidId: 'bid_1',
+        buyerId: ownerUser.id,
+        providerId: bidderUser.id,
+        buyer: mockPublicUser(ownerUser.id, 'Owner'),
+        provider: mockPublicUser(bidderUser.id, 'Bidder'),
+        status: 'ACTIVE',
+        milestones: [],
+        deliverables: [],
+        events: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      prisma.conversation.findFirst.mockResolvedValue(null);
+      prisma.conversation.create.mockResolvedValue({ id: 'conv_cache_failure' });
+      prisma.bid.findUniqueOrThrow.mockResolvedValue({ ...bid, status: 'ACCEPTED' });
+      categoriesService.invalidateCache.mockRejectedValueOnce(new Error('Redis unavailable'));
+
+      await expect(service.accept('bid_1', ownerUser)).resolves.toMatchObject({
+        bid: { id: 'bid_1', status: 'ACCEPTED' },
+        agreement: { id: 'ag_cache_failure', status: 'ACTIVE' },
+      });
+    });
+
     it('throws 409 ConflictException when currency changes concurrently before direct accept', async () => {
       const bid = mockBid('PENDING'); // currency is 'USD'
       prisma.bid.findUnique.mockResolvedValue(bid);

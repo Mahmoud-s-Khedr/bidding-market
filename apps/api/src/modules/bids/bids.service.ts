@@ -96,6 +96,14 @@ export class BidsService {
     }
   }
 
+  private async safeInvalidateCategories(): Promise<void> {
+    try {
+      await this.categoriesService.invalidateCache();
+    } catch (err) {
+      this.logger.warn(`Error invalidating categories cache: ${String(err)}`);
+    }
+  }
+
   async create(listingId: string, input: BidCreateInput, user: AuthUser): Promise<BidDetail> {
     const listing = await this.prisma.listing.findUnique({
       where: { id: listingId },
@@ -1211,7 +1219,7 @@ export class BidsService {
       };
     });
 
-    await this.categoriesService.invalidateCache();
+    await this.safeInvalidateCategories();
 
     const serializedBid = await this.mapBidDetail(result.updatedBid);
     const serializedAgreement = await this.mapAgreement(result.agreement);

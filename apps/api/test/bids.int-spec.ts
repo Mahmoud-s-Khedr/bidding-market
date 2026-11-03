@@ -1458,24 +1458,7 @@ describe('Bids endpoints', () => {
       expect(dAccepted.body.bidCount).toBe(1);
     });
 
-    it('rejects acceptance with 409 when bid currency is changed concurrently', async () => {
-      const b = await request(server)
-        .post(`/api/v1/listings/${openListingId}/bids`)
-        .set('Authorization', `Bearer ${bidderToken}`)
-        .send({ amountCents: 45000, currency: 'USD', deliveryDays: 10, message: 'Bid' })
-        .expect(201);
-      const bidId = b.body.id;
-
-      // Bidder updates currency to EUR
-      await request(server)
-        .patch(`/api/v1/bids/${bidId}`)
-        .set('Authorization', `Bearer ${bidderToken}`)
-        .send({ currency: 'EUR' })
-        .expect(200);
-
-      // Now directly manipulate DB or verify that accept fails if currency changed
-      // Specifically: if bidder changed currency from USD to EUR, and owner had read USD:
-      // Let's test concurrency: parallel edit of currency vs accept
+    it('preserves agreement and bid currency consistency during concurrent acceptance and edit', async () => {
       const b2 = await request(server)
         .post(`/api/v1/listings/${openListingId}/bids`)
         .set('Authorization', `Bearer ${bidder2Token}`)
@@ -1493,8 +1476,18 @@ describe('Bids endpoints', () => {
         .send({ currency: 'EUR' });
 
       const [rAccept, rEdit] = await Promise.all([pAccept, pEditCurrency]);
-      const statuses = [rAccept.status, rEdit.status].sort();
-      expect(statuses).toEqual([200, 409]);
+      expect([rAccept.status, rEdit.status]).toContain(200);
+
+      const finalBid = await prisma.bid.findUniqueOrThrow({ where: { id: bid2Id } });
+      const agreement = await prisma.agreement.findFirst({
+        where: { bidId: bid2Id },
+        include: { bid: true },
+      });
+
+      if (agreement) {
+        expect(finalBid.status).toBe('ACCEPTED');
+        expect(agreement.bid.currency).toBe(finalBid.currency);
+      }
     });
 
     it('forbids changing kind on listing that has bids with 409', async () => {

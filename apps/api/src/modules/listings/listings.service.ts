@@ -3,6 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
   Optional,
   UnauthorizedException,
@@ -93,6 +94,7 @@ interface RawListingRow {
 
 @Injectable()
 export class ListingsService {
+  private readonly logger = new Logger(ListingsService.name);
   private readonly listingPresenter: ListingPresenter;
 
   constructor(
@@ -107,6 +109,14 @@ export class ListingsService {
 
   async toSummary(listing: ListingSummaryInput): Promise<ListingSummary> {
     return this.listingPresenter.toSummary(listing);
+  }
+
+  private async safeInvalidateCategories(): Promise<void> {
+    try {
+      await this.categoriesService.invalidateCache();
+    } catch (err) {
+      this.logger.warn(`Error invalidating categories cache: ${String(err)}`);
+    }
   }
 
   async validateUploads(
@@ -222,7 +232,7 @@ export class ListingsService {
         return created;
       });
 
-      await this.categoriesService.invalidateCache();
+      await this.safeInvalidateCategories();
 
       return this.getById(listing.id, { id: userId, role: 'USER' });
     } catch (err) {
@@ -365,7 +375,7 @@ export class ListingsService {
       throw err;
     }
 
-    await this.categoriesService.invalidateCache();
+    await this.safeInvalidateCategories();
 
     return this.getById(id, user);
   }
@@ -399,7 +409,7 @@ export class ListingsService {
       });
     });
 
-    await this.categoriesService.invalidateCache();
+    await this.safeInvalidateCategories();
 
     return this.getById(id, user);
   }
@@ -446,7 +456,7 @@ export class ListingsService {
       }
     }
 
-    await this.categoriesService.invalidateCache();
+    await this.safeInvalidateCategories();
   }
 
   async getById(id: string, user?: AuthUser): Promise<ListingDetail> {
