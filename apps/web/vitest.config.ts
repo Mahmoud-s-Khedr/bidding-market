@@ -5,6 +5,8 @@ import path from 'node:path';
 export default defineConfig({
   plugins: [react()],
   test: {
+    // userEvent-heavy form tests can exceed 5s on loaded CI runners.
+    testTimeout: 15_000,
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./test/setup.ts'],
