@@ -62,3 +62,69 @@ export async function createReview(
     },
   });
 }
+
+/** Creates the accepted-bid fixture used by agreement integration tests. */
+export async function createAgreement({
+  buyer,
+  provider,
+  listing,
+  amountCents,
+}: {
+  buyer: { id: string };
+  provider: { id: string };
+  listing: { id?: string; kind?: 'REQUEST' | 'OFFER' };
+  amountCents: number;
+}) {
+  const category = await prisma.category.create({
+    data: { name: `Cat-${crypto.randomUUID()}`, slug: `cat-${crypto.randomUUID()}` },
+  });
+  const createdListing = await prisma.listing.create({
+    data: {
+      id: listing.id,
+      ownerId: listing.kind === 'OFFER' ? provider.id : buyer.id,
+      categoryId: category.id,
+      kind: listing.kind ?? 'REQUEST',
+      status: 'IN_PROGRESS',
+      title: 'Agreement fixture',
+      description: 'Agreement fixture description suitable for tests',
+      priceType: 'FIXED',
+      priceMinCents: amountCents,
+      currency: 'USD',
+    },
+  });
+  const bid = await prisma.bid.create({
+    data: {
+      listingId: createdListing.id,
+      bidderId: listing.kind === 'OFFER' ? buyer.id : provider.id,
+      amountCents,
+      currency: 'USD',
+      deliveryDays: 3,
+      message: 'Fixture bid',
+      status: 'ACCEPTED',
+    },
+  });
+  const agreement = await prisma.agreement.create({
+    data: {
+      listingId: createdListing.id,
+      bidId: bid.id,
+      buyerId: buyer.id,
+      providerId: provider.id,
+      status: 'ACTIVE',
+      events: {
+        create: {
+          type: 'CREATED',
+          data: { initiatorRole: 'buyer', finalAmountCents: amountCents, finalDeliveryDays: 3 },
+        },
+      },
+    },
+  });
+  await prisma.conversation.create({
+    data: {
+      listingId: createdListing.id,
+      bidId: bid.id,
+      agreementId: agreement.id,
+      participants: { create: [{ userId: buyer.id }, { userId: provider.id }] },
+    },
+  });
+  return { agreement, listing: createdListing, bid };
+}
