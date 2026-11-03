@@ -294,17 +294,25 @@ export const presignUploadSchema = uploadPresignSchema.superRefine((value, ctx) 
     ctx.addIssue({ code: 'custom', message: 'File is too large', path: ['sizeBytes'] });
 });
 export const bidUpdateSchema = bidCreateSchema.partial();
+export type BidUpdateInput = z.infer<typeof bidUpdateSchema>;
+export const bidSortSchema = z
+  .enum(['newest', 'amount_asc', 'amount_desc', 'delivery', 'delivery_asc', 'rating'])
+  .transform((v) => (v === 'delivery_asc' ? 'delivery' : v));
+export type BidSort = 'newest' | 'amount_asc' | 'amount_desc' | 'delivery' | 'rating';
 export const bidQuerySchema = paginationSchema.extend({
   listingId: z.string().optional(),
   status: BidStatus.optional(),
-  sort: z.enum(['newest', 'amount_asc', 'amount_desc', 'delivery_asc']).default('newest'),
+  sort: bidSortSchema.default('newest'),
 });
+export type BidQueryInput = z.infer<typeof bidQuerySchema>;
 export const myBidsQuerySchema = paginationSchema.extend({ status: BidStatus.optional() });
+export type MyBidsQueryInput = z.infer<typeof myBidsQuerySchema>;
 export const bidCounterSchema = z.object({
   amountCents: z.number().int().positive().max(MAX_INT4),
   deliveryDays: z.number().int().positive().max(3650),
   message: z.string().max(5000),
 });
+export type BidCounterInput = z.infer<typeof bidCounterSchema>;
 export const milestoneSchema = z.object({
   title: z.string().min(1).max(200),
   amountCents: z.number().int().nonnegative().max(MAX_INT4).optional(),
@@ -347,6 +355,7 @@ export const messagesQuerySchema = paginationSchema.extend({ before: z.string().
 export const readSchema = z.object({ lastMessageId: z.string() });
 export const agreementCancelSchema = z.object({ reason: z.string().min(1).max(2000) });
 export const bidRejectSchema = z.object({ reason: z.string().max(2000).optional() });
+export type BidRejectInput = z.infer<typeof bidRejectSchema>;
 export const acceptCounterSchema = z.object({});
 export const milestoneUpdateSchema = milestoneSchema.partial();
 export const disputeSchema = agreementCancelSchema;
@@ -422,6 +431,18 @@ export const listingSummarySchema = z.object({
   bidCount: z.number().int().nonnegative(),
   createdAt: date,
 });
+export const bidRevisionSchema = z.object({
+  id: z.string(),
+  bidId: z.string(),
+  authorId: z.string(),
+  author: publicUserSchema.optional(),
+  amountCents: z.number().int(),
+  deliveryDays: z.number().int(),
+  message: z.string(),
+  createdAt: date,
+});
+export type BidRevision = z.infer<typeof bidRevisionSchema>;
+
 export const bidSchema = z.object({
   id: z.string(),
   listingId: z.string(),
@@ -431,11 +452,25 @@ export const bidSchema = z.object({
   deliveryDays: z.number().int(),
   message: z.string(),
   status: BidStatus,
-  rejectReason: z.string().nullable(),
-  lastCounterById: z.string().nullable(),
+  rejectReason: z.string().nullable().optional(),
+  lastCounterById: z.string().nullable().optional(),
+  attachments: z.array(attachmentSchema).optional(),
   createdAt: date,
   updatedAt: date,
 });
+
+export const bidDetailSchema = bidSchema.extend({
+  attachments: z.array(attachmentSchema).default([]),
+  revisions: z.array(bidRevisionSchema).default([]),
+  listing: listingSummarySchema.optional(),
+});
+export type BidDetail = z.infer<typeof bidDetailSchema>;
+
+export const bidWithListingSchema = bidSchema.extend({
+  listing: listingSummarySchema,
+  attachments: z.array(attachmentSchema).default([]),
+});
+export type BidWithListing = z.infer<typeof bidWithListingSchema>;
 export const listingDetailSchema = listingSummarySchema.extend({
   description: z.string(),
   deliveryDays: z.number().int().nullable(),
@@ -486,6 +521,11 @@ export const agreementSchema = z.object({
   createdAt: date,
   updatedAt: date,
 });
+export const bidAcceptResponseSchema = z.object({
+  bid: bidSchema,
+  agreement: agreementSchema,
+});
+export type BidAcceptResponse = z.infer<typeof bidAcceptResponseSchema>;
 export const messageSchema = z.object({
   id: z.string(),
   conversationId: z.string(),

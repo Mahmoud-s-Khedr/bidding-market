@@ -67,7 +67,7 @@ export class UsersService {
       take: limit + 1,
       cursor: cursor ? { id: cursor } : undefined,
       skip: cursor ? 1 : 0,
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       include: { author: { select: publicUserSelect } },
     });
     const paginated = paginate(reviews, limit);

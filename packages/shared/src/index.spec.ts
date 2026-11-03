@@ -1,8 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   attachmentSchema,
+  bidAcceptResponseSchema,
   bidCounterSchema,
   bidCreateSchema,
+  bidDetailSchema,
+  bidQuerySchema,
+  bidRejectSchema,
+  bidRevisionSchema,
+  bidUpdateSchema,
+  bidWithListingSchema,
   categoryCreateSchema,
   categoryTreeNodeSchema,
   categoryUpdateSchema,
@@ -202,6 +209,132 @@ describe('shared schemas', () => {
     expect(updateProfileSchema.safeParse({ avatarUploadId: 'upload_123' }).success).toBe(true);
     expect(updateProfileSchema.safeParse({ avatarUploadId: null }).success).toBe(true);
     expect(updateProfileSchema.safeParse({ avatarUploadId: '' }).success).toBe(false);
+  });
+  it('validates bid schemas, sort transforms, and revisions', () => {
+    expect(
+      bidCreateSchema.safeParse({
+        amountCents: 5000,
+        currency: 'USD',
+        deliveryDays: 3,
+        message: 'I can deliver this',
+      }).success,
+    ).toBe(true);
+    expect(
+      bidCreateSchema.safeParse({
+        amountCents: -1,
+        deliveryDays: 0,
+        message: 'invalid',
+      }).success,
+    ).toBe(false);
+
+    expect(bidUpdateSchema.safeParse({ amountCents: 6000 }).success).toBe(true);
+    expect(
+      bidCounterSchema.safeParse({
+        amountCents: 4500,
+        deliveryDays: 2,
+        message: 'Counter offer',
+      }).success,
+    ).toBe(true);
+    expect(bidRejectSchema.safeParse({ reason: 'Too expensive' }).success).toBe(true);
+
+    const parsedQuery = bidQuerySchema.parse({ sort: 'delivery_asc' });
+    expect(parsedQuery.sort).toBe('delivery');
+    expect(bidQuerySchema.parse({ sort: 'rating' }).sort).toBe('rating');
+    expect(bidQuerySchema.parse({ sort: 'amount_desc' }).sort).toBe('amount_desc');
+    expect(bidQuerySchema.safeParse({ sort: 'invalid' }).success).toBe(false);
+
+    const user = {
+      id: 'u1',
+      displayName: 'Alice',
+      avatarUrl: null,
+      bio: null,
+      location: null,
+      isBusiness: false,
+      companyName: null,
+      ratingAvg: 4.8,
+      ratingCount: 12,
+      completedCount: 10,
+      createdAt: new Date(),
+    };
+    const revision = {
+      id: 'rev1',
+      bidId: 'b1',
+      authorId: 'u1',
+      author: user,
+      amountCents: 5000,
+      deliveryDays: 3,
+      message: 'Initial bid',
+      createdAt: new Date(),
+    };
+    expect(bidRevisionSchema.safeParse(revision).success).toBe(true);
+
+    const bid = {
+      id: 'b1',
+      listingId: 'l1',
+      bidder: user,
+      amountCents: 5000,
+      currency: 'USD',
+      deliveryDays: 3,
+      message: 'Initial bid',
+      status: 'PENDING' as const,
+      rejectReason: null,
+      lastCounterById: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    expect(
+      bidDetailSchema.safeParse({
+        ...bid,
+        attachments: [],
+        revisions: [revision],
+      }).success,
+    ).toBe(true);
+
+    const listingSummary = {
+      id: 'l1',
+      owner: user,
+      categoryId: 'cat1',
+      categoryName: 'Plumbing',
+      thumbnailUrl: null,
+      kind: 'REQUEST' as const,
+      status: 'OPEN' as const,
+      title: 'Fix kitchen sink',
+      priceType: 'FIXED' as const,
+      priceMinCents: 5000,
+      priceMaxCents: null,
+      currency: 'USD',
+      location: null,
+      expiresAt: null,
+      bidCount: 1,
+      createdAt: new Date(),
+    };
+    expect(
+      bidWithListingSchema.safeParse({
+        ...bid,
+        listing: listingSummary,
+        attachments: [],
+      }).success,
+    ).toBe(true);
+
+    const agreement = {
+      id: 'ag1',
+      listingId: 'l1',
+      bidId: 'b1',
+      buyer: user,
+      provider: user,
+      status: 'ACTIVE' as const,
+      milestones: [],
+      deliverables: [],
+      events: [],
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    expect(
+      bidAcceptResponseSchema.safeParse({
+        bid,
+        agreement,
+      }).success,
+    ).toBe(true);
   });
 });
 describe('schema refinements', () => {

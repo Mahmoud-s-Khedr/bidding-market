@@ -285,16 +285,19 @@ updatedAt DateTime @updatedAt
 @@index([bidderId,status])
 }
 model BidRevision {
-id String @id @default(cuid())
-bidId String
-bid Bid @relation(fields:[bidId],references:[id],onDelete:Cascade)
-authorId String
-author User @relation("BidRevisionAuthor",fields:[authorId],references:[id],onDelete:Restrict)
-amountCents Int
-deliveryDays Int
-message String
-createdAt DateTime @default(now())
-@@index([bidId,createdAt])
+  id           String   @id @default(cuid())
+  seq          Int      @default(autoincrement())
+  bidId        String
+  bid          Bid      @relation(fields: [bidId], references: [id], onDelete: Cascade)
+  authorId     String
+  author       User     @relation("BidRevisionAuthor", fields: [authorId], references: [id], onDelete: Restrict)
+  amountCents  Int
+  deliveryDays Int
+  message      String
+  createdAt    DateTime @default(now())
+
+  @@index([bidId, createdAt])
+  @@index([bidId, seq])
 }
 model BidAttachment {
 id String @id @default(cuid())
