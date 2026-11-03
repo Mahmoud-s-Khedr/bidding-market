@@ -15,6 +15,7 @@ describe('ListingPresenter', () => {
         id: 'u1',
         displayName: 'Alice',
         avatarKey: null,
+        createdAt: now,
       },
       categoryId: 'c1',
       category: { name: 'Technology' },
@@ -65,7 +66,7 @@ describe('ListingPresenter', () => {
     const summary = await toListingSummary(
       {
         id: 'l2',
-        owner: { id: 'u2', displayName: 'Bob' },
+        owner: { id: 'u2', displayName: 'Bob', createdAt: now },
         categoryId: 'c2',
         categoryName: 'Design',
         images: [{ upload: { key: 'listings/l2/img0.jpg' } }],
