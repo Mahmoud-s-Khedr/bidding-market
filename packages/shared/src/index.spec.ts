@@ -271,7 +271,17 @@ it('validates paginated and category tree schemas', async () => {
   const p = paginated(categoryTreeSchema);
   expect(
     p.safeParse({
-      items: [{ id: '1', name: 'Tech', slug: 'tech', parentId: null, children: [] }],
+      items: [
+        {
+          id: '1',
+          name: 'Tech',
+          slug: 'tech',
+          parentId: null,
+          description: null,
+          listingCount: 0,
+          children: [],
+        },
+      ],
       nextCursor: null,
     }).success,
   ).toBe(true);

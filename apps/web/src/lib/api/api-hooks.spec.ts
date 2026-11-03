@@ -96,6 +96,8 @@ describe('Listings API & Hooks', () => {
       description: 'Test description text here',
       categoryId: 'cat-1',
       priceType: 'FIXED',
+      priceMinCents: 5000,
+      currency: 'USD',
     };
 
     await createListing(mockPayload);
@@ -184,6 +186,8 @@ describe('Listings API & Hooks', () => {
       description: 'Test description text here',
       categoryId: 'cat-1',
       priceType: 'FIXED',
+      priceMinCents: 5000,
+      currency: 'USD',
     });
 
     const { result: updateHook } = renderHook(() => useUpdateListing(), { wrapper });

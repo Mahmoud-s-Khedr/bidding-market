@@ -6,6 +6,7 @@ import UserProfilePage from './[id]/page';
 import * as usersApi from '@/lib/api/users';
 import * as listingsApi from '@/lib/api/listings';
 import type { ListingSummary, PublicUser, ReviewItem } from '@/lib/api/types';
+import { makeListingSummary, makePublicUser } from '../../../test/fixtures';
 
 vi.mock('next/navigation', () => ({
   useParams: () => ({ id: 'user-profile-1' }),
@@ -16,7 +17,7 @@ describe('User Profile Page', () => {
     vi.restoreAllMocks();
   });
 
-  const mockUser: PublicUser = {
+  const mockUser: PublicUser = makePublicUser({
     id: 'user-profile-1',
     displayName: 'Elena Rostova',
     avatarUrl: null,
@@ -28,9 +29,9 @@ describe('User Profile Page', () => {
     ratingCount: 25,
     completedCount: 30,
     createdAt: '2024-03-15T00:00:00Z',
-  };
+  });
 
-  const mockListing: ListingSummary = {
+  const mockListing: ListingSummary = makeListingSummary({
     id: 'l-user-1',
     title: 'Mobile App Wireframes & Figma UI Kit',
     kind: 'OFFER',
@@ -46,7 +47,7 @@ describe('User Profile Page', () => {
     owner: mockUser,
     bidCount: 4,
     createdAt: '2026-10-01T00:00:00Z',
-  };
+  });
 
   const mockReview: ReviewItem = {
     id: 'rev-1',

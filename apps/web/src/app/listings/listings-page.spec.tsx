@@ -6,6 +6,7 @@ import { ListingsContent } from './page';
 import * as listingsApi from '@/lib/api/listings';
 import * as categoriesApi from '@/lib/api/categories';
 import type { ListingSummary } from '@/lib/api/types';
+import { makeCategory, makeListingSummary, makePublicUser } from '../../../test/fixtures';
 
 const mockPush = vi.fn();
 const mockReplace = vi.fn();
@@ -28,12 +29,14 @@ describe('Listings Browse Page', () => {
     mockSearchParams = new URLSearchParams();
 
     vi.spyOn(categoriesApi, 'useCategories').mockReturnValue({
-      data: [{ id: 'cat-1', name: 'Tech', slug: 'tech', parentId: null, children: [] }],
+      data: [
+        makeCategory({ id: 'cat-1', name: 'Tech', slug: 'tech', parentId: null, children: [] }),
+      ],
       isLoading: false,
-    } as unknown as ReturnType<typeof categoriesApi.useCategories>);
+    } as ReturnType<typeof categoriesApi.useCategories>);
   });
 
-  const sampleListing: ListingSummary = {
+  const sampleListing: ListingSummary = makeListingSummary({
     id: 'l-1',
     title: 'Fullstack Next.js Developer',
     kind: 'REQUEST',
@@ -46,7 +49,7 @@ describe('Listings Browse Page', () => {
     categoryId: 'cat-1',
     categoryName: 'Tech',
     thumbnailUrl: 'https://cdn.example.com/thumb.jpg',
-    owner: {
+    owner: makePublicUser({
       id: 'u-1',
       displayName: 'Alice',
       isBusiness: false,
@@ -54,10 +57,10 @@ describe('Listings Browse Page', () => {
       ratingCount: 1,
       completedCount: 2,
       createdAt: '2026-01-01T00:00:00Z',
-    },
+    }),
     bidCount: 2,
     createdAt: '2026-10-01T00:00:00Z',
-  };
+  });
 
   it('renders listings items returned from useListings', () => {
     vi.spyOn(listingsApi, 'useListings').mockReturnValue({

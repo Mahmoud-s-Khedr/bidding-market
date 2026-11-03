@@ -8,6 +8,7 @@ import { ApiError } from '@/lib/api/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ToastProvider } from '@/components/ui/toast';
 import type { ListingDetail } from '@/lib/api/types';
+import { makeListingDetail, makePublicUser } from '../../../test/fixtures';
 
 function renderWithToast(ui: React.ReactElement) {
   const queryClient = new QueryClient({
@@ -32,7 +33,7 @@ describe('Listing Detail Page', () => {
     vi.restoreAllMocks();
   });
 
-  const mockListing: ListingDetail = {
+  const mockListing: ListingDetail = makeListingDetail({
     id: 'listing-123',
     title: 'Brand Identity Design',
     description: 'Complete brand guide, vector logos, typography and color palettes.',
@@ -46,8 +47,9 @@ describe('Listing Detail Page', () => {
     location: 'Remote',
     tags: ['branding', 'design'],
     categoryId: 'c-design',
+    categoryName: 'Design',
     category: { id: 'c-design', name: 'Design', slug: 'design' },
-    owner: {
+    owner: makePublicUser({
       id: 'user-owner',
       displayName: 'Creative Studio',
       isBusiness: true,
@@ -56,13 +58,13 @@ describe('Listing Detail Page', () => {
       ratingCount: 20,
       completedCount: 15,
       createdAt: '2026-01-01T00:00:00Z',
-    },
+    }),
     images: [],
     attachments: [],
     bidCount: 5,
     createdAt: '2026-10-01T00:00:00Z',
     updatedAt: '2026-10-01T00:00:00Z',
-  };
+  });
 
   it('renders listing overview, price, tags, and owner information', () => {
     vi.spyOn(authContext, 'useAuth').mockReturnValue({

@@ -6,13 +6,26 @@ import { ListingForm } from './listing-form';
 import { ApiError } from '@/lib/api/client';
 import * as categoriesApi from '@/lib/api/categories';
 import type { Category, CreateListingRequest, UpdateListingRequest } from '@/lib/api/types';
+import { makeCategory, makeListingDetail, makePublicUser } from '../../../test/fixtures';
 
 describe('ListingForm component', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     const mockCategories: Category[] = [
-      { id: 'cat-1', name: 'Design & Creative', slug: 'design', parentId: null, children: [] },
-      { id: 'cat-2', name: 'Web Development', slug: 'web-dev', parentId: null, children: [] },
+      makeCategory({
+        id: 'cat-1',
+        name: 'Design & Creative',
+        slug: 'design',
+        parentId: null,
+        children: [],
+      }),
+      makeCategory({
+        id: 'cat-2',
+        name: 'Web Development',
+        slug: 'web-dev',
+        parentId: null,
+        children: [],
+      }),
     ];
     vi.spyOn(categoriesApi, 'useCategories').mockReturnValue({
       data: mockCategories,
@@ -61,13 +74,13 @@ describe('ListingForm component', () => {
       .fn<(data: CreateListingRequest | UpdateListingRequest) => Promise<void>>()
       .mockResolvedValue(undefined);
 
-    const initialListing = {
+    const initialListing = makeListingDetail({
       id: 'l-edit',
       title: 'Senior Frontend Engineer needed',
       description: 'We need an experienced developer for our production Next.js app.',
-      kind: 'REQUEST' as const,
-      status: 'OPEN' as const,
-      priceType: 'FIXED' as const,
+      kind: 'REQUEST',
+      status: 'OPEN',
+      priceType: 'FIXED',
       priceMinCents: 15000,
       priceMaxCents: 15000,
       currency: 'USD',
@@ -75,20 +88,20 @@ describe('ListingForm component', () => {
       location: 'Remote',
       tags: ['react'],
       categoryId: 'cat-2',
+      categoryName: 'Web Development',
       category: { id: 'cat-2', name: 'Web Development', slug: 'web-dev' },
-      ownerId: 'u-1',
-      owner: {
+      owner: makePublicUser({
         id: 'u-1',
         displayName: 'Alice',
         isBusiness: false,
         createdAt: '2026-01-01T00:00:00Z',
-      },
+      }),
       images: [],
       attachments: [],
       bidCount: 0,
       createdAt: '2026-10-01T00:00:00Z',
       updatedAt: '2026-10-01T00:00:00Z',
-    };
+    });
 
     render(<ListingForm initialListing={initialListing} onSubmit={onSubmit} />);
 
@@ -122,30 +135,30 @@ describe('ListingForm component', () => {
       .fn<(data: CreateListingRequest | UpdateListingRequest) => Promise<void>>()
       .mockResolvedValue(undefined);
 
-    const initialListing = {
+    const initialListing = makeListingDetail({
       id: 'l-draft',
       title: 'Draft Website Redesign Proposal',
       description: 'Work in progress description that has plenty of length for validation.',
-      kind: 'OFFER' as const,
-      status: 'DRAFT' as const,
-      priceType: 'NEGOTIABLE' as const,
+      kind: 'OFFER',
+      status: 'DRAFT',
+      priceType: 'NEGOTIABLE',
       currency: 'USD',
       tags: [],
       categoryId: 'cat-1',
+      categoryName: 'Design',
       category: { id: 'cat-1', name: 'Design', slug: 'design' },
-      ownerId: 'u-1',
-      owner: {
+      owner: makePublicUser({
         id: 'u-1',
         displayName: 'Bob',
         isBusiness: false,
         createdAt: '2026-01-01T00:00:00Z',
-      },
+      }),
       images: [],
       attachments: [],
       bidCount: 0,
       createdAt: '2026-10-01T00:00:00Z',
       updatedAt: '2026-10-01T00:00:00Z',
-    };
+    });
 
     render(<ListingForm initialListing={initialListing} onSubmit={onSubmit} />);
 
@@ -168,32 +181,32 @@ describe('ListingForm component', () => {
       .fn<(data: CreateListingRequest | UpdateListingRequest) => Promise<void>>()
       .mockResolvedValue(undefined);
 
-    const initialDraftListing = {
+    const initialDraftListing = makeListingDetail({
       id: 'l-draft-publish',
       title: 'Draft Proposal to Publish',
       description: 'Long enough description text for testing publication of a draft listing.',
-      kind: 'OFFER' as const,
-      status: 'DRAFT' as const,
-      priceType: 'FIXED' as const,
+      kind: 'OFFER',
+      status: 'DRAFT',
+      priceType: 'FIXED',
       priceMinCents: 10000,
       priceMaxCents: null,
       currency: 'USD',
       tags: [],
       categoryId: 'cat-1',
+      categoryName: 'Design',
       category: { id: 'cat-1', name: 'Design', slug: 'design' },
-      ownerId: 'u-1',
-      owner: {
+      owner: makePublicUser({
         id: 'u-1',
         displayName: 'Bob',
         isBusiness: false,
         createdAt: '2026-01-01T00:00:00Z',
-      },
+      }),
       images: [],
       attachments: [],
       bidCount: 0,
       createdAt: '2026-10-01T00:00:00Z',
       updatedAt: '2026-10-01T00:00:00Z',
-    };
+    });
 
     render(<ListingForm initialListing={initialDraftListing} onSubmit={onSubmit} />);
 
@@ -211,32 +224,32 @@ describe('ListingForm component', () => {
   });
 
   it('displays the currency symbol from the selected currency', () => {
-    const initialListing = {
+    const initialListing = makeListingDetail({
       id: 'l-eur',
       title: 'European Consulting Service',
       description: 'Comprehensive business consulting services in Europe.',
-      kind: 'OFFER' as const,
-      status: 'OPEN' as const,
-      priceType: 'FIXED' as const,
+      kind: 'OFFER',
+      status: 'OPEN',
+      priceType: 'FIXED',
       priceMinCents: 5000,
       priceMaxCents: null,
       currency: 'EUR',
       tags: [],
       categoryId: 'cat-1',
+      categoryName: 'Design',
       category: { id: 'cat-1', name: 'Design', slug: 'design' },
-      ownerId: 'u-1',
-      owner: {
+      owner: makePublicUser({
         id: 'u-1',
         displayName: 'Alice',
         isBusiness: false,
         createdAt: '2026-01-01T00:00:00Z',
-      },
+      }),
       images: [],
       attachments: [],
       bidCount: 0,
       createdAt: '2026-10-01T00:00:00Z',
       updatedAt: '2026-10-01T00:00:00Z',
-    };
+    });
 
     render(<ListingForm initialListing={initialListing} onSubmit={vi.fn()} />);
 
@@ -250,30 +263,30 @@ describe('ListingForm component', () => {
     ]);
     const onSubmit = vi.fn().mockRejectedValue(validationError);
 
-    const initialListing = {
+    const initialListing = makeListingDetail({
       id: 'l-err',
       title: 'Prohibited keyword title',
       description: 'Valid length description text for testing validation error mapping.',
-      kind: 'REQUEST' as const,
-      status: 'OPEN' as const,
-      priceType: 'NEGOTIABLE' as const,
+      kind: 'REQUEST',
+      status: 'OPEN',
+      priceType: 'NEGOTIABLE',
       currency: 'USD',
       tags: [],
       categoryId: 'cat-1',
+      categoryName: 'Design',
       category: { id: 'cat-1', name: 'Design', slug: 'design' },
-      ownerId: 'u-1',
-      owner: {
+      owner: makePublicUser({
         id: 'u-1',
         displayName: 'Carol',
         isBusiness: false,
         createdAt: '2026-01-01T00:00:00Z',
-      },
+      }),
       images: [],
       attachments: [],
       bidCount: 0,
       createdAt: '2026-10-01T00:00:00Z',
       updatedAt: '2026-10-01T00:00:00Z',
-    };
+    });
 
     render(<ListingForm initialListing={initialListing} onSubmit={onSubmit} />);
 

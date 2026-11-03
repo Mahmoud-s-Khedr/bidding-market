@@ -19,6 +19,8 @@ import type {
   PaginatedResponse as SharedPaginatedResponse,
   ApiError,
   ReviewItem as SharedReviewItem,
+  UpdateProfileInput as SharedUpdateProfileInput,
+  ListingCreateFormInput,
 } from '@market/shared';
 
 export type UserRole = Role;
@@ -116,17 +118,8 @@ export interface PresignedGetUrlResponse {
 
 export type Category = SharedCategory;
 
-export type ListingFilters = Omit<SharedListingFilters, 'sort'> & {
-  sort?: ListingSort;
-};
-export type ListingSort =
-  | SharedListingSort
-  | 'relevance'
-  | 'newest'
-  | 'price_asc'
-  | 'price_desc'
-  | 'ending_soon'
-  | 'most_bids';
+export type ListingFilters = SharedListingFilters;
+export type ListingSort = SharedListingSort;
 
 export type ListingSummary = Omit<
   SharedListingSummary,
@@ -138,8 +131,6 @@ export type ListingSummary = Omit<
   priceMinCents?: number | null;
   priceMaxCents?: number | null;
   owner: PublicUser;
-  thumbnailUrl?: string | null;
-  categoryName?: string;
 };
 
 export type ListingDetail = Omit<
@@ -165,15 +156,18 @@ export type ListingDetail = Omit<
   owner: PublicUser;
   images: Attachment[];
   attachments: Attachment[];
-  category?: {
+  category: {
     id: string;
     name: string;
     slug: string;
+    parentId?: string | null;
   };
   myBid?: unknown;
 };
 
 export type CreateListingRequest = ListingCreateInput;
+export type ListingCreateFormInputType = ListingCreateFormInput;
+export type UpdateProfileInput = SharedUpdateProfileInput;
 export type UpdateListingRequest = Omit<
   ListingUpdateInput,
   'priceMinCents' | 'priceMaxCents' | 'deliveryDays' | 'location' | 'expiresAt'

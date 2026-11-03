@@ -11,6 +11,7 @@ import { CategorySelect } from './category-select';
 import { ListingCard } from './listing-card';
 import * as categoriesApi from '@/lib/api/categories';
 import type { Category, ListingSummary } from '@/lib/api/types';
+import { makeCategory, makeListingSummary, makePublicUser } from '../../../test/fixtures';
 
 describe('Shared Components', () => {
   beforeEach(() => {
@@ -165,21 +166,21 @@ describe('Shared Components', () => {
 
   describe('CategorySelect', () => {
     const mockTree: Category[] = [
-      {
+      makeCategory({
         id: 'c-tech',
         name: 'Technology',
         slug: 'technology',
         parentId: null,
         children: [
-          {
+          makeCategory({
             id: 'c-web',
             name: 'Web Dev',
             slug: 'web-dev',
             parentId: 'c-tech',
             children: [],
-          },
+          }),
         ],
-      },
+      }),
     ];
 
     it('flattens categories hierarchy into selectable list', () => {
@@ -195,7 +196,7 @@ describe('Shared Components', () => {
   });
 
   describe('ListingCard', () => {
-    const mockListing: ListingSummary = {
+    const mockListing: ListingSummary = makeListingSummary({
       id: 'list-123',
       title: 'Fullstack Next.js Developer needed',
       kind: 'REQUEST',
@@ -208,7 +209,7 @@ describe('Shared Components', () => {
       categoryId: 'c-web',
       categoryName: 'Web Development',
       thumbnailUrl: 'https://ex.com/hero.jpg',
-      owner: {
+      owner: makePublicUser({
         id: 'u-alice',
         displayName: 'Alice Cooper',
         isBusiness: false,
@@ -216,10 +217,10 @@ describe('Shared Components', () => {
         ratingCount: 15,
         completedCount: 10,
         createdAt: '2026-01-01T00:00:00Z',
-      },
+      }),
       bidCount: 3,
       createdAt: '2026-10-01T00:00:00Z',
-    };
+    });
 
     it('renders listing card with title, kind, price, category, and owner details (Finding 7)', () => {
       const { container } = render(<ListingCard listing={mockListing} />);
@@ -235,13 +236,13 @@ describe('Shared Components', () => {
       expect(img).toBeInTheDocument();
     });
 
-    it('hides category label and does not render raw cuid when categoryName is absent (Finding 7)', () => {
-      const listingWithoutCategoryName: ListingSummary = {
+    it('hides category label and does not render raw cuid when categoryName is empty (Finding 7)', () => {
+      const listingWithoutCategoryName: ListingSummary = makeListingSummary({
         ...mockListing,
         categoryId: 'c-design',
-        categoryName: undefined,
+        categoryName: '',
         thumbnailUrl: null,
-      };
+      });
 
       const { container } = render(<ListingCard listing={listingWithoutCategoryName} />);
       expect(container).not.toHaveTextContent('c-design');
