@@ -1457,5 +1457,136 @@ describe('Bids endpoints', () => {
         .expect(200);
       expect(dAccepted.body.bidCount).toBe(1);
     });
+
+    it('rejects acceptance with 409 when bid currency is changed concurrently', async () => {
+      const b = await request(server)
+        .post(`/api/v1/listings/${openListingId}/bids`)
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .send({ amountCents: 45000, currency: 'USD', deliveryDays: 10, message: 'Bid' })
+        .expect(201);
+      const bidId = b.body.id;
+
+      // Bidder updates currency to EUR
+      await request(server)
+        .patch(`/api/v1/bids/${bidId}`)
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .send({ currency: 'EUR' })
+        .expect(200);
+
+      // Now directly manipulate DB or verify that accept fails if currency changed
+      // Specifically: if bidder changed currency from USD to EUR, and owner had read USD:
+      // Let's test concurrency: parallel edit of currency vs accept
+      const b2 = await request(server)
+        .post(`/api/v1/listings/${openListingId}/bids`)
+        .set('Authorization', `Bearer ${bidder2Token}`)
+        .send({ amountCents: 46000, currency: 'USD', deliveryDays: 12, message: 'Bid 2' })
+        .expect(201);
+      const bid2Id = b2.body.id;
+
+      const pAccept = request(server)
+        .post(`/api/v1/bids/${bid2Id}/accept`)
+        .set('Authorization', `Bearer ${ownerToken}`);
+
+      const pEditCurrency = request(server)
+        .patch(`/api/v1/bids/${bid2Id}`)
+        .set('Authorization', `Bearer ${bidder2Token}`)
+        .send({ currency: 'EUR' });
+
+      const [rAccept, rEdit] = await Promise.all([pAccept, pEditCurrency]);
+      const statuses = [rAccept.status, rEdit.status].sort();
+      expect(statuses).toEqual([200, 409]);
+    });
+
+    it('forbids changing kind on listing that has bids with 409', async () => {
+      await request(server)
+        .post(`/api/v1/listings/${openListingId}/bids`)
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .send({ amountCents: 45000, currency: 'USD', deliveryDays: 10, message: 'Bid' })
+        .expect(201);
+
+      await request(server)
+        .patch(`/api/v1/listings/${openListingId}`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ kind: 'OFFER' })
+        .expect(409);
+    });
+
+    it('orders revision history and counter lookup by seq as primary ordering', async () => {
+      const b = await request(server)
+        .post(`/api/v1/listings/${openListingId}/bids`)
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .send({ amountCents: 45000, currency: 'USD', deliveryDays: 10, message: 'Initial bid' })
+        .expect(201);
+      const bidId = b.body.id;
+
+      // 1. Owner counters
+      await request(server)
+        .post(`/api/v1/bids/${bidId}/counter`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ amountCents: 40000, deliveryDays: 8, message: 'First counter' })
+        .expect(200);
+
+      // 2. Bidder edits
+      await request(server)
+        .patch(`/api/v1/bids/${bidId}`)
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .send({ amountCents: 42000, deliveryDays: 9, message: 'Second proposal' })
+        .expect(200);
+
+      // 3. Owner counters again
+      await request(server)
+        .post(`/api/v1/bids/${bidId}/counter`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ amountCents: 39000, deliveryDays: 7, message: 'Second counter' })
+        .expect(200);
+
+      // Fetch bid details and verify revision history is ordered by seq ascending
+      const detail = await request(server)
+        .get(`/api/v1/bids/${bidId}`)
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .expect(200);
+
+      const revisions = (detail.body as { revisions: Array<{ amountCents: number }> }).revisions;
+      expect(revisions.length).toBe(4);
+      expect(revisions.map((r) => r.amountCents)).toEqual([45000, 40000, 42000, 39000]);
+
+      // When bidder accepts counter, it accepts the latest counter (39000, 7 days)
+      const acceptRes = await request(server)
+        .post(`/api/v1/bids/${bidId}/accept-counter`)
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .expect(200);
+
+      expect(acceptRes.body.bid.amountCents).toBe(39000);
+      expect(acceptRes.body.bid.deliveryDays).toBe(7);
+    });
+
+    it('invalidates categories cache after accept: /categories count drops right after an accept', async () => {
+      // 1. Check categories before: listing is OPEN so category listingCount is at least 1
+      const initialCatRes = await request(server).get('/api/v1/categories').expect(200);
+      const catNodeInitial = (
+        initialCatRes.body as Array<{ id: string; listingCount: number }>
+      ).find((c) => c.id === categoryId);
+      const initialCount = catNodeInitial?.listingCount ?? 0;
+      expect(initialCount).toBeGreaterThan(0);
+
+      // 2. Submit bid and accept it
+      const b = await request(server)
+        .post(`/api/v1/listings/${openListingId}/bids`)
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .send({ amountCents: 45000, currency: 'USD', deliveryDays: 10, message: 'Bid to accept' })
+        .expect(201);
+
+      await request(server)
+        .post(`/api/v1/bids/${b.body.id}/accept`)
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .expect(200);
+
+      // 3. Immediately query categories: cache must have been invalidated and count dropped by 1
+      const afterCatRes = await request(server).get('/api/v1/categories').expect(200);
+      const catNodeAfter = (afterCatRes.body as Array<{ id: string; listingCount: number }>).find(
+        (c) => c.id === categoryId,
+      );
+      expect(catNodeAfter?.listingCount).toBe(initialCount - 1);
+    });
   });
 });

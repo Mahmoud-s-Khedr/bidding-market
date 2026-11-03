@@ -13,6 +13,9 @@ type MockFn = ReturnType<typeof vi.fn>;
 
 describe('BidsService', () => {
   let service: BidsService;
+  let categoriesService: {
+    invalidateCache: MockFn;
+  };
   let prisma: {
     listing: {
       findUnique: MockFn;
@@ -227,11 +230,20 @@ describe('BidsService', () => {
       presignGet: vi.fn().mockResolvedValue('http://presigned-get-url'),
     };
 
+    categoriesService = {
+      invalidateCache: vi.fn().mockResolvedValue(undefined),
+    };
+
     eventEmitter = {
       emit: vi.fn(),
     };
 
-    service = new BidsService(prisma as never, storage as never, eventEmitter as never);
+    service = new BidsService(
+      prisma as never,
+      storage as never,
+      eventEmitter as never,
+      categoriesService as never,
+    );
   });
 
   describe('create', () => {
@@ -763,6 +775,109 @@ describe('BidsService', () => {
       expect(res.bid.status).toBe('ACCEPTED');
       expect(res.bid.amountCents).toBe(6500);
       expect(res.bid.deliveryDays).toBe(3);
+      expect(categoriesService.invalidateCache).toHaveBeenCalled();
+      expect(prisma.bidRevision.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          orderBy: [{ seq: 'desc' }, { createdAt: 'desc' }],
+        }),
+      );
+    });
+
+    it('invalidates categories cache after successful accept', async () => {
+      const bid = mockBid('PENDING');
+      prisma.bid.findUnique.mockResolvedValue(bid);
+      prisma.listing.updateMany.mockResolvedValue({ count: 1 });
+      prisma.bid.updateMany.mockResolvedValue({ count: 1 });
+      prisma.agreement.create.mockResolvedValue({
+        id: 'ag_cache',
+        listingId: 'list_1',
+        bidId: 'bid_1',
+        buyerId: ownerUser.id,
+        providerId: bidderUser.id,
+        buyer: mockPublicUser(ownerUser.id, 'Owner'),
+        provider: mockPublicUser(bidderUser.id, 'Bidder'),
+        status: 'ACTIVE',
+        milestones: [],
+        deliverables: [],
+        events: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      prisma.conversation.findFirst.mockResolvedValue(null);
+      prisma.conversation.create.mockResolvedValue({ id: 'conv_cache' });
+      prisma.bid.findUniqueOrThrow.mockResolvedValue({
+        ...bid,
+        status: 'ACCEPTED',
+      });
+
+      await service.accept('bid_1', ownerUser);
+      expect(categoriesService.invalidateCache).toHaveBeenCalled();
+    });
+
+    it('throws 409 ConflictException when currency changes concurrently before direct accept', async () => {
+      const bid = mockBid('PENDING'); // currency is 'USD'
+      prisma.bid.findUnique.mockResolvedValue(bid);
+      prisma.listing.updateMany.mockResolvedValue({ count: 1 });
+      // Locked bid returns changed currency 'EUR'
+      prisma.$queryRaw.mockResolvedValueOnce([
+        {
+          ...bid,
+          currency: 'EUR',
+        },
+      ]);
+
+      await expect(service.accept('bid_1', ownerUser)).rejects.toThrow(
+        new ConflictException('Bid details have changed'),
+      );
+    });
+
+    it('throws 409 ConflictException when currency changes concurrently before acceptCounter', async () => {
+      const bid = {
+        ...mockBid('COUNTERED'),
+        currency: 'USD',
+        lastCounterById: ownerUser.id,
+      };
+      prisma.bid.findUnique.mockResolvedValue(bid);
+      prisma.bidRevision.findFirst.mockResolvedValue({
+        id: 'rev_counter',
+        bidId: 'bid_1',
+        authorId: ownerUser.id,
+        amountCents: 6500,
+        deliveryDays: 3,
+        message: 'Owner counter',
+        createdAt: new Date(),
+      });
+      prisma.listing.updateMany.mockResolvedValue({ count: 1 });
+      // Locked bid returns changed currency 'EUR'
+      prisma.$queryRaw.mockResolvedValueOnce([
+        {
+          ...bid,
+          currency: 'EUR',
+        },
+      ]);
+
+      await expect(service.acceptCounter('bid_1', bidderUser)).rejects.toThrow(
+        new ConflictException('Bid details have changed'),
+      );
+    });
+
+    it('throws 409 ConflictException when listing kind or status changes concurrently before accept', async () => {
+      const bid = mockBid('PENDING');
+      prisma.bid.findUnique.mockResolvedValue(bid);
+      prisma.listing.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(service.accept('bid_1', ownerUser)).rejects.toThrow(
+        new ConflictException('Listing is no longer open for acceptance'),
+      );
+      expect(prisma.listing.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            id: bid.listingId,
+            status: 'OPEN',
+            kind: bid.listing.kind,
+          }),
+        }),
+      );
     });
   });
 });

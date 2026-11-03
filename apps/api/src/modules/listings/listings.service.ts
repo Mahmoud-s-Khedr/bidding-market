@@ -265,6 +265,13 @@ export class ListingsService {
       }
     }
 
+    if (input.kind !== undefined && input.kind !== listing.kind) {
+      const bidCount = await this.prisma.bid.count({ where: { listingId: id } });
+      if (bidCount > 0) {
+        throw new ConflictException('Cannot change kind on a listing that has bids');
+      }
+    }
+
     if (input.categoryId) {
       const category = await this.prisma.category.findUnique({
         where: { id: input.categoryId },
@@ -306,6 +313,13 @@ export class ListingsService {
 
     try {
       await this.prisma.$transaction(async (tx) => {
+        if (input.kind !== undefined && input.kind !== listing.kind) {
+          const bidCount = await tx.bid.count({ where: { listingId: id } });
+          if (bidCount > 0) {
+            throw new ConflictException('Cannot change kind on a listing that has bids');
+          }
+        }
+
         if (input.imageIds !== undefined) {
           await tx.listingImage.deleteMany({ where: { listingId: id } });
           for (const [position, uploadId] of input.imageIds.entries()) {

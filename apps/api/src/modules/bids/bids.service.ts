@@ -26,6 +26,7 @@ import type { AuthUser } from '../../common/auth.js';
 import { paginate, type PaginatedResult } from '../../common/pagination.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { StorageService } from '../../storage/storage.service.js';
+import { CategoriesService } from '../categories/categories.service.js';
 import { UserPresenter, publicUserSelect } from '../users/user.presenter.js';
 import { ListingPresenter } from '../listings/listing.presenter.js';
 import { decodeBidCursor, encodeBidCursor } from './bid.cursor.js';
@@ -79,6 +80,7 @@ export class BidsService {
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly categoriesService: CategoriesService,
     @Optional() userPresenter?: UserPresenter,
     @Optional() listingPresenter?: ListingPresenter,
   ) {
@@ -200,7 +202,7 @@ export class BidsService {
             attachments: { include: { upload: true } },
             revisions: {
               include: { author: { select: publicUserSelect } },
-              orderBy: [{ createdAt: 'asc' }, { seq: 'asc' }],
+              orderBy: [{ seq: 'asc' }, { createdAt: 'asc' }],
             },
           },
         });
@@ -558,7 +560,7 @@ export class BidsService {
         attachments: { include: { upload: true } },
         revisions: {
           include: { author: { select: publicUserSelect } },
-          orderBy: [{ createdAt: 'asc' }, { seq: 'asc' }],
+          orderBy: [{ seq: 'asc' }, { createdAt: 'asc' }],
         },
       },
     });
@@ -687,7 +689,7 @@ export class BidsService {
           attachments: { include: { upload: true } },
           revisions: {
             include: { author: { select: publicUserSelect } },
-            orderBy: [{ createdAt: 'asc' }, { seq: 'asc' }],
+            orderBy: [{ seq: 'asc' }, { createdAt: 'asc' }],
           },
         },
       });
@@ -736,7 +738,7 @@ export class BidsService {
           attachments: { include: { upload: true } },
           revisions: {
             include: { author: { select: publicUserSelect } },
-            orderBy: [{ createdAt: 'asc' }, { seq: 'asc' }],
+            orderBy: [{ seq: 'asc' }, { createdAt: 'asc' }],
           },
         },
       });
@@ -794,7 +796,7 @@ export class BidsService {
           attachments: { include: { upload: true } },
           revisions: {
             include: { author: { select: publicUserSelect } },
-            orderBy: [{ createdAt: 'asc' }, { seq: 'asc' }],
+            orderBy: [{ seq: 'asc' }, { createdAt: 'asc' }],
           },
         },
       });
@@ -845,7 +847,7 @@ export class BidsService {
           attachments: { include: { upload: true } },
           revisions: {
             include: { author: { select: publicUserSelect } },
-            orderBy: [{ createdAt: 'asc' }, { seq: 'asc' }],
+            orderBy: [{ seq: 'asc' }, { createdAt: 'asc' }],
           },
         },
       });
@@ -916,7 +918,7 @@ export class BidsService {
           attachments: { include: { upload: true } },
           revisions: {
             include: { author: { select: publicUserSelect } },
-            orderBy: [{ createdAt: 'asc' }, { seq: 'asc' }],
+            orderBy: [{ seq: 'asc' }, { createdAt: 'asc' }],
           },
         },
       });
@@ -953,6 +955,7 @@ export class BidsService {
         expectedStatus: ['PENDING', 'SHORTLISTED', 'COUNTERED'],
         expectedAmountCents: bid.amountCents,
         expectedDeliveryDays: bid.deliveryDays,
+        expectedCurrency: bid.currency,
       },
       user,
     );
@@ -987,7 +990,7 @@ export class BidsService {
         bidId: bid.id,
         authorId: bid.listing.ownerId,
       },
-      orderBy: [{ createdAt: 'desc' }, { seq: 'desc' }],
+      orderBy: [{ seq: 'desc' }, { createdAt: 'desc' }],
     });
 
     if (!lastCounterRevision) {
@@ -1001,6 +1004,7 @@ export class BidsService {
         expectedAmountCents: lastCounterRevision.amountCents,
         expectedDeliveryDays: lastCounterRevision.deliveryDays,
         expectedRevisionId: lastCounterRevision.id,
+        expectedCurrency: bid.currency,
       },
       user,
     );
@@ -1012,19 +1016,30 @@ export class BidsService {
       expectedStatus: string[];
       expectedAmountCents: number;
       expectedDeliveryDays: number;
+      expectedCurrency: string;
       expectedRevisionId?: string;
     },
     actor: AuthUser,
   ): Promise<BidAcceptResponse> {
     const result = await this.prisma.$transaction(async (tx) => {
       // 1. Conditional update on listing: OPEN -> IN_PROGRESS
+      // Include kind in conditional update to ensure kind has not changed concurrently
       const listingUpdate = await tx.listing.updateMany({
-        where: { id: preBid.listingId, status: 'OPEN' },
+        where: { id: preBid.listingId, status: 'OPEN', kind: preBid.listing.kind },
         data: { status: 'IN_PROGRESS' },
       });
 
       if (listingUpdate.count === 0) {
         throw new ConflictException('Listing is no longer open for acceptance');
+      }
+
+      // Re-read current listing row inside transaction
+      const currentListing = await tx.listing.findUnique({
+        where: { id: preBid.listingId },
+        select: { id: true, ownerId: true, kind: true, status: true },
+      });
+      if (!currentListing) {
+        throw new NotFoundException('Listing not found');
       }
 
       // 2. Lock and re-read the bid row
@@ -1050,21 +1065,25 @@ export class BidsService {
         const latestCounter = await tx.bidRevision.findFirst({
           where: {
             bidId: currentBid.id,
-            authorId: preBid.listing.ownerId,
+            authorId: currentListing.ownerId,
           },
-          orderBy: [{ createdAt: 'desc' }, { seq: 'desc' }],
+          orderBy: [{ seq: 'desc' }, { createdAt: 'desc' }],
         });
 
         if (!latestCounter || latestCounter.id !== guard.expectedRevisionId) {
           throw new ConflictException('Counter offer has changed');
         }
+        if (currentBid.currency !== guard.expectedCurrency) {
+          throw new ConflictException('Bid details have changed');
+        }
         finalAmountCents = latestCounter.amountCents;
         finalDeliveryDays = latestCounter.deliveryDays;
       } else {
-        // Direct accept flow: verify bidder did not edit amount or delivery concurrently
+        // Direct accept flow: verify bidder did not edit amount, delivery, or currency concurrently
         if (
           currentBid.amountCents !== guard.expectedAmountCents ||
-          currentBid.deliveryDays !== guard.expectedDeliveryDays
+          currentBid.deliveryDays !== guard.expectedDeliveryDays ||
+          currentBid.currency !== guard.expectedCurrency
         ) {
           throw new ConflictException('Bid details have changed');
         }
@@ -1083,7 +1102,7 @@ export class BidsService {
       // 3. Decline all other active bids on this listing
       await tx.bid.updateMany({
         where: {
-          listingId: preBid.listingId,
+          listingId: currentListing.id,
           id: { not: currentBid.id },
           status: { in: ['PENDING', 'SHORTLISTED', 'COUNTERED'] },
         },
@@ -1093,14 +1112,14 @@ export class BidsService {
       // 4. Role derivation:
       // REQUEST listing: owner = buyer, bidder = provider
       // OFFER listing: owner = provider, bidder = buyer
-      const isRequest = preBid.listing.kind === 'REQUEST';
-      const buyerId = isRequest ? preBid.listing.ownerId : currentBid.bidderId;
-      const providerId = isRequest ? currentBid.bidderId : preBid.listing.ownerId;
+      const isRequest = currentListing.kind === 'REQUEST';
+      const buyerId = isRequest ? currentListing.ownerId : currentBid.bidderId;
+      const providerId = isRequest ? currentBid.bidderId : currentListing.ownerId;
 
       // 5. Create Agreement & AgreementEvent CREATED
       const agreement = await tx.agreement.create({
         data: {
-          listingId: preBid.listingId,
+          listingId: currentListing.id,
           bidId: currentBid.id,
           buyerId,
           providerId,
@@ -1128,9 +1147,9 @@ export class BidsService {
       // 6. Reuse or create Conversation linked to listing/bid/agreement
       const existingConv = await tx.conversation.findFirst({
         where: {
-          listingId: preBid.listingId,
+          listingId: currentListing.id,
           participants: {
-            some: { userId: preBid.listing.ownerId },
+            some: { userId: currentListing.ownerId },
           },
           AND: [
             {
@@ -1153,11 +1172,11 @@ export class BidsService {
       } else {
         await tx.conversation.create({
           data: {
-            listingId: preBid.listingId,
+            listingId: currentListing.id,
             bidId: currentBid.id,
             agreementId: agreement.id,
             participants: {
-              create: [{ userId: preBid.listing.ownerId }, { userId: currentBid.bidderId }],
+              create: [{ userId: currentListing.ownerId }, { userId: currentBid.bidderId }],
             },
           },
         });
@@ -1170,7 +1189,7 @@ export class BidsService {
           attachments: { include: { upload: true } },
           revisions: {
             include: { author: { select: publicUserSelect } },
-            orderBy: [{ createdAt: 'asc' }, { seq: 'asc' }],
+            orderBy: [{ seq: 'asc' }, { createdAt: 'asc' }],
           },
         },
       });
@@ -1191,6 +1210,8 @@ export class BidsService {
         agreement: fullAgreement,
       };
     });
+
+    await this.categoriesService.invalidateCache();
 
     const serializedBid = await this.mapBidDetail(result.updatedBid);
     const serializedAgreement = await this.mapAgreement(result.agreement);
