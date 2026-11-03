@@ -68,7 +68,7 @@ describe('ReportsService target validation', () => {
 
 describe('AdminService moderation', () => {
   const transaction = () => ({
-    user: { findUnique: vi.fn(), count: vi.fn(), update: vi.fn() },
+    user: { findUnique: vi.fn(), count: vi.fn(), update: vi.fn(), groupBy: vi.fn() },
     listing: { findUnique: vi.fn(), updateMany: vi.fn(), findMany: vi.fn(), groupBy: vi.fn() },
     bid: { findUnique: vi.fn(), updateMany: vi.fn(), count: vi.fn() },
     agreement: { groupBy: vi.fn(), findUnique: vi.fn() },
