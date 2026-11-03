@@ -1264,7 +1264,7 @@ describe('Bids endpoints', () => {
       }
     });
 
-    it('concurrency: accept vs edit in parallel -> exactly one 200, one 409', async () => {
+    it('concurrency: accept vs edit preserves agreement terms and final bid state', async () => {
       const b = await request(server)
         .post(`/api/v1/listings/${openListingId}/bids`)
         .set('Authorization', `Bearer ${bidderToken}`)
@@ -1282,8 +1282,29 @@ describe('Bids endpoints', () => {
         .send({ amountCents: 99999, message: 'Changed my price' });
 
       const [rAccept, rEdit] = await Promise.all([pAccept, pEdit]);
-      const statuses = [rAccept.status, rEdit.status].sort();
-      expect(statuses).toEqual([200, 409]);
+      const [finalBid, agreements] = await Promise.all([
+        prisma.bid.findUniqueOrThrow({ where: { id: bidId } }),
+        prisma.agreement.findMany({ where: { bidId }, include: { bid: true, events: true } }),
+      ]);
+
+      expect(agreements.length).toBeLessThanOrEqual(1);
+      if (agreements[0]) {
+        const agreement = agreements[0];
+        const createdEvent = agreement.events.find((event) => event.type === 'CREATED');
+        expect(finalBid.status).toBe('ACCEPTED');
+        expect(agreement.bid.amountCents).toBe(finalBid.amountCents);
+        expect(agreement.bid.deliveryDays).toBe(finalBid.deliveryDays);
+        expect(agreement.bid.currency).toBe(finalBid.currency);
+        expect(createdEvent?.data).toMatchObject({
+          finalAmountCents: finalBid.amountCents,
+          finalDeliveryDays: finalBid.deliveryDays,
+        });
+        expect(rAccept.status).toBe(200);
+      } else {
+        expect(finalBid.status).toBe('PENDING');
+        expect(rAccept.status).toBe(409);
+        expect(rEdit.status).toBe(200);
+      }
     });
 
     it('concurrency: accept vs reject in parallel -> exactly one 200, one 409', async () => {
@@ -1315,7 +1336,7 @@ describe('Bids endpoints', () => {
       }
     });
 
-    it('concurrency: accept vs counter in parallel -> exactly one 200, one 409', async () => {
+    it('concurrency: accept vs counter preserves agreement terms and final bid state', async () => {
       const b = await request(server)
         .post(`/api/v1/listings/${openListingId}/bids`)
         .set('Authorization', `Bearer ${bidderToken}`)
@@ -1333,8 +1354,29 @@ describe('Bids endpoints', () => {
         .send({ amountCents: 38000, deliveryDays: 7, message: 'Counter offer' });
 
       const [rAccept, rCounter] = await Promise.all([pAccept, pCounter]);
-      const statuses = [rAccept.status, rCounter.status].sort();
-      expect(statuses).toEqual([200, 409]);
+      const [finalBid, agreements] = await Promise.all([
+        prisma.bid.findUniqueOrThrow({ where: { id: bidId } }),
+        prisma.agreement.findMany({ where: { bidId }, include: { bid: true, events: true } }),
+      ]);
+
+      expect(agreements.length).toBeLessThanOrEqual(1);
+      if (agreements[0]) {
+        const agreement = agreements[0];
+        const createdEvent = agreement.events.find((event) => event.type === 'CREATED');
+        expect(finalBid.status).toBe('ACCEPTED');
+        expect(agreement.bid.amountCents).toBe(finalBid.amountCents);
+        expect(agreement.bid.deliveryDays).toBe(finalBid.deliveryDays);
+        expect(agreement.bid.currency).toBe(finalBid.currency);
+        expect(createdEvent?.data).toMatchObject({
+          finalAmountCents: finalBid.amountCents,
+          finalDeliveryDays: finalBid.deliveryDays,
+        });
+        expect(rAccept.status).toBe(200);
+      } else {
+        expect(finalBid.status).toBe('COUNTERED');
+        expect(rAccept.status).toBe(409);
+        expect(rCounter.status).toBe(200);
+      }
     });
 
     it('concurrency: accept vs close in parallel -> exactly one outcome, cannot both succeed', async () => {

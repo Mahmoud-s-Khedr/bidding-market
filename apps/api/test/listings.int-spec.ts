@@ -366,6 +366,45 @@ describe('Listings endpoints', () => {
         .expect(409);
     });
 
+    it('serializes a kind change with bid creation so a changed listing has no in-flight bid', async () => {
+      const listing = await prisma.listing.create({
+        data: {
+          ownerId: user1Id,
+          categoryId,
+          kind: 'REQUEST',
+          status: 'OPEN',
+          title: 'Listing racing its first bid',
+          description: 'A sufficiently long description for testing the row lock.',
+          priceType: 'NEGOTIABLE',
+        },
+      });
+
+      const [patchResult, bidResult] = await Promise.all([
+        request(server)
+          .patch(`/api/v1/listings/${listing.id}`)
+          .set('Authorization', `Bearer ${user1Token}`)
+          .send({ kind: 'OFFER' }),
+        request(server)
+          .post(`/api/v1/listings/${listing.id}/bids`)
+          .set('Authorization', `Bearer ${user2Token}`)
+          .send({ amountCents: 1500, currency: 'USD', deliveryDays: 3, message: 'Race bid' }),
+      ]);
+
+      expect([patchResult.status, bidResult.status]).toContain(200);
+
+      const [finalListing, bids] = await Promise.all([
+        prisma.listing.findUniqueOrThrow({ where: { id: listing.id } }),
+        prisma.bid.findMany({ where: { listingId: listing.id } }),
+      ]);
+
+      if (finalListing.kind === 'OFFER') {
+        expect(bids).toHaveLength(0);
+      } else {
+        expect(finalListing.kind).toBe('REQUEST');
+        expect(bids).toHaveLength(1);
+      }
+    });
+
     it('allows admin to PATCH someone elses listing and validates uploads against the listing owner', async () => {
       const listing = await prisma.listing.create({
         data: {
