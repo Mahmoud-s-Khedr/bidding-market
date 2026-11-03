@@ -103,7 +103,71 @@ describe('Listing Validation Schemas', () => {
     expect(negative.success).toBe(false);
   });
 
-  it('validates that expiresAt must be in the future', () => {
+  it('enforces int4 max limit on price inputs (21,474,836.47)', () => {
+    const validAtMax = listingFormSchema.safeParse({
+      ...validBase,
+      priceType: 'FIXED',
+      priceMin: 21474836.47,
+    });
+    expect(validAtMax.success).toBe(true);
+
+    const overFixed = listingFormSchema.safeParse({
+      ...validBase,
+      priceType: 'FIXED',
+      priceMin: 21474836.48,
+    });
+    expect(overFixed.success).toBe(false);
+    if (!overFixed.success) {
+      expect(overFixed.error.issues[0]?.message).toBe('Price cannot exceed 21,474,836.47');
+    }
+
+    const overRangeMin = listingFormSchema.safeParse({
+      ...validBase,
+      priceType: 'RANGE',
+      priceMin: 21474836.48,
+      priceMax: 21474836.48,
+    });
+    expect(overRangeMin.success).toBe(false);
+    if (!overRangeMin.success) {
+      expect(overRangeMin.error.issues[0]?.message).toBe(
+        'Minimum price cannot exceed 21,474,836.47',
+      );
+    }
+
+    const overRangeMax = listingFormSchema.safeParse({
+      ...validBase,
+      priceType: 'RANGE',
+      priceMin: 100,
+      priceMax: 21474836.48,
+    });
+    expect(overRangeMax.success).toBe(false);
+    if (!overRangeMax.success) {
+      expect(overRangeMax.error.issues[0]?.message).toBe(
+        'Maximum price cannot exceed 21,474,836.47',
+      );
+    }
+  });
+
+  it('validates that expiresAt must be strictly in the future (today is rejected)', () => {
+    // "today" rejected
+    const today = new Date();
+    const todayY = today.getFullYear();
+    const todayM = String(today.getMonth() + 1).padStart(2, '0');
+    const todayD = String(today.getDate()).padStart(2, '0');
+    const todayStr = `${todayY}-${todayM}-${todayD}`;
+
+    const todayRes = listingFormSchema.safeParse({
+      ...validBase,
+      priceType: 'FIXED',
+      priceMin: 20,
+      expiresAt: todayStr,
+    });
+    expect(todayRes.success).toBe(false);
+    if (!todayRes.success) {
+      expect(todayRes.error.issues[0]?.message).toBe('Expiration date must be in the future');
+    }
+
+    // Past date rejected
     const pastDate = new Date(Date.now() - 24 * 3600 * 1000).toISOString().split('T')[0]!;
     const pastRes = listingFormSchema.safeParse({
       ...validBase,
@@ -116,12 +180,19 @@ describe('Listing Validation Schemas', () => {
       expect(pastRes.error.issues[0]?.message).toBe('Expiration date must be in the future');
     }
 
-    const futureDate = new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString().split('T')[0]!;
+    // Tomorrow accepted
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowY = tomorrow.getFullYear();
+    const tomorrowM = String(tomorrow.getMonth() + 1).padStart(2, '0');
+    const tomorrowD = String(tomorrow.getDate()).padStart(2, '0');
+    const tomorrowStr = `${tomorrowY}-${tomorrowM}-${tomorrowD}`;
+
     const futureRes = listingFormSchema.safeParse({
       ...validBase,
       priceType: 'FIXED',
       priceMin: 20,
-      expiresAt: futureDate,
+      expiresAt: tomorrowStr,
     });
     expect(futureRes.success).toBe(true);
   });
@@ -171,6 +242,34 @@ describe('Listing Validation Schemas', () => {
     });
     expect(negPayload.priceMinCents).toBeUndefined();
     expect(negPayload.priceMaxCents).toBeUndefined();
+  });
+
+  it('tomorrow in formValuesToApiPayload converts to local 23:59:59.999 as ISO timestamp', () => {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowY = tomorrow.getFullYear();
+    const tomorrowM = String(tomorrow.getMonth() + 1).padStart(2, '0');
+    const tomorrowD = String(tomorrow.getDate()).padStart(2, '0');
+    const tomorrowStr = `${tomorrowY}-${tomorrowM}-${tomorrowD}`;
+
+    const expectedIso = new Date(
+      tomorrow.getFullYear(),
+      tomorrow.getMonth(),
+      tomorrow.getDate(),
+      23,
+      59,
+      59,
+      999,
+    ).toISOString();
+
+    const payload = formValuesToApiPayload({
+      ...validBase,
+      priceType: 'FIXED',
+      priceMin: 50,
+      expiresAt: tomorrowStr,
+    });
+
+    expect(payload.expiresAt).toBe(expectedIso);
   });
 
   describe('formValuesToUpdatePayload (Finding 4)', () => {
@@ -241,6 +340,57 @@ describe('Listing Validation Schemas', () => {
         'DRAFT',
       );
       expect(updateWithStatus.status).toBe('DRAFT');
+    });
+
+    it('does not send unchanged expiresAt on edit, but sends new ISO when changed', () => {
+      const initialIso = '2026-11-20T21:59:59.999Z';
+      const initialDate = new Date(initialIso);
+      const y = initialDate.getFullYear();
+      const m = String(initialDate.getMonth() + 1).padStart(2, '0');
+      const d = String(initialDate.getDate()).padStart(2, '0');
+      const initialLocalDateStr = `${y}-${m}-${d}`;
+
+      // When expiresAt matches initial local date string -> NOT sent
+      const unchangedUpdate = formValuesToUpdatePayload(
+        {
+          ...validBase,
+          priceType: 'FIXED',
+          priceMin: 10,
+          expiresAt: initialLocalDateStr,
+        },
+        undefined,
+        initialIso,
+      );
+      expect(unchangedUpdate.expiresAt).toBeUndefined();
+      expect('expiresAt' in unchangedUpdate).toBe(false);
+
+      // When expiresAt changed to a different date -> sent as local end of day ISO
+      const changedUpdate = formValuesToUpdatePayload(
+        {
+          ...validBase,
+          priceType: 'FIXED',
+          priceMin: 10,
+          expiresAt: '2026-11-25',
+        },
+        undefined,
+        initialIso,
+      );
+      expect(changedUpdate.expiresAt).toBeDefined();
+      const expectedNewIso = new Date(2026, 10, 25, 23, 59, 59, 999).toISOString();
+      expect(changedUpdate.expiresAt).toBe(expectedNewIso);
+
+      // When expiresAt cleared -> sent as null
+      const clearedUpdate = formValuesToUpdatePayload(
+        {
+          ...validBase,
+          priceType: 'FIXED',
+          priceMin: 10,
+          expiresAt: '',
+        },
+        undefined,
+        initialIso,
+      );
+      expect(clearedUpdate.expiresAt).toBeNull();
     });
   });
 });

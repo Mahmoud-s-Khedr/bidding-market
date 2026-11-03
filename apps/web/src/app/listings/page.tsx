@@ -56,6 +56,20 @@ export function ListingsContent({ initialCategorySlug }: ListingsViewProps) {
   const defaultSort: ListingSort = qParam.trim() ? 'relevance' : 'newest';
   const effectiveSort: ListingSort = rawSortParam || defaultSort;
 
+  // Local draft states for debounced text inputs
+  const [searchInput, setSearchInput] = React.useState(qParam);
+  const [locationInput, setLocationInput] = React.useState(locationParam);
+  const [minPriceInput, setMinPriceInput] = React.useState(minPriceParam);
+  const [maxPriceInput, setMaxPriceInput] = React.useState(maxPriceParam);
+
+  // Track last values pushed to URL to avoid overwriting typing while router.replace is in flight
+  const lastPushedRef = React.useRef({
+    q: qParam,
+    location: locationParam,
+    minPrice: minPriceParam,
+    maxPrice: maxPriceParam,
+  });
+
   // URL updating helper using router.replace to avoid flooding history
   const updateUrl = React.useCallback(
     (updates: Record<string, string | null>) => {
@@ -66,6 +80,9 @@ export function ListingsContent({ initialCategorySlug }: ListingsViewProps) {
         } else {
           params.set(key, value);
         }
+        if (key in lastPushedRef.current) {
+          lastPushedRef.current[key as keyof typeof lastPushedRef.current] = value ?? '';
+        }
       }
       const qs = params.toString();
       router.replace(qs ? `${pathname}?${qs}` : pathname);
@@ -73,24 +90,30 @@ export function ListingsContent({ initialCategorySlug }: ListingsViewProps) {
     [searchParams, pathname, router],
   );
 
-  // Local draft states for debounced text inputs
-  const [searchInput, setSearchInput] = React.useState(qParam);
-  const [locationInput, setLocationInput] = React.useState(locationParam);
-  const [minPriceInput, setMinPriceInput] = React.useState(minPriceParam);
-  const [maxPriceInput, setMaxPriceInput] = React.useState(maxPriceParam);
-
-  // Sync inputs when URL params change externally
+  // Sync inputs when URL params change externally (only if URL value differs from last value pushed by this page)
   React.useEffect(() => {
-    setSearchInput(qParam);
+    if (qParam !== lastPushedRef.current.q) {
+      setSearchInput(qParam);
+      lastPushedRef.current.q = qParam;
+    }
   }, [qParam]);
   React.useEffect(() => {
-    setLocationInput(locationParam);
+    if (locationParam !== lastPushedRef.current.location) {
+      setLocationInput(locationParam);
+      lastPushedRef.current.location = locationParam;
+    }
   }, [locationParam]);
   React.useEffect(() => {
-    setMinPriceInput(minPriceParam);
+    if (minPriceParam !== lastPushedRef.current.minPrice) {
+      setMinPriceInput(minPriceParam);
+      lastPushedRef.current.minPrice = minPriceParam;
+    }
   }, [minPriceParam]);
   React.useEffect(() => {
-    setMaxPriceInput(maxPriceParam);
+    if (maxPriceParam !== lastPushedRef.current.maxPrice) {
+      setMaxPriceInput(maxPriceParam);
+      lastPushedRef.current.maxPrice = maxPriceParam;
+    }
   }, [maxPriceParam]);
 
   // Debounce search query (300 ms)
@@ -143,10 +166,16 @@ export function ListingsContent({ initialCategorySlug }: ListingsViewProps) {
     if (kindParam && kindParam !== 'all') filters.kind = kindParam;
     if (categorySlugParam) filters.categorySlug = categorySlugParam;
     if (minPriceParam && !Number.isNaN(Number(minPriceParam))) {
-      filters.minPrice = Math.round(Number(minPriceParam) * 100);
+      const val = Math.round(Number(minPriceParam) * 100);
+      if (val >= 0 && val <= 2147483647) {
+        filters.minPrice = val;
+      }
     }
     if (maxPriceParam && !Number.isNaN(Number(maxPriceParam))) {
-      filters.maxPrice = Math.round(Number(maxPriceParam) * 100);
+      const val = Math.round(Number(maxPriceParam) * 100);
+      if (val >= 0 && val <= 2147483647) {
+        filters.maxPrice = val;
+      }
     }
     if (locationParam.trim()) filters.location = locationParam.trim();
     return filters;
@@ -201,6 +230,7 @@ export function ListingsContent({ initialCategorySlug }: ListingsViewProps) {
     setLocationInput('');
     setMinPriceInput('');
     setMaxPriceInput('');
+    lastPushedRef.current = { q: '', location: '', minPrice: '', maxPrice: '' };
     const params = new URLSearchParams();
     if (initialCategorySlug) {
       params.set('categorySlug', initialCategorySlug);
@@ -284,6 +314,8 @@ export function ListingsContent({ initialCategorySlug }: ListingsViewProps) {
         <div className="grid grid-cols-2 gap-2">
           <Input
             type="number"
+            min="0"
+            max="21474836.47"
             placeholder="Min"
             value={minPriceInput}
             onChange={(e) => setMinPriceInput(e.target.value)}
@@ -291,6 +323,8 @@ export function ListingsContent({ initialCategorySlug }: ListingsViewProps) {
           />
           <Input
             type="number"
+            min="0"
+            max="21474836.47"
             placeholder="Max"
             value={maxPriceInput}
             onChange={(e) => setMaxPriceInput(e.target.value)}

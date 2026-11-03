@@ -1,10 +1,11 @@
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ListingForm } from './listing-form';
 import { ApiError } from '@/lib/api/client';
 import * as categoriesApi from '@/lib/api/categories';
+import * as uploadModule from '@/lib/upload';
 import type { Category, CreateListingRequest, UpdateListingRequest } from '@/lib/api/types';
 import { makeCategory, makeListingDetail, makePublicUser } from '../../../test/fixtures';
 
@@ -56,14 +57,13 @@ describe('ListingForm component', () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it('updates live character counter for description', async () => {
-    const user = userEvent.setup();
+  it('updates live character counter for description', () => {
     render(<ListingForm onSubmit={vi.fn()} />);
 
     expect(screen.getByText('0 / 10,000 characters')).toBeInTheDocument();
 
     const descInput = screen.getByPlaceholderText(/describe scope, requirements/i);
-    await user.type(descInput, 'Building custom responsive layout');
+    fireEvent.change(descInput, { target: { value: 'Building custom responsive layout' } });
 
     expect(screen.getByText('33 / 10,000 characters')).toBeInTheDocument();
   });
@@ -295,6 +295,131 @@ describe('ListingForm component', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Title contains prohibited words')).toBeInTheDocument();
+    });
+  });
+
+  it('does not send unchanged expiresAt on edit in onSubmit payload', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi
+      .fn<(data: CreateListingRequest | UpdateListingRequest) => Promise<void>>()
+      .mockResolvedValue(undefined);
+
+    const initialListing = makeListingDetail({
+      id: 'l-expiry',
+      title: 'Listing with Existing Expiry',
+      description: 'A sufficiently long description for testing unchanged expiry omission.',
+      kind: 'REQUEST',
+      status: 'OPEN',
+      priceType: 'FIXED',
+      priceMinCents: 5000,
+      priceMaxCents: 5000,
+      currency: 'USD',
+      tags: [],
+      categoryId: 'cat-1',
+      categoryName: 'Design',
+      category: { id: 'cat-1', name: 'Design', slug: 'design' },
+      owner: makePublicUser({
+        id: 'u-1',
+        displayName: 'Alice',
+        isBusiness: false,
+        createdAt: '2026-01-01T00:00:00Z',
+      }),
+      images: [],
+      attachments: [],
+      bidCount: 0,
+      expiresAt: '2026-11-20T21:59:59.999Z',
+      createdAt: '2026-10-01T00:00:00Z',
+      updatedAt: '2026-10-01T00:00:00Z',
+    });
+
+    render(<ListingForm initialListing={initialListing} onSubmit={onSubmit} />);
+
+    const submitBtn = screen.getByRole('button', { name: /save changes/i });
+    await user.click(submitBtn);
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledTimes(1);
+    });
+
+    const payload = onSubmit.mock.calls[0]![0];
+    expect(payload.expiresAt).toBeUndefined();
+    expect('expiresAt' in payload).toBe(false);
+  });
+
+  it('displays error message when price exceeds int4 limit (21,474,836.47)', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+
+    render(<ListingForm onSubmit={onSubmit} />);
+
+    // Select category and type title and description
+    const titleInput = screen.getByLabelText(/^title/i);
+    const descInput = screen.getByPlaceholderText(/describe scope, requirements/i);
+    const priceInput = screen.getByLabelText(/price \(\$\)/i);
+
+    fireEvent.change(titleInput, { target: { value: 'Valid Project Title Here' } });
+    fireEvent.change(descInput, {
+      target: { value: 'Valid description that has plenty of length for form submission.' },
+    });
+    fireEvent.change(priceInput, { target: { value: '21474836.48' } });
+
+    const publishBtn = screen.getByRole('button', { name: /publish listing/i });
+    await user.click(publishBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText('Price cannot exceed 21,474,836.47')).toBeInTheDocument();
+    });
+
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('disables Publish and Save Draft buttons while upload is in flight or errored, and enables after dismiss', async () => {
+    const user = userEvent.setup();
+    let rejectUpload: (reason: Error) => void;
+    const uploadPromise = new Promise<never>((_, reject) => {
+      rejectUpload = reject;
+    });
+
+    vi.spyOn(uploadModule, 'uploadFile').mockReturnValue(uploadPromise);
+
+    const { container } = render(<ListingForm onSubmit={vi.fn()} />);
+
+    const publishBtn = screen.getByRole('button', { name: /publish listing/i });
+    const draftBtn = screen.getByRole('button', { name: /save draft/i });
+
+    expect(publishBtn).not.toBeDisabled();
+    expect(draftBtn).not.toBeDisabled();
+
+    // Trigger file drop/upload
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['test'], 'photo.png', { type: 'image/png' });
+    fireEvent.change(input, { target: { files: [file] } });
+
+    // While upload is in flight -> buttons are disabled
+    await waitFor(() => {
+      expect(publishBtn).toBeDisabled();
+      expect(draftBtn).toBeDisabled();
+    });
+
+    // Fail upload
+    rejectUpload!(new Error('Upload failed'));
+
+    // While errored -> buttons remain disabled
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent('Upload failed');
+      expect(publishBtn).toBeDisabled();
+      expect(draftBtn).toBeDisabled();
+    });
+
+    // Dismiss errored upload
+    const dismissBtn = screen.getByRole('button', { name: /dismiss error for photo\.png/i });
+    await user.click(dismissBtn);
+
+    // After dismiss -> buttons become enabled again
+    await waitFor(() => {
+      expect(screen.queryByText('photo.png')).not.toBeInTheDocument();
+      expect(publishBtn).not.toBeDisabled();
+      expect(draftBtn).not.toBeDisabled();
     });
   });
 });

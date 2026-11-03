@@ -145,6 +145,14 @@ describe('Listings endpoints', () => {
         .set('Authorization', `Bearer ${user1Token}`)
         .send({ ...base, priceType: 'NEGOTIABLE', priceMinCents: 1000 })
         .expect(400);
+
+      // Int4 overflow: priceMinCents: 99999999999 -> 400 VALIDATION_ERROR
+      const overflowRes = await request(server)
+        .post('/api/v1/listings')
+        .set('Authorization', `Bearer ${user1Token}`)
+        .send({ ...base, priceType: 'FIXED', priceMinCents: 99999999999 })
+        .expect(400);
+      expect(overflowRes.body.error.code).toBe('VALIDATION_ERROR');
     });
 
     it('returns 400 on non-existent categoryId', async () => {
@@ -826,6 +834,11 @@ describe('Listings endpoints', () => {
   });
 
   describe('GET /api/v1/listings (search, filters, sort, stable cursor pagination)', () => {
+    it('rejects int4 overflow on minPrice query with 400 VALIDATION_ERROR', async () => {
+      const res = await request(server).get('/api/v1/listings?minPrice=999999999999').expect(400);
+      expect(res.body.error.code).toBe('VALIDATION_ERROR');
+    });
+
     it('returns thumbnailUrl downloading first image bytes from S3 for listing with 2 images, and null for listing without images', async () => {
       // 1. Create upload 1 with real S3 PUT
       const img1Content = 'first-image-raw-bytes-content-12345';

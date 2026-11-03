@@ -117,6 +117,33 @@ describe('FileDropzone component', () => {
     });
   });
 
+  it('allows errored upload item to be dismissed with a Dismiss button (accessible label)', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(uploadModule, 'uploadFile').mockRejectedValue(new Error('Network error'));
+
+    const { container } = render(<FileDropzone purpose="LISTING_IMAGE" value={[]} />);
+
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['bad'], 'failed-doc.png', { type: 'image/png' });
+
+    fireEvent.change(input, { target: { files: [file] } });
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent('Network error');
+    });
+
+    // Dismiss button is present with accessible label
+    const dismissBtn = screen.getByRole('button', { name: /dismiss error for failed-doc\.png/i });
+    expect(dismissBtn).toBeInTheDocument();
+    expect(dismissBtn).toHaveTextContent('Dismiss');
+
+    // Clicking dismiss removes the errored item
+    await user.click(dismissBtn);
+
+    expect(screen.queryByText('failed-doc.png')).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
   it('handles concurrent uploads of multiple files without losing files (Finding 6)', async () => {
     const onChange = vi.fn();
     const att1: Attachment = {

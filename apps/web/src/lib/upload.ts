@@ -75,8 +75,8 @@ export async function uploadFile(
     throw new DOMException('Upload aborted', 'AbortError');
   }
 
-  const uploadUrl = presign.url || presign.uploadUrl;
-  const uploadId = presign.uploadId || presign.upload?.id;
+  const uploadUrl = presign.url;
+  const uploadId = presign.uploadId;
 
   if (!uploadUrl || !uploadId) {
     throw new Error('Invalid presign response: missing upload URL or upload ID');

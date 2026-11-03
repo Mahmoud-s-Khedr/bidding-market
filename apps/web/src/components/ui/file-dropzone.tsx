@@ -130,6 +130,16 @@ export function FileDropzone({
     });
   };
 
+  const handleDismiss = (uploadId: string) => {
+    setInFlight((prev) => {
+      const item = prev.find((u) => u.id === uploadId);
+      if (item?.previewUrl) {
+        URL.revokeObjectURL(item.previewUrl);
+      }
+      return prev.filter((u) => u.id !== uploadId);
+    });
+  };
+
   const handleRemoveExisting = (attachmentId: string) => {
     const next = value.filter((a) => a.id !== attachmentId);
     committedAttachmentsRef.current = next;
@@ -308,16 +318,29 @@ export function FileDropzone({
                   </div>
                 </div>
 
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  aria-label={`Cancel upload of ${item.file.name}`}
-                  onClick={() => handleCancel(item.id)}
-                  className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
-                >
-                  <X className="h-4 w-4" />
-                </Button>
+                {item.error ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    aria-label={`Dismiss error for ${item.file.name}`}
+                    onClick={() => handleDismiss(item.id)}
+                    className="h-8 px-2 text-xs font-medium text-muted-foreground hover:text-destructive"
+                  >
+                    Dismiss
+                  </Button>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    aria-label={`Cancel upload of ${item.file.name}`}
+                    onClick={() => handleCancel(item.id)}
+                    className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                )}
               </div>
 
               {item.error ? (

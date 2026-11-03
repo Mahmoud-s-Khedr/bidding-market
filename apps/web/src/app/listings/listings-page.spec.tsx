@@ -154,6 +154,49 @@ describe('Listings Browse Page', () => {
     vi.useRealTimers();
   });
 
+  it('does not overwrite typed characters when router.replace resolves with value page pushed (Finding 3)', () => {
+    vi.useFakeTimers();
+
+    vi.spyOn(listingsApi, 'useListings').mockReturnValue({
+      data: { pages: [{ items: [], nextCursor: null }], pageParams: [null] },
+      isLoading: false,
+      isError: false,
+      hasNextPage: false,
+      isFetchingNextPage: false,
+      fetchNextPage: vi.fn(),
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof listingsApi.useListings>);
+
+    const { rerender } = render(<ListingsContent />);
+
+    const locationInput = screen.getByPlaceholderText(/city, region, or remote/i);
+    // User types 'Berlin'
+    fireEvent.change(locationInput, { target: { value: 'Berlin' } });
+
+    // Advance debounce
+    vi.advanceTimersByTime(300);
+    expect(mockReplace).toHaveBeenCalledWith('/listings?location=Berlin');
+
+    // While router.replace is in flight, user continues typing 'Berlin Center'
+    fireEvent.change(locationInput, { target: { value: 'Berlin Center' } });
+    expect(locationInput).toHaveValue('Berlin Center');
+
+    // router.replace completes and updates URL searchParams to 'Berlin'
+    mockSearchParams = new URLSearchParams('location=Berlin');
+    rerender(<ListingsContent />);
+
+    // Local input must NOT be overwritten by the in-flight 'Berlin' push
+    expect(locationInput).toHaveValue('Berlin Center');
+
+    // An external change (e.g. back button or different filter) DOES update the input
+    mockSearchParams = new URLSearchParams('location=Hamburg');
+    rerender(<ListingsContent />);
+
+    expect(locationInput).toHaveValue('Hamburg');
+
+    vi.useRealTimers();
+  });
+
   it('renders empty state when no listings match filters', () => {
     vi.spyOn(listingsApi, 'useListings').mockReturnValue({
       data: { pages: [{ items: [], nextCursor: null }], pageParams: [null] },

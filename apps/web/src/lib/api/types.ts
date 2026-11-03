@@ -21,6 +21,7 @@ import type {
   ReviewItem as SharedReviewItem,
   UpdateProfileInput as SharedUpdateProfileInput,
   ListingCreateFormInput,
+  UploadPresignResponse,
 } from '@market/shared';
 
 export type UserRole = Role;
@@ -90,26 +91,7 @@ export interface PresignUploadRequest {
   sizeBytes: number;
 }
 
-export interface PresignUploadResponse {
-  uploadId: string;
-  url: string;
-  headers?: Record<string, string>;
-  key?: string;
-  expiresAt?: string;
-  // Optional legacy fields for backward compatibility
-  upload?: {
-    id: string;
-    key: string;
-    fileName: string;
-    mimeType: string;
-    sizeBytes: number;
-    purpose: UploadPurpose;
-    status: 'PENDING' | 'READY' | 'FAILED';
-    createdAt: Date | string;
-    completedAt: Date | string | null;
-  };
-  uploadUrl?: string;
-}
+export type PresignUploadResponse = UploadPresignResponse;
 
 export interface PresignedGetUrlResponse {
   url: string;

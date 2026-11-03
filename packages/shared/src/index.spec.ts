@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   attachmentSchema,
+  bidCounterSchema,
+  bidCreateSchema,
   categoryCreateSchema,
   categoryTreeNodeSchema,
   categoryUpdateSchema,
@@ -10,7 +12,9 @@ import {
   listingSummarySchema,
   listingUpdateSchema,
   loginSchema,
+  MAX_INT4,
   messageCreateSchema,
+  milestoneSchema,
   passwordSchema,
   presignUploadSchema,
   registerSchema,
@@ -285,4 +289,75 @@ it('validates paginated and category tree schemas', async () => {
       nextCursor: null,
     }).success,
   ).toBe(true);
+});
+
+describe('int4 overflow protection', () => {
+  it('exports MAX_INT4 as 2147483647', () => {
+    expect(MAX_INT4).toBe(2147483647);
+  });
+
+  it('caps listingCreateSchema priceMinCents and priceMaxCents at MAX_INT4', () => {
+    const base = {
+      kind: 'REQUEST',
+      title: 'Valid title for listing',
+      description: 'A sufficiently detailed description that satisfies requirements.',
+      categoryId: 'c-1',
+      priceType: 'FIXED',
+    };
+
+    expect(listingCreateSchema.safeParse({ ...base, priceMinCents: 2147483647 }).success).toBe(
+      true,
+    );
+    expect(listingCreateSchema.safeParse({ ...base, priceMinCents: 2147483648 }).success).toBe(
+      false,
+    );
+    expect(listingCreateSchema.safeParse({ ...base, priceMinCents: 99999999999 }).success).toBe(
+      false,
+    );
+
+    const rangeBase = { ...base, priceType: 'RANGE', priceMinCents: 1000 };
+    expect(listingCreateSchema.safeParse({ ...rangeBase, priceMaxCents: 2147483647 }).success).toBe(
+      true,
+    );
+    expect(listingCreateSchema.safeParse({ ...rangeBase, priceMaxCents: 2147483648 }).success).toBe(
+      false,
+    );
+  });
+
+  it('caps listingUpdateSchema priceMinCents and priceMaxCents at MAX_INT4', () => {
+    expect(listingUpdateSchema.safeParse({ priceMinCents: 2147483647 }).success).toBe(true);
+    expect(listingUpdateSchema.safeParse({ priceMinCents: 2147483648 }).success).toBe(false);
+    expect(listingUpdateSchema.safeParse({ priceMaxCents: 2147483647 }).success).toBe(true);
+    expect(listingUpdateSchema.safeParse({ priceMaxCents: 2147483648 }).success).toBe(false);
+  });
+
+  it('caps listingQuerySchema minPrice and maxPrice at MAX_INT4', () => {
+    expect(listingQuerySchema.safeParse({ minPrice: '2147483647' }).success).toBe(true);
+    expect(listingQuerySchema.safeParse({ minPrice: '2147483648' }).success).toBe(false);
+    expect(listingQuerySchema.safeParse({ minPrice: '999999999999' }).success).toBe(false);
+    expect(listingQuerySchema.safeParse({ maxPrice: '2147483647' }).success).toBe(true);
+    expect(listingQuerySchema.safeParse({ maxPrice: '2147483648' }).success).toBe(false);
+  });
+
+  it('caps bid amountCents at MAX_INT4 in create, counter, and milestone schemas', () => {
+    const validBid = {
+      amountCents: 2147483647,
+      deliveryDays: 5,
+      message: 'Can complete the work.',
+    };
+    expect(bidCreateSchema.safeParse(validBid).success).toBe(true);
+    expect(bidCreateSchema.safeParse({ ...validBid, amountCents: 2147483648 }).success).toBe(false);
+
+    expect(bidCounterSchema.safeParse(validBid).success).toBe(true);
+    expect(bidCounterSchema.safeParse({ ...validBid, amountCents: 2147483648 }).success).toBe(
+      false,
+    );
+
+    expect(milestoneSchema.safeParse({ title: 'Phase 1', amountCents: 2147483647 }).success).toBe(
+      true,
+    );
+    expect(milestoneSchema.safeParse({ title: 'Phase 1', amountCents: 2147483648 }).success).toBe(
+      false,
+    );
+  });
 });

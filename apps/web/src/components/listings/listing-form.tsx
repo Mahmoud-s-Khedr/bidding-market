@@ -6,6 +6,7 @@ import {
   listingFormSchema,
   formValuesToApiPayload,
   formValuesToUpdatePayload,
+  toLocalDateString,
   type ListingFormOutput,
   type ListingFormValues,
 } from '@/lib/validation/listing';
@@ -57,7 +58,14 @@ export function ListingForm({ initialListing, onSubmit, isLoading = false }: Lis
   const hasUploadErrors = imageUploadState.hasErrors || docUploadState.hasErrors;
   const isSubmitBlocked = isLoading || hasInFlightUploads || hasUploadErrors;
 
-  const todayStr = React.useMemo(() => new Date().toISOString().split('T')[0], []);
+  const tomorrowStr = React.useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }, []);
 
   // Convert initial cents to major units for form
   const initialPriceMin =
@@ -70,7 +78,7 @@ export function ListingForm({ initialListing, onSubmit, isLoading = false }: Lis
       : undefined;
 
   const initialExpiresAt = initialListing?.expiresAt
-    ? new Date(initialListing.expiresAt).toISOString().split('T')[0]
+    ? toLocalDateString(initialListing.expiresAt)
     : undefined;
 
   const form = useForm<ListingFormValues, unknown, ListingFormOutput>({
@@ -128,7 +136,11 @@ export function ListingForm({ initialListing, onSubmit, isLoading = false }: Lis
       } else if (initialListing.status === 'DRAFT') {
         statusOverride = 'OPEN';
       }
-      payload = formValuesToUpdatePayload(mergedValues, statusOverride);
+      payload = formValuesToUpdatePayload(
+        mergedValues,
+        statusOverride,
+        initialListing.expiresAt ?? null,
+      );
     } else {
       payload = formValuesToApiPayload(mergedValues, action === 'DRAFT' ? 'DRAFT' : 'OPEN');
     }
@@ -364,6 +376,7 @@ export function ListingForm({ initialListing, onSubmit, isLoading = false }: Lis
                 type="number"
                 step="0.01"
                 min="0"
+                max="21474836.47"
                 placeholder="50.00"
                 {...register('priceMin')}
               />
@@ -384,6 +397,7 @@ export function ListingForm({ initialListing, onSubmit, isLoading = false }: Lis
                 type="number"
                 step="0.01"
                 min="0"
+                max="21474836.47"
                 placeholder="100.00"
                 {...register('priceMin')}
               />
@@ -400,6 +414,7 @@ export function ListingForm({ initialListing, onSubmit, isLoading = false }: Lis
                 type="number"
                 step="0.01"
                 min="0"
+                max="21474836.47"
                 placeholder="250.00"
                 {...register('priceMax')}
               />
@@ -470,7 +485,7 @@ export function ListingForm({ initialListing, onSubmit, isLoading = false }: Lis
         hint="Optional date when this listing will stop accepting bids."
       >
         <div className="relative">
-          <Input type="date" min={todayStr} {...register('expiresAt')} className="pl-10" />
+          <Input type="date" min={tomorrowStr} {...register('expiresAt')} className="pl-10" />
           <Calendar className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
         </div>
       </FormField>
