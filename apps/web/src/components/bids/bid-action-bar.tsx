@@ -3,7 +3,7 @@
 import * as React from 'react';
 import { ArrowUpDown, Check, Sparkles, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { canBidTransition } from '@/lib/api/bid-types';
+import { canBidTransition } from '@/lib/api/bid-transitions';
 import type { Bid } from '@/lib/api/types';
 
 export interface BidActionBarProps {

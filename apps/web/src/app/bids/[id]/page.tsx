@@ -48,7 +48,7 @@ import {
   useUpdateBid,
   useWithdrawBid,
 } from '@/lib/api/bids';
-import { canBidTransition } from '@/lib/api/bid-types';
+import { canBidTransition } from '@/lib/api/bid-transitions';
 import { formatDate, formatMoney } from '@/lib/format';
 import { ApiError } from '@/lib/api/client';
 import type { BidActorRole, BidCounterInput, BidCreateInput } from '@/lib/api/types';
