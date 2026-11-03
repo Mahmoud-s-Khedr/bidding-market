@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Spinner } from '@/components/ui/spinner';
 import { formatRelativeTime } from '@/lib/format';
+import { safeMediaUrl } from '@/lib/safe-url';
 import { useInfiniteConversations } from '@/lib/api/conversations';
 import type { Conversation } from '@/lib/api/messaging-types';
 
@@ -104,7 +105,9 @@ export function ConversationList({
               aria-label={`Conversation with ${other?.displayName ?? 'User'}`}
             >
               <Avatar className="h-11 w-11 shrink-0 border border-border/50">
-                {other?.avatarUrl && <AvatarImage src={other.avatarUrl} alt={other.displayName} />}
+                {other?.avatarUrl && (
+                  <AvatarImage src={safeMediaUrl(other.avatarUrl)} alt={other.displayName} />
+                )}
                 <AvatarFallback>{getInitials(other?.displayName)}</AvatarFallback>
               </Avatar>
 

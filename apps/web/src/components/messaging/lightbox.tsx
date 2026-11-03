@@ -5,6 +5,7 @@ import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { X, ZoomIn } from 'lucide-react';
 import { Dialog, DialogOverlay, DialogPortal } from '@/components/ui/dialog';
 import { getAttachmentUrl } from '@/lib/api/uploads';
+import { safeMediaUrl } from '@/lib/safe-url';
 
 export interface LightboxProps {
   src: string | null;
@@ -36,18 +37,20 @@ export function Lightbox({ src, uploadId, alt = 'Image preview', onClose }: Ligh
     }
   };
 
+  const safeSrc = safeMediaUrl(currentSrc);
+
   return (
-    <Dialog open={Boolean(currentSrc)} onOpenChange={(open) => !open && onClose()}>
+    <Dialog open={Boolean(safeSrc)} onOpenChange={(open) => !open && onClose()}>
       <DialogPortal>
         <DialogOverlay className="bg-black/80 backdrop-blur-sm z-50 fixed inset-0" />
         <DialogPrimitive.Content
           aria-label="Image preview lightbox"
           className="fixed left-[50%] top-[50%] z-50 -translate-x-1/2 -translate-y-1/2 max-w-4xl max-h-[90vh] p-2 bg-transparent border-none shadow-none focus:outline-none flex flex-col items-center justify-center"
         >
-          {currentSrc && (
+          {safeSrc && (
             <div className="relative group max-w-full max-h-[85vh] overflow-hidden rounded-lg flex items-center justify-center">
               <img
-                src={currentSrc}
+                src={safeSrc}
                 alt={alt}
                 onError={() => {
                   void handleError();
@@ -101,15 +104,17 @@ export function ImageAttachmentThumbnail({
     }
   };
 
+  const safeSrc = safeMediaUrl(currentSrc);
+
   return (
     <button
       type="button"
-      onClick={() => onClick(currentSrc)}
+      onClick={() => onClick(safeSrc || currentSrc)}
       aria-label={`View full image ${alt}`}
       className="group relative block overflow-hidden rounded-md border border-border/60 hover:border-primary/50 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
       <img
-        src={currentSrc}
+        src={safeSrc}
         alt={alt}
         onError={() => {
           void handleError();

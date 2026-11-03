@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils';
 import { Button } from './button';
 import { uploadFile } from '@/lib/upload';
 import type { Attachment, UploadPurpose } from '@/lib/api/types';
+import { safeMediaUrl } from '@/lib/safe-url';
 
 export interface FileDropzoneProps {
   purpose: UploadPurpose;
@@ -251,7 +252,7 @@ export function FileDropzone({
                   {isImage ? (
                     <div className="h-10 w-10 shrink-0 overflow-hidden rounded border border-border bg-muted flex items-center justify-center">
                       <img
-                        src={attachment.url}
+                        src={safeMediaUrl(attachment.url)}
                         alt={attachment.fileName}
                         className="h-full w-full object-cover"
                       />
@@ -299,7 +300,7 @@ export function FileDropzone({
                   {item.previewUrl ? (
                     <div className="h-10 w-10 shrink-0 overflow-hidden rounded border border-border bg-muted">
                       <img
-                        src={item.previewUrl}
+                        src={safeMediaUrl(item.previewUrl)}
                         alt={item.file.name}
                         className="h-full w-full object-cover"
                       />

@@ -34,6 +34,7 @@ import { getAttachmentUrl } from '@/lib/api/uploads';
 import { formatDate } from '@/lib/format';
 import { ApiError } from '@/lib/api/client';
 import type { Attachment } from '@/lib/api/types';
+import { safeMediaUrl } from '@/lib/safe-url';
 
 export default function ListingDetailPage() {
   const params = useParams();
@@ -91,7 +92,16 @@ export default function ListingDetailPage() {
   const handleDownloadAttachment = async (attachment: Attachment) => {
     try {
       const res = await getAttachmentUrl(attachment.id);
-      window.open(res.url, '_blank', 'noopener,noreferrer');
+      const safeUrl = safeMediaUrl(res.url);
+      if (safeUrl) {
+        window.open(safeUrl, '_blank', 'noopener,noreferrer');
+      } else {
+        toast({
+          title: 'Download failed',
+          description: 'Invalid download URL',
+          variant: 'error',
+        });
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to retrieve download URL';
       toast({
@@ -441,7 +451,7 @@ export default function ListingDetailPage() {
             <Link href={`/users/${listing.owner.id}`} className="group flex items-center gap-3">
               <Avatar className="h-12 w-12 border border-border">
                 <AvatarImage
-                  src={listing.owner.avatarUrl || undefined}
+                  src={safeMediaUrl(listing.owner.avatarUrl)}
                   alt={listing.owner.displayName}
                 />
                 <AvatarFallback className="text-sm font-semibold">

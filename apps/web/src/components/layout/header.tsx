@@ -20,6 +20,7 @@ import {
 import { useAuth } from '@/components/auth/auth-provider';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { safeMediaUrl } from '@/lib/safe-url';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -155,7 +156,7 @@ export function Header() {
                   >
                     <Avatar className="h-8 w-8">
                       {user?.avatarUrl && (
-                        <AvatarImage src={user.avatarUrl} alt={user.displayName} />
+                        <AvatarImage src={safeMediaUrl(user.avatarUrl)} alt={user.displayName} />
                       )}
                       <AvatarFallback>{getInitials(user?.displayName)}</AvatarFallback>
                     </Avatar>

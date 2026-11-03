@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { uploadFile } from '@/lib/upload';
 import type { Attachment } from '@/lib/api/types';
 import type { MessageType } from '@/lib/api/messaging-types';
+import { safeMediaUrl } from '@/lib/safe-url';
 import { VoiceRecorder } from './voice-recorder';
 
 export interface ComposerAttachment extends Attachment {
@@ -286,9 +287,9 @@ export function Composer({
                 key={att.id}
                 className="group relative flex items-center gap-2 p-1.5 pr-2 rounded-lg border border-border bg-background text-xs max-w-xs shadow-xs"
               >
-                {isImage && (att.previewUrl || att.url) ? (
+                {isImage && safeMediaUrl(att.previewUrl || att.url) ? (
                   <img
-                    src={att.previewUrl || att.url}
+                    src={safeMediaUrl(att.previewUrl || att.url)}
                     alt={att.fileName}
                     className="h-10 w-10 object-cover rounded-md"
                   />

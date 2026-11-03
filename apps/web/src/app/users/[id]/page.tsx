@@ -23,6 +23,7 @@ import { ListingCard } from '@/components/shared/listing-card';
 import { usePublicUser, useUserReviews } from '@/lib/api/users';
 import { useListings } from '@/lib/api/listings';
 import { formatDate } from '@/lib/format';
+import { safeMediaUrl } from '@/lib/safe-url';
 import { ApiError } from '@/lib/api/client';
 
 export default function UserProfilePage() {
@@ -119,7 +120,7 @@ export default function UserProfilePage() {
       <div className="rounded-xl border border-border bg-card p-6 sm:p-8 shadow-xs">
         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6">
           <Avatar className="h-24 w-24 border-2 border-border text-2xl font-bold">
-            <AvatarImage src={user.avatarUrl || undefined} alt={user.displayName} />
+            <AvatarImage src={safeMediaUrl(user.avatarUrl)} alt={user.displayName} />
             <AvatarFallback>{user.displayName.slice(0, 2).toUpperCase()}</AvatarFallback>
           </Avatar>
 
@@ -265,7 +266,7 @@ export default function UserProfilePage() {
                     >
                       <Avatar className="h-8 w-8">
                         <AvatarImage
-                          src={rev.author.avatarUrl || undefined}
+                          src={safeMediaUrl(rev.author.avatarUrl)}
                           alt={rev.author.displayName}
                         />
                         <AvatarFallback className="text-xs">

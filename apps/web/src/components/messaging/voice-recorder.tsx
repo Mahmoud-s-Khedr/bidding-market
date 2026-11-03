@@ -3,6 +3,7 @@
 import * as React from 'react';
 import { AlertCircle, Check, Mic, Square, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { safeMediaUrl } from '@/lib/safe-url';
 import { AudioPlayer } from './audio-player';
 
 export interface VoiceRecorderProps {
@@ -287,7 +288,7 @@ export function VoiceRecorder({
         aria-label="Preview recorded voice note"
       >
         <div className="flex-1">
-          <AudioPlayer src={audioUrl} durationSec={duration} />
+          <AudioPlayer src={safeMediaUrl(audioUrl) || ''} durationSec={duration} />
         </div>
 
         <div className="flex items-center gap-1.5">

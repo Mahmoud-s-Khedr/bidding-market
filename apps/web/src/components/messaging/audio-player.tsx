@@ -3,6 +3,7 @@
 import * as React from 'react';
 import { Pause, Play } from 'lucide-react';
 import { getAttachmentUrl } from '@/lib/api/uploads';
+import { safeMediaUrl } from '@/lib/safe-url';
 
 export interface AudioPlayerProps {
   src: string;
@@ -108,7 +109,7 @@ export function AudioPlayer({
     >
       <audio
         ref={audioRef}
-        src={currentSrc}
+        src={safeMediaUrl(currentSrc)}
         autoPlay={autoPlay}
         onError={() => {
           void handleError();

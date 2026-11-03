@@ -18,6 +18,7 @@ import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import { formatDate } from '@/lib/format';
 import { getAttachmentUrl } from '@/lib/api/uploads';
+import { safeMediaUrl } from '@/lib/safe-url';
 import {
   markConversationRead,
   sendMessage,
@@ -439,15 +440,17 @@ export function ChatView({ conversationId, onBack, className = '' }: ChatViewPro
   const handleDownloadAttachment = async (att: Attachment) => {
     try {
       const res = await getAttachmentUrl(att.id);
-      if (res?.url) {
-        window.open(res.url, '_blank', 'noopener,noreferrer');
+      const safeResUrl = safeMediaUrl(res?.url);
+      if (safeResUrl) {
+        window.open(safeResUrl, '_blank', 'noopener,noreferrer');
         return;
       }
     } catch {
       // Fallback to existing url
     }
-    if (att.url) {
-      window.open(att.url, '_blank', 'noopener,noreferrer');
+    const safeAttUrl = safeMediaUrl(att.url);
+    if (safeAttUrl) {
+      window.open(safeAttUrl, '_blank', 'noopener,noreferrer');
     }
   };
 
@@ -482,7 +485,7 @@ export function ChatView({ conversationId, onBack, className = '' }: ChatViewPro
           <div className="relative shrink-0">
             <Avatar className="h-9 w-9">
               <AvatarImage
-                src={otherParticipant?.avatarUrl || ''}
+                src={safeMediaUrl(otherParticipant?.avatarUrl) || ''}
                 alt={otherParticipant?.displayName || 'User'}
               />
               <AvatarFallback>{getInitials(otherParticipant?.displayName)}</AvatarFallback>
@@ -637,10 +640,12 @@ export function ChatView({ conversationId, onBack, className = '' }: ChatViewPro
                       {msg.attachments.map((att) => (
                         <ImageAttachmentThumbnail
                           key={att.id}
-                          src={att.url || ''}
+                          src={safeMediaUrl(att.url) || ''}
                           uploadId={att.id}
                           alt={att.fileName}
-                          onClick={(url) => setSelectedLightboxImage(url || att.url || '')}
+                          onClick={(url) =>
+                            setSelectedLightboxImage(safeMediaUrl(url || att.url) || null)
+                          }
                         />
                       ))}
                     </div>
@@ -685,7 +690,7 @@ export function ChatView({ conversationId, onBack, className = '' }: ChatViewPro
                   {msg.type === 'VOICE' && (
                     <div className="mt-1">
                       <AudioPlayer
-                        src={msg.attachments?.[0]?.url || ''}
+                        src={safeMediaUrl(msg.attachments?.[0]?.url) || ''}
                         uploadId={msg.attachments?.[0]?.id}
                         durationSec={msg.voiceDurationSec}
                       />
@@ -754,7 +759,7 @@ export function ChatView({ conversationId, onBack, className = '' }: ChatViewPro
 
       {/* Lightbox for image attachments */}
       <Lightbox
-        src={selectedLightboxImage}
+        src={safeMediaUrl(selectedLightboxImage) || null}
         alt="Attached image preview"
         onClose={() => setSelectedLightboxImage(null)}
       />
