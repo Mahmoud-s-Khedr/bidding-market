@@ -65,6 +65,25 @@ describe('Centralized Query Keys', () => {
 
     expect(queryKeys.uploads.all).toEqual(['uploads']);
     expect(queryKeys.uploads.url('up-1')).toEqual(['uploads', 'url', 'up-1']);
+
+    expect(queryKeys.agreements.all).toEqual(['agreements']);
+    expect(queryKeys.agreements.lists()).toEqual(['agreements', 'list']);
+    expect(queryKeys.agreements.details()).toEqual(['agreements', 'detail']);
+    expect(queryKeys.agreements.detail('ag-1', 'u-1')).toEqual([
+      'agreements',
+      'detail',
+      'ag-1',
+      'u-1',
+    ]);
+    expect(queryKeys.dashboard.all).toEqual(['dashboard']);
+    expect(queryKeys.dashboard.summary('u-1')).toEqual(['dashboard', 'summary', 'u-1']);
+    expect(queryKeys.bids.all).toEqual(['bids']);
+    expect(queryKeys.bids.mine({ status: 'PENDING' }, 'u-1')).toEqual([
+      'bids',
+      'mine',
+      { status: 'PENDING' },
+      'u-1',
+    ]);
   });
 });
 

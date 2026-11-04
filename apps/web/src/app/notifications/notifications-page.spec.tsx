@@ -15,12 +15,16 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(),
 }));
 
-vi.mock('@/lib/api/notifications', () => ({
-  useInfiniteNotifications: vi.fn(),
-  useUnreadNotificationCount: vi.fn(),
-  useMarkNotificationRead: vi.fn(),
-  useMarkAllNotificationsRead: vi.fn(),
-}));
+vi.mock('@/lib/api/notifications', async () => {
+  const actual = await vi.importActual<typeof notificationsApi>('@/lib/api/notifications');
+  return {
+    ...actual,
+    useInfiniteNotifications: vi.fn(),
+    useUnreadNotificationCount: vi.fn(),
+    useMarkNotificationRead: vi.fn(),
+    useMarkAllNotificationsRead: vi.fn(),
+  };
+});
 
 vi.mock('@/components/auth/auth-provider', () => ({
   useAuth: vi.fn(),

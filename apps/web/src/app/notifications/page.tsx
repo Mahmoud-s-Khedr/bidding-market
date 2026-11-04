@@ -11,6 +11,7 @@ import { Spinner } from '@/components/ui/spinner';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { formatDate, formatRelativeTime } from '@/lib/format';
 import {
+  getNotificationLink,
   useInfiniteNotifications,
   useMarkAllNotificationsRead,
   useMarkNotificationRead,
@@ -41,8 +42,9 @@ export default function NotificationsPage() {
     if (!item.readAt) {
       markRead.mutate(item.id);
     }
-    if (item.link) {
-      router.push(item.link);
+    const link = getNotificationLink(item);
+    if (link) {
+      router.push(link);
     }
   };
 

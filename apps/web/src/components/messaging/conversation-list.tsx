@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Spinner } from '@/components/ui/spinner';
-import { formatRelativeTime } from '@/lib/format';
+import { formatRelativeTime, getInitials } from '@/lib/format';
 import { safeMediaUrl } from '@/lib/safe-url';
 import { useInfiniteConversations } from '@/lib/api/conversations';
 import type { Conversation } from '@/lib/api/messaging-types';
@@ -18,16 +18,6 @@ export interface ConversationListProps {
   activeId?: string;
   onSelectConversation?: (id: string) => void;
   className?: string;
-}
-
-function getInitials(name?: string): string {
-  if (!name) return 'U';
-  return name
-    .split(' ')
-    .map((n) => n[0])
-    .join('')
-    .toUpperCase()
-    .substring(0, 2);
 }
 
 function getMessagePreview(conversation: Conversation): string {

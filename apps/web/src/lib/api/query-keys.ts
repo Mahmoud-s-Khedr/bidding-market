@@ -1,4 +1,5 @@
 import type { ListingFilters } from './types';
+import type { AgreementsQueryInput, MyBidsQueryInput } from '@market/shared';
 
 export const queryKeys = {
   listings: {
@@ -32,7 +33,8 @@ export const queryKeys = {
     details: () => ['conversations', 'detail'] as const,
     detail: (id: string) => ['conversations', 'detail', id] as const,
     messages: (id: string) => ['conversations', 'messages', id] as const,
-    unreadTotal: () => ['conversations', 'unread-total'] as const,
+    unreadTotal: (viewerId?: string | null) =>
+      ['conversations', 'unread-total', viewerId ?? 'anonymous'] as const,
   },
   notifications: {
     all: ['notifications'] as const,
@@ -40,5 +42,27 @@ export const queryKeys = {
     list: (unread?: boolean) => ['notifications', 'list', { unread }] as const,
     infinite: (unread?: boolean) => ['notifications', 'infinite', { unread }] as const,
     unreadCount: () => ['notifications', 'unread-count'] as const,
+  },
+  agreements: {
+    all: ['agreements'] as const,
+    lists: () => ['agreements', 'list'] as const,
+    list: (filters?: Partial<AgreementsQueryInput>, viewerId?: string | null) =>
+      ['agreements', 'list', filters, viewerId ?? 'anon'] as const,
+    infinite: (filters?: Partial<AgreementsQueryInput>, viewerId?: string | null) =>
+      ['agreements', 'infinite', filters, viewerId ?? 'anon'] as const,
+    details: () => ['agreements', 'detail'] as const,
+    detail: (id: string, viewerId?: string | null) =>
+      ['agreements', 'detail', id, viewerId ?? 'anon'] as const,
+  },
+  dashboard: {
+    all: ['dashboard'] as const,
+    summary: (viewerId?: string | null) => ['dashboard', 'summary', viewerId ?? 'anon'] as const,
+  },
+  bids: {
+    all: ['bids'] as const,
+    mine: (filters?: Partial<MyBidsQueryInput>, viewerId?: string | null) =>
+      ['bids', 'mine', filters, viewerId ?? 'anon'] as const,
+    infiniteMine: (filters?: Partial<MyBidsQueryInput>, viewerId?: string | null) =>
+      ['bids', 'mine', 'infinite', filters, viewerId ?? 'anon'] as const,
   },
 };

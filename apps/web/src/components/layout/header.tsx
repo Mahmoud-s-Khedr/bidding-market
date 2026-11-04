@@ -32,6 +32,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { NotificationsBell } from '@/components/notifications/notifications-bell';
 import { useTotalUnreadMessages } from '@/lib/api/conversations';
+import { getInitials } from '@/lib/format';
 
 export function Header() {
   const { user, isAuthenticated, isAdmin, logout } = useAuth();
@@ -40,7 +41,10 @@ export function Header() {
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
   // Unread messages total: /dashboard/summary is not yet available on main,
   // so this falls back to summing unread counts of active conversations up to limit 50.
-  const totalUnreadMessages = useTotalUnreadMessages({ enabled: isAuthenticated });
+  const totalUnreadMessages = useTotalUnreadMessages({
+    enabled: isAuthenticated,
+    viewerId: user?.id,
+  });
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -53,16 +57,6 @@ export function Header() {
   const handleLogout = async () => {
     await logout();
     router.push('/');
-  };
-
-  const getInitials = (name?: string) => {
-    if (!name) return 'U';
-    return name
-      .split(' ')
-      .map((part) => part[0])
-      .join('')
-      .toUpperCase()
-      .substring(0, 2);
   };
 
   return (
@@ -91,6 +85,14 @@ export function Header() {
             >
               Browse
             </Link>
+            {isAuthenticated && (
+              <Link
+                href="/dashboard"
+                className="px-3 py-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                Dashboard
+              </Link>
+            )}
             <Link
               href="/listings/new"
               className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"

@@ -1,6 +1,7 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from './client';
 import { queryKeys } from './query-keys';
+import { getDashboardSummary } from './dashboard';
 import type { PaginatedResponse } from './types';
 import type {
   Conversation,
@@ -100,13 +101,20 @@ export function useCreateConversation() {
  * Until that endpoint is implemented, this query calculates the sum across fetched conversations
  * up to the query limit (50 conversations).
  */
-export function useTotalUnreadMessages(options?: { enabled?: boolean }) {
+export function useTotalUnreadMessages(options?: { enabled?: boolean; viewerId?: string | null }) {
   const { data } = useQuery({
-    queryKey: queryKeys.conversations.unreadTotal(),
+    queryKey: queryKeys.conversations.unreadTotal(options?.viewerId),
     queryFn: async () => {
-      // Fallback calculation: sums unread counts across up to 50 conversations until /dashboard/summary is available
+      try {
+        const summary = await getDashboardSummary();
+        if (typeof summary?.unreadMessages === 'number') {
+          return summary.unreadMessages;
+        }
+      } catch {
+        // Fallback calculation: sums unread counts across up to 50 conversations if dashboard summary fails
+      }
       const res = await getConversations({ limit: 50 });
-      return res.items.reduce((acc, c) => acc + (c.unreadCount ?? 0), 0);
+      return res?.items?.reduce((acc, c) => acc + (c.unreadCount ?? 0), 0) ?? 0;
     },
     enabled: options?.enabled ?? true,
     staleTime: 1000 * 30,
