@@ -20,6 +20,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { ErrorState } from '@/components/ui/error-state';
 import { RatingStars } from '@/components/shared/rating-stars';
 import { ListingCard } from '@/components/shared/listing-card';
+import { ReportButton } from '@/components/shared/report-button';
 import { usePublicUser, useUserReviews } from '@/lib/api/users';
 import { useListings } from '@/lib/api/listings';
 import { formatDate } from '@/lib/format';
@@ -125,17 +126,29 @@ export default function UserProfilePage() {
           </Avatar>
 
           <div className="space-y-2.5 flex-1 min-w-0">
-            <div className="flex flex-wrap items-center gap-2.5">
-              <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground truncate">
-                {user.displayName}
-              </h1>
+            <div className="flex flex-wrap items-center justify-between gap-2.5">
+              <div className="flex flex-wrap items-center gap-2.5">
+                <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground truncate">
+                  {user.displayName}
+                </h1>
 
-              {user.isBusiness && (
-                <Badge variant="secondary" className="flex items-center gap-1 text-xs">
-                  <Briefcase className="h-3 w-3" />
-                  <span>Business {user.companyName ? `• ${user.companyName}` : ''}</span>
-                </Badge>
-              )}
+                {user.isBusiness && (
+                  <Badge variant="secondary" className="flex items-center gap-1 text-xs">
+                    <Briefcase className="h-3 w-3" />
+                    <span>Business {user.companyName ? `• ${user.companyName}` : ''}</span>
+                  </Badge>
+                )}
+              </div>
+
+              <ReportButton
+                targetType="USER"
+                targetId={user.id}
+                targetTitle={user.displayName}
+                ownerId={user.id}
+                label="Report User"
+                variant="outline"
+                size="sm"
+              />
             </div>
 
             {user.bio && (

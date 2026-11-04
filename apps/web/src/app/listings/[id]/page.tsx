@@ -26,6 +26,7 @@ import { ImageGallery } from '@/components/shared/image-gallery';
 import { PriceTag } from '@/components/shared/price-tag';
 import { RatingStars } from '@/components/shared/rating-stars';
 import { ConfirmDialog } from '@/components/shared/confirm-dialog';
+import { ReportButton } from '@/components/shared/report-button';
 import { useAuth } from '@/components/auth/auth-provider';
 import { useToast } from '@/components/ui/toast';
 import { useCloseListing, useDeleteListing, useListing } from '@/lib/api/listings';
@@ -255,7 +256,19 @@ export default function ListingDetailPage() {
               Delete
             </Button>
           </div>
-        ) : null}
+        ) : (
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <ReportButton
+              targetType="LISTING"
+              targetId={listing.id}
+              targetTitle={listing.title}
+              ownerId={listing.owner.id}
+              label="Report Listing"
+              variant="outline"
+              size="sm"
+            />
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
