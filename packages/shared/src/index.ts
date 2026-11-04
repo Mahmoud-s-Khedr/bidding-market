@@ -346,11 +346,16 @@ export const adminUsersQuerySchema = paginationSchema.extend({
   role: Role.optional(),
   status: UserStatus.optional(),
 });
-export const adminUserUpdateSchema = z.object({
-  role: Role.optional(),
-  status: UserStatus.optional(),
-  reason: z.string().max(2000).optional(),
-});
+export const adminUserUpdateSchema = z
+  .object({
+    role: Role.optional(),
+    status: UserStatus.optional(),
+    reason: z.string().max(2000).optional(),
+  })
+  .refine(
+    (value) => value.role !== undefined || value.status !== undefined || value.reason !== undefined,
+    { message: 'At least one field is required' },
+  );
 export const adminResolveReportSchema = z.object({
   action: z.enum(['DISMISS', 'REMOVE_CONTENT', 'SUSPEND_USER']),
   note: z.string().min(1).max(2000),
@@ -375,6 +380,11 @@ export const adminListingActionSchema = z.object({ reason: z.string().min(1).max
 export const adminListingsQuerySchema = paginationSchema.extend({
   q: z.string().optional(),
   status: ListingStatus.optional(),
+});
+export const adminAuditQuerySchema = paginationSchema.extend({
+  actorId: z.string().optional(),
+  action: z.string().optional(),
+  targetType: z.string().optional(),
 });
 export const paginated = <T extends z.ZodType>(item: T) =>
   z.object({ items: z.array(item), nextCursor: z.string().nullable() });
@@ -807,6 +817,10 @@ export type ReportResolution = z.infer<typeof ReportResolution>;
 export type ReportInput = z.infer<typeof reportSchema>;
 export type AdminUserUpdateInput = z.infer<typeof adminUserUpdateSchema>;
 export type AdminResolveReportInput = z.infer<typeof adminResolveReportSchema>;
+export type AdminUsersQueryInput = z.infer<typeof adminUsersQuerySchema>;
+export type AdminListingsQueryInput = z.infer<typeof adminListingsQuerySchema>;
+export type AdminReportsQueryInput = z.infer<typeof adminReportsQuerySchema>;
+export type AdminAuditQueryInput = z.infer<typeof adminAuditQuerySchema>;
 export type AuthResponse = z.infer<typeof authResponseSchema>;
 export type ListingFilters = z.input<typeof listingQuerySchema>;
 export type ListingSort = NonNullable<z.input<typeof listingQuerySchema>['sort']>;

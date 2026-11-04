@@ -1,11 +1,12 @@
 import { ConflictException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 import { AdminService, ReportsService } from './reports.service.js';
-import { isDeleted } from './message-deletion.js';
 
 describe('AdminService last-admin guard', () => {
   it('rejects demoting the last remaining admin before changing the user', async () => {
     const tx = {
+      $executeRaw: vi.fn(),
+      $queryRaw: vi.fn(),
       user: {
         findUnique: vi.fn().mockResolvedValue({ id: 'target', role: 'ADMIN', status: 'ACTIVE' }),
         count: vi.fn().mockResolvedValue(1),
@@ -60,15 +61,17 @@ describe('ReportsService target validation', () => {
       ),
     ).rejects.toThrow('Target not found');
   });
-  it('identifies deleted messages', () => {
-    expect(isDeleted({ deletedAt: new Date() })).toBe(true);
-    expect(isDeleted({ deletedAt: null })).toBe(false);
-  });
 });
 
 describe('AdminService moderation', () => {
   const transaction = () => ({
-    user: { findUnique: vi.fn(), count: vi.fn(), update: vi.fn(), groupBy: vi.fn() },
+    user: {
+      findUnique: vi.fn(),
+      findMany: vi.fn(),
+      count: vi.fn(),
+      update: vi.fn(),
+      groupBy: vi.fn(),
+    },
     listing: { findUnique: vi.fn(), updateMany: vi.fn(), findMany: vi.fn(), groupBy: vi.fn() },
     bid: { findUnique: vi.fn(), updateMany: vi.fn(), count: vi.fn() },
     agreement: { groupBy: vi.fn(), findUnique: vi.fn() },
@@ -76,12 +79,15 @@ describe('AdminService moderation', () => {
     message: { findUnique: vi.fn(), updateMany: vi.fn() },
     refreshToken: { updateMany: vi.fn() },
     auditLog: { create: vi.fn(), findMany: vi.fn() },
+    $executeRaw: vi.fn(),
+    $queryRaw: vi.fn(),
   });
   const setup = () => {
     const tx = transaction();
     const prisma = {
       ...tx,
       $transaction: (fn: (value: typeof tx) => Promise<unknown>) => fn(tx),
+      $executeRaw: vi.fn(),
       $queryRaw: vi.fn(),
     };
     const categories = { invalidateCache: vi.fn() };
@@ -142,6 +148,7 @@ describe('AdminService moderation', () => {
     tx.listing.findUnique.mockResolvedValue({ id: 'target', status: 'OPEN', ownerId: 'owner' });
     tx.listing.updateMany.mockResolvedValue({ count: 1 });
     tx.user.update.mockResolvedValue({});
+    tx.user.findUnique.mockResolvedValue({ role: 'USER' });
     tx.message.findUnique.mockResolvedValue({ senderId: 'owner' });
     tx.bid.findUnique.mockResolvedValue({ bidderId: 'owner' });
     await expect(
@@ -162,5 +169,103 @@ describe('AdminService moderation', () => {
     });
     tx.report.updateMany.mockResolvedValue({ count: 1 });
     await expect(service.resolveReport('admin', 'r', { action, note: 'note' })).rejects.toThrow();
+  });
+  it('rejects self modification in updateUser', async () => {
+    const { service } = setup();
+    await expect(service.updateUser('admin', 'admin', { role: 'USER' })).rejects.toThrow(
+      'You cannot modify yourself',
+    );
+  });
+  it('rejects suspending the actor or an admin in resolveReport', async () => {
+    const { tx, service } = setup();
+    tx.report.findUnique.mockResolvedValue({
+      id: 'r',
+      reporterId: 'reporter',
+      targetType: 'USER',
+      targetId: 'admin',
+    });
+    tx.report.updateMany.mockResolvedValue({ count: 1 });
+    tx.user.findUnique.mockResolvedValue({ id: 'admin', role: 'ADMIN' });
+    await expect(
+      service.resolveReport('admin', 'r', { action: 'SUSPEND_USER', note: 'bad' }),
+    ).rejects.toThrow('You cannot suspend yourself');
+
+    tx.report.findUnique.mockResolvedValue({
+      id: 'r2',
+      reporterId: 'reporter',
+      targetType: 'USER',
+      targetId: 'other-admin',
+    });
+    tx.user.findUnique.mockResolvedValue({ id: 'other-admin', role: 'ADMIN' });
+    await expect(
+      service.resolveReport('admin', 'r2', { action: 'SUSPEND_USER', note: 'bad' }),
+    ).rejects.toThrow('Administrators cannot be suspended');
+  });
+  it('paginates users, listings, reports, and audit logs', async () => {
+    const { prisma, service } = setup();
+    prisma.user.findMany = vi.fn().mockResolvedValue([
+      { id: 'u1', createdAt: new Date() },
+      { id: 'u2', createdAt: new Date() },
+    ]);
+    const usersRes = await service.users({ limit: 1, q: 'test', role: 'USER', status: 'ACTIVE' });
+    expect(usersRes.items).toHaveLength(1);
+    expect(usersRes.nextCursor).toBeDefined();
+
+    prisma.listing.findMany = vi.fn().mockResolvedValue([
+      { id: 'l1', createdAt: new Date() },
+      { id: 'l2', createdAt: new Date() },
+    ]);
+    const listingsRes = await service.listings({ limit: 1, q: 'test', status: 'OPEN' });
+    expect(listingsRes.items).toHaveLength(1);
+    expect(listingsRes.nextCursor).toBeDefined();
+
+    prisma.report.findMany = vi.fn().mockResolvedValue([
+      { id: 'r1', targetType: 'USER', targetId: 'u1', createdAt: new Date() },
+      { id: 'r2', targetType: 'LISTING', targetId: 'l1', createdAt: new Date() },
+    ]);
+    prisma.user.findUnique = vi.fn().mockResolvedValue({ id: 'u1', displayName: 'U1' });
+    prisma.listing.findUnique = vi.fn().mockResolvedValue({ id: 'l1', title: 'L1' });
+    prisma.message.findUnique = vi.fn().mockResolvedValue({ id: 'm1', body: 'hi' });
+    prisma.bid.findUnique = vi.fn().mockResolvedValue({ id: 'b1', amountCents: 100 });
+    prisma.agreement.findUnique = vi.fn().mockResolvedValue({ id: 'a1', status: 'ACTIVE' });
+
+    const reportsRes = await service.reports({ limit: 1, status: 'OPEN' });
+    expect(reportsRes.items).toHaveLength(1);
+    expect(reportsRes.nextCursor).toBeDefined();
+
+    prisma.auditLog.findMany = vi.fn().mockResolvedValue([
+      { id: 'a1', createdAt: new Date() },
+      { id: 'a2', createdAt: new Date() },
+    ]);
+    const auditRes = await service.audit({
+      limit: 1,
+      action: 'USER_UPDATED',
+      actorId: 'admin',
+      targetType: 'USER',
+    });
+    expect(auditRes.items).toHaveLength(1);
+    expect(auditRes.nextCursor).toBeDefined();
+  });
+  it('handles restoreListing and removeListing edge cases', async () => {
+    const { tx, service } = setup();
+    tx.listing.findUnique.mockResolvedValueOnce(null);
+    await expect(service.removeListing('admin', 'missing', 'reason')).rejects.toThrow(
+      'Listing not found',
+    );
+
+    tx.listing.findUnique.mockResolvedValueOnce({ id: 'l1', status: 'REMOVED' });
+    await expect(service.removeListing('admin', 'l1', 'reason')).rejects.toThrow(
+      'Listing is already removed',
+    );
+
+    tx.listing.findUnique.mockResolvedValueOnce(null);
+    await expect(service.restoreListing('admin', 'missing', 'reason')).rejects.toThrow(
+      'Listing not found',
+    );
+
+    tx.listing.findUnique.mockResolvedValueOnce({ id: 'l1', status: 'OPEN', previousStatus: null });
+    await expect(service.restoreListing('admin', 'l1', 'reason')).rejects.toThrow(
+      'Listing is not removed',
+    );
   });
 });

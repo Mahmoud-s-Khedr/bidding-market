@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
-import { z } from 'zod';
 import {
+  adminAuditQuerySchema,
   adminListingActionSchema,
   adminListingsQuerySchema,
   adminReportsQuerySchema,
@@ -9,10 +9,13 @@ import {
   adminUserUpdateSchema,
   adminUsersQuerySchema,
   idParamSchema,
-  paginationSchema,
   reportSchema,
+  type AdminAuditQueryInput,
+  type AdminListingsQueryInput,
+  type AdminReportsQueryInput,
   type AdminResolveReportInput,
   type AdminUserUpdateInput,
+  type AdminUsersQueryInput,
   type ReportInput,
 } from '@market/shared';
 import { CurrentUser, Roles, type AuthUser } from '../../common/auth.js';
@@ -40,7 +43,7 @@ export class AdminController {
     return this.admin.stats();
   }
   @Get('users') users(@Query(new ZodValidationPipe(adminUsersQuerySchema)) query: unknown) {
-    return this.admin.users(query as never);
+    return this.admin.users(query as AdminUsersQueryInput);
   }
   @Patch('users/:id') updateUser(
     @CurrentUser() user: AuthUser,
@@ -56,7 +59,7 @@ export class AdminController {
   @Get('listings') listings(
     @Query(new ZodValidationPipe(adminListingsQuerySchema)) query: unknown,
   ) {
-    return this.admin.listings(query as never);
+    return this.admin.listings(query as AdminListingsQueryInput);
   }
   @Post('listings/:id/remove') removeListing(
     @CurrentUser() user: AuthUser,
@@ -81,7 +84,7 @@ export class AdminController {
     );
   }
   @Get('reports') reports(@Query(new ZodValidationPipe(adminReportsQuerySchema)) query: unknown) {
-    return this.admin.reports(query as never);
+    return this.admin.reports(query as AdminReportsQueryInput);
   }
   @Post('reports/:id/resolve') resolve(
     @CurrentUser() user: AuthUser,
@@ -95,17 +98,9 @@ export class AdminController {
     );
   }
   @Get('audit-log') audit(
-    @Query(
-      new ZodValidationPipe(
-        paginationSchema.extend({
-          actorId: z.string().optional(),
-          action: z.string().optional(),
-          targetType: z.string().optional(),
-        }),
-      ),
-    )
+    @Query(new ZodValidationPipe(adminAuditQuerySchema))
     query: unknown,
   ) {
-    return this.admin.audit(query as never);
+    return this.admin.audit(query as AdminAuditQueryInput);
   }
 }

@@ -24,6 +24,16 @@ type ListingQuery = CursorQuery & {
 type ReportQuery = CursorQuery & { status?: 'OPEN' | 'RESOLVED' | 'DISMISSED' };
 type AuditQuery = CursorQuery & { actorId?: string; action?: string; targetType?: string };
 type Target = { ownerId?: string; senderId?: string; userId?: string };
+const adminUserSelect = {
+  id: true,
+  email: true,
+  role: true,
+  status: true,
+  suspendedReason: true,
+  suspendedAt: true,
+  displayName: true,
+  createdAt: true,
+} as const;
 
 function cursor(value?: string): { createdAt: Date; id: string } | undefined {
   if (!value) return undefined;
@@ -159,7 +169,7 @@ export class AdminService {
       this.prisma.$queryRaw<
         Array<{ day: Date; signups: bigint; listings: bigint; bids: bigint; agreements: bigint }>
       >(
-        Prisma.sql`SELECT d.day, (SELECT COUNT(*) FROM "User" u WHERE u."createdAt" >= d.day AND u."createdAt" < d.day + interval '1 day')::bigint AS signups, (SELECT COUNT(*) FROM "Listing" l WHERE l."createdAt" >= d.day AND l."createdAt" < d.day + interval '1 day')::bigint AS listings, (SELECT COUNT(*) FROM "Bid" b WHERE b."createdAt" >= d.day AND b."createdAt" < d.day + interval '1 day')::bigint AS bids, (SELECT COUNT(*) FROM "Agreement" a WHERE a."createdAt" >= d.day AND a."createdAt" < d.day + interval '1 day')::bigint AS agreements FROM generate_series(current_date - interval '29 days', current_date, interval '1 day') d(day) ORDER BY d.day`,
+        Prisma.sql`SELECT d.day, (SELECT COUNT(*) FROM "User" u WHERE u."createdAt" >= d.day AND u."createdAt" < d.day + interval '1 day')::bigint AS signups, (SELECT COUNT(*) FROM "Listing" l WHERE l."createdAt" >= d.day AND l."createdAt" < d.day + interval '1 day')::bigint AS listings, (SELECT COUNT(*) FROM "Bid" b WHERE b."createdAt" >= d.day AND b."createdAt" < d.day + interval '1 day')::bigint AS bids, (SELECT COUNT(*) FROM "Agreement" a WHERE a."createdAt" >= d.day AND a."createdAt" < d.day + interval '1 day')::bigint AS agreements FROM generate_series((now() AT TIME ZONE 'utc')::date - interval '29 days', (now() AT TIME ZONE 'utc')::date, interval '1 day') d(day) ORDER BY d.day`,
       ),
     ]);
     const count = <T extends { status: string; _count: { id: number } }>(
@@ -204,16 +214,7 @@ export class AdminService {
       where,
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: query.limit + 1,
-      select: {
-        id: true,
-        email: true,
-        role: true,
-        status: true,
-        suspendedReason: true,
-        suspendedAt: true,
-        displayName: true,
-        createdAt: true,
-      },
+      select: adminUserSelect,
     });
     return {
       items: rows.slice(0, query.limit),
@@ -224,6 +225,7 @@ export class AdminService {
   async updateUser(actorId: string, id: string, input: AdminUserUpdateInput) {
     if (actorId === id) throw new BadRequestException('You cannot modify yourself');
     return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(8675309)`);
       const user = await tx.user.findUnique({ where: { id } });
       if (!user) throw new NotFoundException('User not found');
       if (user.role === 'ADMIN' && input.role === 'USER') {
@@ -242,6 +244,7 @@ export class AdminService {
               ? { suspendedAt: new Date(), suspendedReason: input.reason ?? null }
               : {}),
         },
+        select: adminUserSelect,
       });
       if (input.status === 'SUSPENDED' || input.status === 'BANNED')
         await tx.refreshToken.updateMany({
@@ -438,6 +441,11 @@ export class AdminService {
         if (report.targetType === 'AGREEMENT')
           throw new BadRequestException('User suspension is not applicable to agreements');
         if (!userId) throw new NotFoundException('Target not found');
+        const target = await tx.user.findUnique({ where: { id: userId }, select: { role: true } });
+        if (!target) throw new NotFoundException('Target not found');
+        if (userId === actorId) throw new BadRequestException('You cannot suspend yourself');
+        if (target.role === 'ADMIN')
+          throw new ConflictException('Administrators cannot be suspended by report resolution');
         await tx.user.update({
           where: { id: userId },
           data: { status: 'SUSPENDED', suspendedAt: new Date(), suspendedReason: input.note },
@@ -445,6 +453,10 @@ export class AdminService {
         await tx.refreshToken.updateMany({
           where: { userId, revokedAt: null },
           data: { revokedAt: new Date() },
+        });
+        await this.createAudit(tx, actorId, 'USER_UPDATED', 'USER', userId, {
+          status: 'SUSPENDED',
+          reason: input.note,
         });
       }
       await tx.report.updateMany({
