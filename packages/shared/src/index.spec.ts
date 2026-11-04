@@ -732,3 +732,35 @@ describe('int4 overflow protection', () => {
     expect(agreementSchema.safeParse(detail).success).toBe(true);
   });
 });
+
+describe('deliveryDays cap', () => {
+  it('caps deliveryDays at 3650 in listing and bid schemas', () => {
+    const validListing = {
+      kind: 'REQUEST',
+      title: 'Valid title for listing',
+      description: 'A sufficiently detailed description that satisfies requirements.',
+      categoryId: 'c-1',
+      priceType: 'FIXED',
+      priceMinCents: 1000,
+      deliveryDays: 3650,
+    };
+    expect(listingCreateSchema.safeParse(validListing).success).toBe(true);
+    expect(listingCreateSchema.safeParse({ ...validListing, deliveryDays: 3651 }).success).toBe(
+      false,
+    );
+
+    expect(listingUpdateSchema.safeParse({ deliveryDays: 3650 }).success).toBe(true);
+    expect(listingUpdateSchema.safeParse({ deliveryDays: 3651 }).success).toBe(false);
+
+    const validBid = {
+      amountCents: 5000,
+      deliveryDays: 3650,
+      message: 'Bid proposal',
+    };
+    expect(bidCreateSchema.safeParse(validBid).success).toBe(true);
+    expect(bidCreateSchema.safeParse({ ...validBid, deliveryDays: 3651 }).success).toBe(false);
+
+    expect(bidCounterSchema.safeParse(validBid).success).toBe(true);
+    expect(bidCounterSchema.safeParse({ ...validBid, deliveryDays: 3651 }).success).toBe(false);
+  });
+});

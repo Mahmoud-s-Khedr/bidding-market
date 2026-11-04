@@ -1,28 +1,81 @@
-import type {
-  Attachment as SharedAttachment,
-  Category as SharedCategory,
-  ListingDetail as SharedListingDetail,
-  ListingFilters as SharedListingFilters,
-  ListingSort as SharedListingSort,
-  ListingSummary as SharedListingSummary,
-  PrivateUser,
-  PublicUser as SharedPublicUser,
-  Role,
-  UserStatus,
-  ListingKind,
-  ListingStatus,
-  PriceType,
-  UploadPurpose,
-  AuthResponse as SharedAuthResponse,
-  ListingCreateInput,
-  ListingUpdateInput,
-  PaginatedResponse as SharedPaginatedResponse,
-  ApiError,
-  ReviewItem as SharedReviewItem,
-  UpdateProfileInput as SharedUpdateProfileInput,
-  ListingCreateFormInput,
-  UploadPresignResponse,
+import {
+  BidStatus,
+  bidCreateSchema,
+  bidUpdateSchema,
+  bidCounterSchema,
+  bidRejectSchema,
+  bidSortSchema,
+  bidQuerySchema,
+  myBidsQuerySchema,
+  bidRevisionSchema,
+  bidSchema,
+  bidDetailSchema,
+  bidWithListingSchema,
+  bidAcceptResponseSchema,
+  type Attachment as SharedAttachment,
+  type Category as SharedCategory,
+  type ListingDetail as SharedListingDetail,
+  type ListingFilters as SharedListingFilters,
+  type ListingSort as SharedListingSort,
+  type ListingSummary as SharedListingSummary,
+  type PrivateUser,
+  type PublicUser as SharedPublicUser,
+  type Role,
+  type UserStatus,
+  type ListingKind,
+  type ListingStatus,
+  type PriceType,
+  type UploadPurpose,
+  type AuthResponse as SharedAuthResponse,
+  type ListingCreateInput,
+  type ListingUpdateInput,
+  type PaginatedResponse as SharedPaginatedResponse,
+  type ApiError,
+  type ReviewItem as SharedReviewItem,
+  type UpdateProfileInput as SharedUpdateProfileInput,
+  type ListingCreateFormInput,
+  type UploadPresignResponse,
+  type Bid as SharedBid,
+  type BidRevision as SharedBidRevision,
+  type BidCreateInput,
+  type BidUpdateInput,
+  type BidCounterInput,
+  type BidRejectInput,
+  type BidSort,
+  type BidQueryInput,
+  type MyBidsQueryInput,
+  type BidAcceptResponse,
 } from '@market/shared';
+
+export * from './bid-transitions';
+
+export {
+  BidStatus,
+  bidCreateSchema,
+  bidUpdateSchema,
+  bidCounterSchema,
+  bidRejectSchema,
+  bidSortSchema,
+  bidQuerySchema,
+  myBidsQuerySchema,
+  bidRevisionSchema,
+  bidSchema,
+  bidDetailSchema,
+  bidWithListingSchema,
+  bidAcceptResponseSchema,
+};
+
+export type {
+  BidStatus as BidStatusType,
+  BidCreateInput,
+  BidUpdateInput,
+  BidCounterInput,
+  BidRejectInput,
+  BidSort,
+  BidQueryInput,
+  MyBidsQueryInput,
+  BidAcceptResponse,
+};
 
 export type UserRole = Role;
 export type { Role, UserStatus, ListingKind, ListingStatus, PriceType, UploadPurpose };
@@ -127,6 +180,7 @@ export type ListingDetail = Omit<
   | 'priceMinCents'
   | 'priceMaxCents'
   | 'deliveryDays'
+  | 'myBid'
 > & {
   createdAt: Date | string;
   updatedAt: Date | string;
@@ -144,7 +198,7 @@ export type ListingDetail = Omit<
     slug: string;
     parentId?: string | null;
   };
-  myBid?: unknown;
+  myBid?: Bid | null;
 };
 
 export type CreateListingRequest = ListingCreateInput;
@@ -165,4 +219,27 @@ export type ReviewItem = Omit<SharedReviewItem, 'createdAt' | 'author' | 'commen
   createdAt: Date | string;
   comment?: string | null;
   author: PublicUser;
+};
+
+export type Bid = Omit<SharedBid, 'createdAt' | 'updatedAt' | 'bidder' | 'attachments'> & {
+  bidder: PublicUser;
+  attachments?: Attachment[];
+  createdAt: Date | string;
+  updatedAt: Date | string;
+};
+
+export type BidRevision = Omit<SharedBidRevision, 'createdAt' | 'author'> & {
+  author?: PublicUser;
+  createdAt: Date | string;
+};
+
+export type BidDetail = Bid & {
+  attachments: Attachment[];
+  revisions: BidRevision[];
+  listing?: ListingSummary;
+};
+
+export type BidWithListing = Bid & {
+  listing: ListingSummary;
+  attachments: Attachment[];
 };

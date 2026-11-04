@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import {
   Bell,
   ChevronDown,
+  Gavel,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -195,6 +196,13 @@ export function Header() {
                   </DropdownMenuItem>
 
                   <DropdownMenuItem asChild>
+                    <Link href="/bids" className="flex items-center gap-2">
+                      <Gavel className="h-4 w-4" />
+                      <span>My Bids</span>
+                    </Link>
+                  </DropdownMenuItem>
+
+                  <DropdownMenuItem asChild>
                     <Link href="/messages" className="flex items-center gap-2">
                       <MessageSquare className="h-4 w-4" />
                       <span>Messages</span>
@@ -305,6 +313,14 @@ export function Header() {
                 >
                   <LayoutDashboard className="h-4 w-4" />
                   Dashboard
+                </Link>
+                <Link
+                  href="/bids"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="rounded-md px-3 py-2 text-base font-medium text-foreground hover:bg-secondary flex items-center gap-2"
+                >
+                  <Gavel className="h-4 w-4" />
+                  My Bids
                 </Link>
                 <Link
                   href="/messages"

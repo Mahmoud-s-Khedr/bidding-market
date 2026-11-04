@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { formatDate, formatMoney, formatRelativeTime, getCurrencySymbol } from './format';
+import {
+  formatDate,
+  formatFileSize,
+  formatMoney,
+  formatRelativeTime,
+  getCurrencySymbol,
+} from './format';
 
 describe('Format utilities', () => {
   describe('formatMoney', () => {
@@ -64,6 +70,27 @@ describe('Format utilities', () => {
 
     it('returns empty string for invalid date inputs', () => {
       expect(formatDate('invalid')).toBe('');
+    });
+  });
+
+  describe('formatFileSize', () => {
+    it('formats 0 or negative bytes as 0 B', () => {
+      expect(formatFileSize(0)).toBe('0 B');
+      expect(formatFileSize(-10)).toBe('0 B');
+    });
+
+    it('formats bytes under 1KB', () => {
+      expect(formatFileSize(512)).toBe('512 B');
+    });
+
+    it('formats bytes under 1MB as KB', () => {
+      expect(formatFileSize(1024)).toBe('1.0 KB');
+      expect(formatFileSize(2048)).toBe('2.0 KB');
+    });
+
+    it('formats bytes 1MB and above as MB', () => {
+      expect(formatFileSize(1024 * 1024)).toBe('1.0 MB');
+      expect(formatFileSize(2.5 * 1024 * 1024)).toBe('2.5 MB');
     });
   });
 });

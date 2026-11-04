@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { QueryClientContext } from '@tanstack/react-query';
 import {
   api,
   bumpAuthGeneration,
@@ -29,6 +30,7 @@ export interface AuthContextValue {
 const AuthContext = React.createContext<AuthContextValue | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const queryClient = React.useContext(QueryClientContext);
   const [user, setUser] = React.useState<User | null>(null);
   const [token, setTokenState] = React.useState<string | null>(getAccessToken());
   const [isLoading, setIsLoading] = React.useState<boolean>(true);
@@ -36,12 +38,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Sync token state if client updates it
   React.useEffect(() => {
     return subscribeAccessToken((newToken) => {
-      setTokenState(newToken);
-      if (!newToken) {
-        setUser(null);
-      }
+      setTokenState((prevToken) => {
+        if (!newToken && prevToken !== null) {
+          setUser(null);
+          queryClient?.clear();
+        }
+        return newToken;
+      });
     });
-  }, []);
+  }, [queryClient]);
+
+  // Clear query cache on any user change to avoid cross-user session cache leakage
+  const prevUserIdRef = React.useRef<string | null | undefined>(undefined);
+  const isInitialRestoreRef = React.useRef<boolean>(true);
+  React.useEffect(() => {
+    const currentId = user?.id ?? null;
+    if (prevUserIdRef.current !== undefined && prevUserIdRef.current !== currentId) {
+      if (isInitialRestoreRef.current && prevUserIdRef.current === null && currentId !== null) {
+        // Skip the clear on the initial null -> user restore
+        isInitialRestoreRef.current = false;
+      } else {
+        queryClient?.clear();
+      }
+    }
+    prevUserIdRef.current = currentId;
+  }, [user, queryClient]);
 
   const refresh = React.useCallback(async () => {
     const gen = getAuthGeneration();
@@ -55,10 +76,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(res.user);
       } else {
         setUser(null);
+        isInitialRestoreRef.current = false;
       }
     } catch {
       if (gen === getAuthGeneration()) {
         setUser(null);
+        isInitialRestoreRef.current = false;
       }
     }
   }, []);
@@ -84,36 +107,48 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, [refresh]);
 
-  const login = React.useCallback(async (credentials: LoginInput) => {
-    const res = await api.post<AuthResponse>('/auth/login', credentials, {
-      skipAuth: true,
-      retryOn401: false,
-    });
-    bumpAuthGeneration();
-    setAccessToken(res.accessToken);
-    setUser(res.user);
-  }, []);
+  const login = React.useCallback(
+    async (credentials: LoginInput) => {
+      isInitialRestoreRef.current = false;
+      const res = await api.post<AuthResponse>('/auth/login', credentials, {
+        skipAuth: true,
+        retryOn401: false,
+      });
+      bumpAuthGeneration();
+      setAccessToken(res.accessToken);
+      setUser(res.user);
+      queryClient?.clear();
+    },
+    [queryClient],
+  );
 
-  const register = React.useCallback(async (data: RegisterInput) => {
-    const res = await api.post<AuthResponse>('/auth/register', data, {
-      skipAuth: true,
-      retryOn401: false,
-    });
-    bumpAuthGeneration();
-    setAccessToken(res.accessToken);
-    setUser(res.user);
-  }, []);
+  const register = React.useCallback(
+    async (data: RegisterInput) => {
+      isInitialRestoreRef.current = false;
+      const res = await api.post<AuthResponse>('/auth/register', data, {
+        skipAuth: true,
+        retryOn401: false,
+      });
+      bumpAuthGeneration();
+      setAccessToken(res.accessToken);
+      setUser(res.user);
+      queryClient?.clear();
+    },
+    [queryClient],
+  );
 
   const logout = React.useCallback(async () => {
+    isInitialRestoreRef.current = false;
     // Bumps generation counter and clears in-memory token to discard in-flight refresh results
     clearAuthSession();
     setUser(null);
+    queryClient?.clear();
     try {
       await api.post('/auth/logout', undefined, { skipAuth: true, retryOn401: false });
     } catch {
       // Local session is already cleared
     }
-  }, []);
+  }, [queryClient]);
 
   const value: AuthContextValue = React.useMemo(
     () => ({
@@ -139,4 +174,9 @@ export function useAuth(): AuthContextValue {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
+}
+
+export function useViewerId(): string | null {
+  const context = React.useContext(AuthContext);
+  return context?.user?.id ?? null;
 }

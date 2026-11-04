@@ -1,4 +1,5 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useViewerId } from '@/components/auth/auth-provider';
 import { api } from './client';
 import { queryKeys } from './query-keys';
 import type {
@@ -41,18 +42,21 @@ export async function deleteListing(id: string): Promise<void> {
   return api.delete<void>(`/listings/${id}`);
 }
 
-export function useListings(filters?: ListingFilters) {
+export function useListings(filters?: ListingFilters, options?: { enabled?: boolean }) {
+  const viewerId = useViewerId();
   return useInfiniteQuery({
-    queryKey: queryKeys.listings.infinite(filters),
+    queryKey: queryKeys.listings.infinite(filters, viewerId),
     queryFn: ({ pageParam }) => getListings({ ...filters, cursor: pageParam ?? undefined }),
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    enabled: options?.enabled ?? true,
   });
 }
 
-export function useListing(id: string, options?: { enabled?: boolean; viewerId?: string | null }) {
+export function useListing(id: string, options?: { enabled?: boolean }) {
+  const viewerId = useViewerId();
   return useQuery({
-    queryKey: queryKeys.listings.detail(id, options?.viewerId),
+    queryKey: queryKeys.listings.detail(id, viewerId),
     queryFn: () => getListing(id),
     enabled: options?.enabled ?? Boolean(id),
   });
@@ -74,7 +78,7 @@ export function useUpdateListing() {
     mutationFn: ({ id, data }: { id: string; data: UpdateListingRequest }) =>
       updateListing(id, data),
     onSuccess: (_, variables) => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.listings.detail(variables.id) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.listings.detailAll(variables.id) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.listings.all });
     },
   });
@@ -85,7 +89,7 @@ export function useCloseListing() {
   return useMutation({
     mutationFn: (id: string) => closeListing(id),
     onSuccess: (_, id) => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.listings.detail(id) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.listings.detailAll(id) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.listings.all });
     },
   });

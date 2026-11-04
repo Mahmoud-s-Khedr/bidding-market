@@ -53,121 +53,136 @@ const {
   ...sharedFields
 } = listingCreateSchema.shape;
 
-export const listingFormSchema = z
-  .object({
-    ...sharedFields,
-    categoryId: z.string().min(1, 'Please select a category'),
-    priceMin: z
-      .union([z.number(), z.string()])
-      .optional()
-      .transform((val) =>
-        val === '' || val === undefined || val === null ? undefined : Number(val),
-      ),
-    priceMax: z
-      .union([z.number(), z.string()])
-      .optional()
-      .transform((val) =>
-        val === '' || val === undefined || val === null ? undefined : Number(val),
-      ),
-    deliveryDays: z
-      .union([z.number(), z.string()])
-      .optional()
-      .transform((val) =>
-        val === '' || val === undefined || val === null ? undefined : Number(val),
-      ),
-    tags: z.array(z.string().trim().min(1).max(40)).max(10).default([]),
-    imageIds: z.array(z.string()).default([]),
-    attachmentIds: z.array(z.string()).default([]),
-    expiresAt: z.string().optional(),
-    status: z.enum(['DRAFT', 'OPEN']).default('OPEN'),
-  })
-  .superRefine((data, ctx) => {
-    if (data.priceType === 'FIXED') {
-      if (data.priceMin === undefined || Number.isNaN(data.priceMin) || data.priceMin < 0) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: 'Please enter a valid price',
-          path: ['priceMin'],
-        });
-      } else if (data.priceMin > MAX_PRICE_MAJOR) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: 'Price cannot exceed 21,474,836.47',
-          path: ['priceMin'],
-        });
+export function createListingFormSchema(initialExpiresAt?: string | Date | null) {
+  const initialLocalStr = initialExpiresAt ? toLocalDateString(initialExpiresAt) : undefined;
+
+  return z
+    .object({
+      ...sharedFields,
+      categoryId: z.string().min(1, 'Please select a category'),
+      priceMin: z
+        .union([z.number(), z.string()])
+        .optional()
+        .transform((val) =>
+          val === '' || val === undefined || val === null ? undefined : Number(val),
+        ),
+      priceMax: z
+        .union([z.number(), z.string()])
+        .optional()
+        .transform((val) =>
+          val === '' || val === undefined || val === null ? undefined : Number(val),
+        ),
+      deliveryDays: z
+        .union([z.number(), z.string()])
+        .optional()
+        .transform((val) =>
+          val === '' || val === undefined || val === null ? undefined : Number(val),
+        ),
+      tags: z.array(z.string().trim().min(1).max(40)).max(10).default([]),
+      imageIds: z.array(z.string()).default([]),
+      attachmentIds: z.array(z.string()).default([]),
+      expiresAt: z.string().optional(),
+      status: z.enum(['DRAFT', 'OPEN']).default('OPEN'),
+    })
+    .superRefine((data, ctx) => {
+      if (data.priceType === 'FIXED') {
+        if (data.priceMin === undefined || Number.isNaN(data.priceMin) || data.priceMin < 0) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'Please enter a valid price',
+            path: ['priceMin'],
+          });
+        } else if (data.priceMin > MAX_PRICE_MAJOR) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'Price cannot exceed 21,474,836.47',
+            path: ['priceMin'],
+          });
+        }
+      } else if (data.priceType === 'RANGE') {
+        if (data.priceMin === undefined || Number.isNaN(data.priceMin) || data.priceMin < 0) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'Please enter a valid minimum price',
+            path: ['priceMin'],
+          });
+        } else if (data.priceMin > MAX_PRICE_MAJOR) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'Minimum price cannot exceed 21,474,836.47',
+            path: ['priceMin'],
+          });
+        }
+        if (data.priceMax === undefined || Number.isNaN(data.priceMax) || data.priceMax < 0) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'Please enter a valid maximum price',
+            path: ['priceMax'],
+          });
+        } else if (data.priceMax > MAX_PRICE_MAJOR) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'Maximum price cannot exceed 21,474,836.47',
+            path: ['priceMax'],
+          });
+        }
+        if (
+          data.priceMin !== undefined &&
+          data.priceMax !== undefined &&
+          !Number.isNaN(data.priceMin) &&
+          !Number.isNaN(data.priceMax) &&
+          data.priceMax < data.priceMin
+        ) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'Maximum price must be greater than or equal to minimum price',
+            path: ['priceMax'],
+          });
+        }
       }
-    } else if (data.priceType === 'RANGE') {
-      if (data.priceMin === undefined || Number.isNaN(data.priceMin) || data.priceMin < 0) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: 'Please enter a valid minimum price',
-          path: ['priceMin'],
-        });
-      } else if (data.priceMin > MAX_PRICE_MAJOR) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: 'Minimum price cannot exceed 21,474,836.47',
-          path: ['priceMin'],
-        });
-      }
-      if (data.priceMax === undefined || Number.isNaN(data.priceMax) || data.priceMax < 0) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: 'Please enter a valid maximum price',
-          path: ['priceMax'],
-        });
-      } else if (data.priceMax > MAX_PRICE_MAJOR) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: 'Maximum price cannot exceed 21,474,836.47',
-          path: ['priceMax'],
-        });
-      }
+
       if (
-        data.priceMin !== undefined &&
-        data.priceMax !== undefined &&
-        !Number.isNaN(data.priceMin) &&
-        !Number.isNaN(data.priceMax) &&
-        data.priceMax < data.priceMin
+        data.deliveryDays !== undefined &&
+        (Number.isNaN(data.deliveryDays) ||
+          data.deliveryDays < 1 ||
+          !Number.isInteger(data.deliveryDays))
       ) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: 'Maximum price must be greater than or equal to minimum price',
-          path: ['priceMax'],
+          message: 'Delivery days must be a positive integer',
+          path: ['deliveryDays'],
         });
-      }
-    }
-
-    if (
-      data.deliveryDays !== undefined &&
-      (Number.isNaN(data.deliveryDays) ||
-        data.deliveryDays < 1 ||
-        !Number.isInteger(data.deliveryDays))
-    ) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Delivery days must be a positive integer',
-        path: ['deliveryDays'],
-      });
-    }
-
-    if (data.expiresAt) {
-      const expDate = new Date(data.expiresAt);
-      if (Number.isNaN(expDate.getTime())) {
+      } else if (data.deliveryDays !== undefined && data.deliveryDays > 3650) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: 'Invalid expiration date',
-          path: ['expiresAt'],
-        });
-      } else if (!isStrictlyFutureDate(data.expiresAt)) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: 'Expiration date must be in the future',
-          path: ['expiresAt'],
+          message: 'Delivery days cannot exceed 3,650',
+          path: ['deliveryDays'],
         });
       }
-    }
-  });
+
+      if (data.expiresAt) {
+        const expDate = new Date(data.expiresAt);
+        if (Number.isNaN(expDate.getTime())) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'Invalid expiration date',
+            path: ['expiresAt'],
+          });
+        } else if (
+          (!initialLocalStr || data.expiresAt !== initialLocalStr) &&
+          !isStrictlyFutureDate(data.expiresAt)
+        ) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'Expiration date must be in the future',
+            path: ['expiresAt'],
+          });
+        }
+      }
+    });
+}
+
+export const listingFormSchema = createListingFormSchema();
 
 export type ListingFormValues = z.input<typeof listingFormSchema>;
 export type ListingFormOutput = z.output<typeof listingFormSchema>;

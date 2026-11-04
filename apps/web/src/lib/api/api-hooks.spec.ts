@@ -54,6 +54,21 @@ describe('Centralized Query Keys', () => {
       'id-1',
       'user-123',
     ]);
+    expect(queryKeys.listings.detailAll('id-1')).toEqual(['listings', 'detail', 'id-1']);
+
+    expect(queryKeys.bids.all).toEqual(['bids']);
+    expect(queryKeys.bids.byListing('l-1')).toEqual(['bids', 'listing', 'l-1', 'newest', 'anon']);
+    expect(queryKeys.bids.byListing('l-1', 'amount_asc', 'user-123')).toEqual([
+      'bids',
+      'listing',
+      'l-1',
+      'amount_asc',
+      'user-123',
+    ]);
+    expect(queryKeys.bids.listingAll('l-1')).toEqual(['bids', 'listing', 'l-1']);
+    expect(queryKeys.bids.detailAll('b-1')).toEqual(['bids', 'detail', 'b-1']);
+    expect(queryKeys.bids.detail('b-1')).toEqual(['bids', 'detail', 'b-1', 'anon']);
+    expect(queryKeys.bids.detail('b-1', 'user-123')).toEqual(['bids', 'detail', 'b-1', 'user-123']);
 
     expect(queryKeys.categories.all).toEqual(['categories']);
     expect(queryKeys.categories.list()).toEqual(['categories', 'list']);

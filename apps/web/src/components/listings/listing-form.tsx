@@ -3,7 +3,7 @@ import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { AlertCircle, Calendar, DollarSign, Layers } from 'lucide-react';
 import {
-  listingFormSchema,
+  createListingFormSchema,
   formValuesToApiPayload,
   formValuesToUpdatePayload,
   toLocalDateString,
@@ -81,8 +81,13 @@ export function ListingForm({ initialListing, onSubmit, isLoading = false }: Lis
     ? toLocalDateString(initialListing.expiresAt)
     : undefined;
 
+  const formSchema = React.useMemo(
+    () => createListingFormSchema(initialListing?.expiresAt),
+    [initialListing?.expiresAt],
+  );
+
   const form = useForm<ListingFormValues, unknown, ListingFormOutput>({
-    resolver: zodResolver(listingFormSchema),
+    resolver: zodResolver(formSchema),
     defaultValues: {
       kind: initialListing?.kind || 'REQUEST',
       title: initialListing?.title || '',

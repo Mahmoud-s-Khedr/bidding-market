@@ -481,4 +481,199 @@ describe('AuthProvider & useAuth', () => {
 
     expect(screen.getByTestId('admin-state')).toHaveTextContent('admin');
   });
+
+  it('clears queryClient cache on logout to prevent cross-session leakage (Finding 1)', async () => {
+    const { QueryClient, QueryClientProvider } = await import('@tanstack/react-query');
+    const queryClient = new QueryClient();
+    const clearSpy = vi.spyOn(queryClient, 'clear');
+
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/auth/refresh')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () =>
+            Promise.resolve({
+              accessToken: 'initial-token',
+              user: mockUser,
+            }),
+        });
+      }
+      if (url.includes('/auth/logout')) {
+        return Promise.resolve({
+          ok: true,
+          status: 204,
+          headers: new Headers(),
+        });
+      }
+      return Promise.reject(new Error('not found'));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <TestConsumer />
+        </AuthProvider>
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('auth-state')).toHaveTextContent('authenticated');
+    });
+
+    // Initial restore must not clear cache
+    expect(clearSpy).not.toHaveBeenCalled();
+
+    const userEventSetup = userEvent.setup();
+    await userEventSetup.click(screen.getByText('Trigger Logout'));
+
+    expect(clearSpy).toHaveBeenCalled();
+  });
+
+  it('skips queryClient.clear() on initial null -> user restore', async () => {
+    const { QueryClient, QueryClientProvider } = await import('@tanstack/react-query');
+    const queryClient = new QueryClient();
+    const clearSpy = vi.spyOn(queryClient, 'clear');
+
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/auth/refresh')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () =>
+            Promise.resolve({
+              accessToken: 'initial-restore-token',
+              user: mockUser,
+            }),
+        });
+      }
+      return Promise.reject(new Error('not found'));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <TestConsumer />
+        </AuthProvider>
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('auth-state')).toHaveTextContent('authenticated');
+    });
+
+    expect(screen.getByTestId('user-email')).toHaveTextContent('test@market.test');
+    expect(clearSpy).not.toHaveBeenCalled();
+  });
+
+  it('clears queryClient cache on login', async () => {
+    const { QueryClient, QueryClientProvider } = await import('@tanstack/react-query');
+    const queryClient = new QueryClient();
+    const clearSpy = vi.spyOn(queryClient, 'clear');
+
+    const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      if (url.includes('/auth/refresh')) {
+        return Promise.resolve({
+          ok: false,
+          status: 401,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () => Promise.resolve({ error: { code: 'UNAUTHORIZED' } }),
+        });
+      }
+      if (url.includes('/auth/login')) {
+        const body = JSON.parse(init?.body as string) as { email: string };
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () =>
+            Promise.resolve({
+              accessToken: 'logged-in-token',
+              user: { ...mockUser, email: body.email },
+            }),
+        });
+      }
+      return Promise.reject(new Error('not found'));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <TestConsumer />
+        </AuthProvider>
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('loading')).toHaveTextContent('ready');
+    });
+    expect(screen.getByTestId('auth-state')).toHaveTextContent('unauthenticated');
+    expect(clearSpy).not.toHaveBeenCalled();
+
+    const user = userEvent.setup();
+    await user.click(screen.getByText('Trigger Login'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('auth-state')).toHaveTextContent('authenticated');
+    });
+
+    expect(clearSpy).toHaveBeenCalled();
+  });
+
+  it('clears queryClient cache on user-id change A -> B', async () => {
+    const { QueryClient, QueryClientProvider } = await import('@tanstack/react-query');
+    const queryClient = new QueryClient();
+    const clearSpy = vi.spyOn(queryClient, 'clear');
+
+    let currentUser = { ...mockUser, id: 'user-A', email: 'userA@market.test' };
+
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/auth/refresh')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: () =>
+            Promise.resolve({
+              accessToken: 'token-' + currentUser.id,
+              user: currentUser,
+            }),
+        });
+      }
+      return Promise.reject(new Error('not found'));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <TestConsumer />
+        </AuthProvider>
+      </QueryClientProvider>,
+    );
+
+    // Initial restore of user-A skips clear
+    await waitFor(() => {
+      expect(screen.getByTestId('user-email')).toHaveTextContent('userA@market.test');
+    });
+    expect(clearSpy).not.toHaveBeenCalled();
+
+    // User switches to user-B
+    currentUser = { ...mockUser, id: 'user-B', email: 'userB@market.test' };
+
+    const user = userEvent.setup();
+    await user.click(screen.getByText('Trigger Refresh'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('user-email')).toHaveTextContent('userB@market.test');
+    });
+
+    // queryClient.clear is called on user change A -> B
+    expect(clearSpy).toHaveBeenCalledTimes(1);
+  });
 });
