@@ -48,11 +48,13 @@ describe('BidsService', () => {
       findUniqueOrThrow: MockFn;
     };
     conversation: {
+      findUnique: MockFn;
       findFirst: MockFn;
       create: MockFn;
       update: MockFn;
     };
     $transaction: MockFn;
+    $executeRaw: MockFn;
     $queryRaw: MockFn;
   };
   let storage: {
@@ -199,11 +201,13 @@ describe('BidsService', () => {
         }),
       },
       conversation: {
+        findUnique: vi.fn().mockResolvedValue(null),
         findFirst: vi.fn(),
         create: vi.fn(),
         update: vi.fn(),
       },
       $transaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>) => cb(prisma)),
+      $executeRaw: vi.fn(),
       $queryRaw: vi.fn().mockImplementation(async (strings: TemplateStringsArray) => {
         const sql = Array.isArray(strings) ? strings.join('') : String(strings);
         if (sql.includes('FROM "Listing"')) {
@@ -673,7 +677,7 @@ describe('BidsService', () => {
         createdAt: new Date(),
         updatedAt: new Date(),
       });
-      prisma.conversation.findFirst.mockResolvedValue(null);
+      prisma.conversation.findUnique.mockResolvedValue(null);
       prisma.conversation.create.mockResolvedValue({ id: 'conv_1' });
       prisma.bid.findUniqueOrThrow.mockResolvedValue({
         ...bid,
@@ -684,6 +688,7 @@ describe('BidsService', () => {
       expect(res.bid.status).toBe('ACCEPTED');
       expect(res.agreement.buyer.id).toBe(ownerUser.id);
       expect(res.agreement.provider.id).toBe(bidderUser.id);
+      expect(prisma.$executeRaw).toHaveBeenCalled();
       expect(prisma.conversation.create).toHaveBeenCalled();
       expect(eventEmitter.emit).toHaveBeenCalledWith('bid.accepted', expect.any(Object));
     });
@@ -712,7 +717,7 @@ describe('BidsService', () => {
         createdAt: new Date(),
         updatedAt: new Date(),
       });
-      prisma.conversation.findFirst.mockResolvedValue({ id: 'existing_conv' });
+      prisma.conversation.findUnique.mockResolvedValue({ id: 'existing_conv' });
       prisma.conversation.update.mockResolvedValue({ id: 'existing_conv' });
       prisma.bid.findUniqueOrThrow.mockResolvedValue({
         ...bid,
@@ -726,6 +731,44 @@ describe('BidsService', () => {
         expect.objectContaining({
           where: { id: 'existing_conv' },
           data: expect.objectContaining({ agreementId: 'ag_2' }),
+        }),
+      );
+    });
+
+    it('locks and links an existing conversation during accept', async () => {
+      const bid = mockBid('PENDING');
+      prisma.bid.findUnique.mockResolvedValue(bid);
+      prisma.listing.updateMany.mockResolvedValue({ count: 1 });
+      prisma.bid.updateMany.mockResolvedValue({ count: 1 });
+      prisma.agreement.create.mockResolvedValue({
+        id: 'ag_race',
+        listingId: 'list_1',
+        bidId: 'bid_1',
+        buyerId: ownerUser.id,
+        providerId: bidderUser.id,
+        buyer: mockPublicUser(ownerUser.id, 'Owner'),
+        provider: mockPublicUser(bidderUser.id, 'Bidder'),
+        status: 'ACTIVE',
+        milestones: [],
+        deliverables: [],
+        events: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      prisma.conversation.findUnique.mockResolvedValue({ id: 'conv_reused' });
+      prisma.conversation.update.mockResolvedValue({ id: 'conv_reused' });
+      prisma.bid.findUniqueOrThrow.mockResolvedValue({ ...bid, status: 'ACCEPTED' });
+
+      const res = await service.accept('bid_1', ownerUser);
+      expect(res.bid.status).toBe('ACCEPTED');
+      expect(prisma.$executeRaw).toHaveBeenCalled();
+      expect(prisma.conversation.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'conv_reused' },
+          data: expect.objectContaining({
+            agreementId: 'ag_race',
+            bidId: 'bid_1',
+          }),
         }),
       );
     });
@@ -762,7 +805,7 @@ describe('BidsService', () => {
         createdAt: new Date(),
         updatedAt: new Date(),
       });
-      prisma.conversation.findFirst.mockResolvedValue(null);
+      prisma.conversation.findUnique.mockResolvedValue(null);
       prisma.conversation.create.mockResolvedValue({ id: 'conv_3' });
       prisma.bid.findUniqueOrThrow.mockResolvedValue({
         ...bid,
@@ -803,7 +846,7 @@ describe('BidsService', () => {
         createdAt: new Date(),
         updatedAt: new Date(),
       });
-      prisma.conversation.findFirst.mockResolvedValue(null);
+      prisma.conversation.findUnique.mockResolvedValue(null);
       prisma.conversation.create.mockResolvedValue({ id: 'conv_cache' });
       prisma.bid.findUniqueOrThrow.mockResolvedValue({
         ...bid,
@@ -834,7 +877,7 @@ describe('BidsService', () => {
         createdAt: new Date(),
         updatedAt: new Date(),
       });
-      prisma.conversation.findFirst.mockResolvedValue(null);
+      prisma.conversation.findUnique.mockResolvedValue(null);
       prisma.conversation.create.mockResolvedValue({ id: 'conv_cache_failure' });
       prisma.bid.findUniqueOrThrow.mockResolvedValue({ ...bid, status: 'ACCEPTED' });
       categoriesService.invalidateCache.mockRejectedValueOnce(new Error('Redis unavailable'));

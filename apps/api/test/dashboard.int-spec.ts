@@ -5,7 +5,7 @@ import request from 'supertest';
 import { dashboardSummarySchema } from '@market/shared';
 import { createTestApp } from './helpers/app.js';
 import { createUser, signToken } from './helpers/auth.js';
-import { createAgreement } from './helpers/factories.js';
+import { createAgreement, createConversation } from './helpers/factories.js';
 import { prisma, resetDb } from './helpers/db.js';
 
 describe('GET /dashboard/summary', () => {
@@ -115,8 +115,9 @@ describe('GET /dashboard/summary', () => {
         { userId: user.id, type: 'MESSAGE_RECEIVED', title: 'Read', body: 'x', readAt: new Date() },
       ],
     });
-    const conversation = await prisma.conversation.create({
-      data: { participants: { create: [{ userId: user.id }, { userId: provider.id }] } },
+    const conversation = await createConversation({
+      userAId: user.id,
+      userBId: provider.id,
     });
     await prisma.message.create({
       data: {

@@ -387,6 +387,33 @@ describe('schema refinements', () => {
     expect(messageCreateSchema.safeParse({ type: 'TEXT' }).success).toBe(false);
     expect(messageCreateSchema.safeParse({ type: 'TEXT', body: 'yes' }).success).toBe(true);
   });
+
+  it('enforces message body and voice duration limits', () => {
+    expect(messageCreateSchema.safeParse({ type: 'TEXT', body: 'x'.repeat(5001) }).success).toBe(
+      false,
+    );
+    expect(
+      messageCreateSchema.safeParse({
+        type: 'VOICE',
+        attachmentIds: ['upload'],
+        voiceDurationSec: 0,
+      }).success,
+    ).toBe(false);
+    expect(
+      messageCreateSchema.safeParse({
+        type: 'VOICE',
+        attachmentIds: ['upload'],
+        voiceDurationSec: 601,
+      }).success,
+    ).toBe(false);
+    expect(
+      messageCreateSchema.safeParse({
+        type: 'VOICE',
+        attachmentIds: ['upload'],
+        voiceDurationSec: 60,
+      }).success,
+    ).toBe(true);
+  });
 });
 it('enforces upload purpose limits', () => {
   expect(
