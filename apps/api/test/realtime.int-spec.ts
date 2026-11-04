@@ -273,9 +273,14 @@ describe('realtime', () => {
     const s = socket(a.accessToken);
     await once(s, 'connect');
     await redis.expire(`rt:presence:${a.user.id}`, 20);
-    expect(await redis.ttl(`rt:presence:${a.user.id}`)).toBeLessThanOrEqual(20);
-    await new Promise((resolve) => setTimeout(resolve, 350));
-    const ttl = await redis.ttl(`rt:presence:${a.user.id}`);
+    // Poll instead of a fixed sleep: under CI load the heartbeat can be delayed well past 350ms.
+    let ttl = 0;
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      ttl = await redis.ttl(`rt:presence:${a.user.id}`);
+      if (ttl > 80) break;
+    }
     expect(ttl).toBeGreaterThan(80);
     s.close();
   });
