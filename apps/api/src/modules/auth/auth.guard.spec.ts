@@ -9,6 +9,10 @@ const context = (request: {
   switchToHttp: () => ({ getRequest: () => request }),
 });
 describe('JwtAuthGuard', () => {
+  const mockPrisma = {
+    user: { findUnique: vi.fn().mockResolvedValue({ status: 'ACTIVE', role: 'USER' }) },
+  };
+
   it('rejects missing and invalid tokens', async () => {
     const reflector = { getAllAndOverride: vi.fn().mockReturnValue(false) };
     const jwt = {
@@ -16,7 +20,7 @@ describe('JwtAuthGuard', () => {
         throw new Error('bad');
       }),
     };
-    const guard = new JwtAuthGuard(reflector as never, jwt as never);
+    const guard = new JwtAuthGuard(reflector as never, jwt as never, mockPrisma as never);
     await expect(guard.canActivate(context({ headers: {} }) as never)).rejects.toThrow();
     await expect(
       guard.canActivate(context({ headers: { authorization: 'Bearer x' } }) as never),
@@ -27,13 +31,14 @@ describe('JwtAuthGuard', () => {
       getAllAndOverride: vi.fn((key: string) => key === 'isOptionalAuth'),
     };
     const jwt = { verify: vi.fn() };
-    const guard = new JwtAuthGuard(reflector as never, jwt as never);
+    const guard = new JwtAuthGuard(reflector as never, jwt as never, mockPrisma as never);
     await expect(guard.canActivate(context({ headers: {} }) as never)).resolves.toBe(true);
   });
   it('accepts valid token', async () => {
     const guard = new JwtAuthGuard(
       { getAllAndOverride: vi.fn().mockReturnValue(false) } as never,
       { verify: vi.fn().mockReturnValue({ sub: 'u', role: 'ADMIN' }) } as never,
+      mockPrisma as never,
     );
     const req = { headers: { authorization: 'Bearer valid' } } as {
       headers: { authorization?: string };

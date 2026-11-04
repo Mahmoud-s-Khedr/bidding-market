@@ -49,7 +49,7 @@ Scheduled lifecycle cleanup of uncompleted PENDING uploads is out of scope and s
 
 | GET | /listings | filters: `q` (Postgres full-text using GIN index: `websearch_to_tsquery('simple', ...)` with ranking when sort is relevance), `kind` (REQUEST/OFFER), `categoryId` / `categorySlug` (includes all descendants), `minPrice` / `maxPrice` (interval overlap semantics on `[priceMinCents, COALESCE(priceMaxCents, priceMinCents)]`), `currency`, `location` (case-insensitive substring contains), `status` (default OPEN; when `ownerId=me` without explicit status returns all of the caller's own listings regardless of status; non-admins may only query OPEN/IN_PROGRESS/COMPLETED/CLOSED or their own via `ownerId=me`), `ownerId`, `sort=newest|price_asc|price_desc|ending_soon|most_bids|relevance` (when `sort=relevance` is requested without `q`, it normalizes to `newest` for cursor encode/decode and order-by), `cursor`, `limit` → paginated `ListingSummary` (each summary enriched with `thumbnailUrl` [presigned GET URL of first image by position, or null], `categoryName`, and owner public profile with presigned `avatarUrl`). Listings with `status: OPEN` that are expired (`expiresAt <= NOW()`) are excluded from default browse and active OPEN queries. Stable cursor pagination uses compound base64url JSON cursors `{"s": "<sort>", "v": <sortValue>, "id": "<listingId>"}` |
 |---|---|---|
-| GET | /listings/:id | optional auth: valid token → user, no token → anonymous, invalid token → 401; returns `ListingDetail` (extends `ListingSummary` with `categoryName`, `thumbnailUrl`, owner public profile with presigned `avatarUrl`, category, images and attachments with ids and presigned URLs, bidCount, and `myBid` [with bidder presigned `avatarUrl`] if authed); DRAFT and REMOVED only visible to owner or admin (else 404) |
+| GET | /listings/:id | optional auth: valid token → user, no token → anonymous, invalid token → 401; returns `ListingDetail` (extends `ListingSummary` with `categoryName`, `thumbnailUrl`, owner public profile with presigned `avatarUrl`, category, images and attachments with ids and presigned URLs, `bidCount` [counts active: PENDING/SHORTLISTED/COUNTERED + ACCEPTED], and `myBid` [current user's active bid: PENDING/SHORTLISTED/COUNTERED, with bidder presigned `avatarUrl`] if authed); DRAFT and REMOVED only visible to owner or admin (else 404) |
 | POST | /listings 🔒 | owner = current user; categoryId must exist; price rules: FIXED requires `priceMinCents` (no `priceMaxCents`), RANGE requires `priceMinCents <= priceMaxCents`, NEGOTIABLE neither; imageIds / attachmentIds must be READY uploads owned by user with purpose `LISTING_IMAGE` / `LISTING_ATTACHMENT`, attached to at most one listing; status DRAFT\|OPEN (default OPEN) |
 | PATCH | /listings/:id 🔒 owner | owner (or admin); forbidden when IN_PROGRESS/COMPLETED/REMOVED (409); status changes restricted to DRAFT→OPEN, OPEN→DRAFT rejected when bids exist (409), reopening CLOSED returns 409; admin PATCH validates uploads against listing owner; same price and upload validation |
 | POST | /listings/:id/close 🔒 owner | owner; OPEN → CLOSED (conditional write); pending/shortlisted/countered bids declined in a single transaction |
@@ -57,12 +57,12 @@ Scheduled lifecycle cleanup of uncompleted PENDING uploads is out of scope and s
 
 ## Bids
 
-| GET | /listings/:id/bids 🔒 | owner sees all (sort: `amount_asc|amount_desc|delivery|rating|newest`); bidder sees only own |
+| GET | /listings/:id/bids 🔒 | owner sees all (sort: `amount_asc|amount_desc|delivery|rating|newest`); bidder sees only own (returns 404 if caller has no bids on the listing) |
 |---|---|---|
 | POST | /listings/:id/bids 🔒 | `{amountCents, currency, deliveryDays, message(≤5000), attachmentIds?}`; 409 if own listing / not OPEN / already has active bid |
 | GET | /bids/mine 🔒 | my bids with listing summary, filter `status` |
 | GET | /bids/:id 🔒 | bid + revision history (owner or bidder) |
-| PATCH | /bids/:id 🔒 bidder | edit while PENDING/SHORTLISTED/COUNTERED → creates BidRevision |
+| PATCH | /bids/:id 🔒 bidder | edit while PENDING/SHORTLISTED/COUNTERED → creates BidRevision; editing resets status to PENDING |
 | POST | /bids/:id/withdraw 🔒 bidder | → WITHDRAWN |
 | POST | /bids/:id/shortlist 🔒 owner | → SHORTLISTED |
 | POST | /bids/:id/reject 🔒 owner | `{reason?}` → REJECTED |
@@ -86,20 +86,23 @@ Moderators may soft-delete a message. A deleted message serializes as `{body: nu
 
 ## Agreements (transactions)
 
-| GET | /agreements 🔒 | mine, filter `status`, `role=buyer|provider` |
+| GET | /agreements 🔒 | mine, filter `status`, `role=buyer|provider` — returns paginated agreement summaries (lighter summary shape without deliverable attachments or presigned URLs) |
 |---|---|---|
-| GET | /agreements/:id 🔒 participant | detail: parties, listing, bid, milestones, deliverables, timeline, conversationId, myConfirmation |
+| GET | /agreements/:id 🔒 participant | detail: parties (`buyer`, `provider`), listing (summary), bid, milestones, deliverables (with presigned attachment URLs), timeline (`events`), conversationId, `myRole`, `myConfirmation` |
 | POST | /agreements/:id/milestones 🔒 participant | `{title, amountCents?, dueDate?}` |
 | PATCH | /agreements/:id/milestones/:mid 🔒 participant | `{title?, status?: 'PENDING'|'IN_PROGRESS'|'DONE'}` |
-| POST | /agreements/:id/deliverables 🔒 provider | `{note, attachmentIds}` → status DELIVERED |
+| POST | /agreements/:id/deliverables 🔒 provider | `{note, attachmentIds}` → status DELIVERED (attachments cannot be reused across deliverables) |
 | POST | /agreements/:id/deliverables/:did/accept 🔒 buyer | |
 | POST | /agreements/:id/deliverables/:did/request-revision 🔒 buyer | `{note}` → ACTIVE |
-| POST | /agreements/:id/complete 🔒 participant | records confirmation; when both confirmed → COMPLETED, listing COMPLETED |
-| POST | /agreements/:id/cancel 🔒 participant | `{reason}` → CANCELLED; listing → CLOSED |
-| POST | /agreements/:id/dispute 🔒 participant | `{reason}` → DISPUTED (creates admin report) |
+| POST | /agreements/:id/complete 🔒 participant | records confirmation; when both confirmed → COMPLETED, listing COMPLETED; allowed from ACTIVE or DELIVERED and is idempotent for a party already confirmed; returns 409 if concurrent cancel won |
+| POST | /agreements/:id/cancel 🔒 participant | `{reason}` → CANCELLED; listing → CLOSED (rejected with 409 from DISPUTED) |
+| POST | /agreements/:id/dispute 🔒 participant | `{reason}` → DISPUTED (creates admin report; rejected with 409 from DISPUTED) |
 | POST | /agreements/:id/reviews 🔒 participant | `{rating 1..5, comment?}` only when COMPLETED, once per party |
 
-Roles: in a `REQUEST` listing the owner is **buyer** and bidder is **provider**; in an `OFFER` listing the owner is **provider** and bidder is **buyer**.
+Roles and Authorization:
+
+- In a `REQUEST` listing the owner is **buyer** and bidder is **provider**; in an `OFFER` listing the owner is **provider** and bidder is **buyer**.
+- Role-restricted actions: a participant attempting the other role's action (buyer submitting deliverable; provider accepting deliverable or requesting revision) receives **403 Forbidden**. Non-participants receive **404 Not Found**.
 
 ## Notifications
 
@@ -114,6 +117,11 @@ Types: `BID_RECEIVED, BID_UPDATED, BID_COUNTERED, BID_ACCEPTED, BID_REJECTED, ME
 ## Dashboard
 
 | GET | /dashboard/summary 🔒 | `{listings: {open, inProgress, completed}, bids: {pending, accepted}, agreements: {active, completed}, unreadMessages, unreadNotifications}` |
+
+Dashboard semantics:
+
+- `agreements.active`: counts agreements in both `ACTIVE` and `DELIVERED` status for the authenticated user.
+- `unreadMessages`: counts every message sent by someone else in each conversation the user participates in whose `createdAt` is later than the message referenced by that participant's `lastReadMessageId`; when it is null (or references no row), all messages from other participants count as unread. Messages with the same timestamp as the read marker do not count.
 
 ## Reports
 

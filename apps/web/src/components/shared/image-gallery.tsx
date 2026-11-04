@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, Image as ImageIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import type { Attachment } from '@/lib/api/types';
+import { safeMediaUrl } from '@/lib/safe-url';
 
 export interface ImageGalleryProps {
   images?: Attachment[];
@@ -68,7 +69,7 @@ export function ImageGallery({
       <div className="relative aspect-video w-full overflow-hidden rounded-lg border border-border bg-muted/30">
         {activeImage && (
           <img
-            src={activeImage.url}
+            src={safeMediaUrl(activeImage.url)}
             alt={`${title} - view ${selectedIndex + 1} of ${images.length}`}
             className="h-full w-full object-contain"
           />
@@ -127,7 +128,7 @@ export function ImageGallery({
               >
                 {/* Thumbnail image */}
                 <img
-                  src={img.url}
+                  src={safeMediaUrl(img.url)}
                   alt=""
                   aria-hidden="true"
                   className="h-full w-full object-cover"

@@ -14,9 +14,7 @@ export class JwtAuthGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
     private readonly jwt: JwtService,
-    private readonly prisma: PrismaService = {
-      user: { findUnique: () => Promise.resolve({ status: 'ACTIVE', role: 'USER' }) },
-    } as unknown as PrismaService,
+    private readonly prisma: PrismaService,
   ) {}
   async canActivate(context: ExecutionContext): Promise<boolean> {
     if (

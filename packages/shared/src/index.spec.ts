@@ -1,11 +1,26 @@
 import { describe, expect, it } from 'vitest';
 import {
+  agreementDetailSchema,
+  agreementEventSchema,
+  agreementSchema,
+  agreementSummarySchema,
   attachmentSchema,
+  bidAcceptResponseSchema,
   bidCounterSchema,
   bidCreateSchema,
+  bidDetailSchema,
+  bidQuerySchema,
+  bidRejectSchema,
+  bidRevisionSchema,
+  bidUpdateSchema,
+  bidWithListingSchema,
   categoryCreateSchema,
   categoryTreeNodeSchema,
   categoryUpdateSchema,
+  dashboardSummarySchema,
+  deliverableResponseSchema,
+  deliverableSchema,
+  deliverableSummarySchema,
   listingCreateSchema,
   listingDetailSchema,
   listingQuerySchema,
@@ -14,10 +29,14 @@ import {
   loginSchema,
   MAX_INT4,
   messageCreateSchema,
+  milestoneCreateSchema,
   milestoneSchema,
+  milestoneUpdateSchema,
   passwordSchema,
   presignUploadSchema,
   registerSchema,
+  reviewItemSchema,
+  reviewSchema,
   updateProfileSchema,
   uploadPresignResponseSchema,
 } from './index.js';
@@ -203,6 +222,132 @@ describe('shared schemas', () => {
     expect(updateProfileSchema.safeParse({ avatarUploadId: null }).success).toBe(true);
     expect(updateProfileSchema.safeParse({ avatarUploadId: '' }).success).toBe(false);
   });
+  it('validates bid schemas, sort transforms, and revisions', () => {
+    expect(
+      bidCreateSchema.safeParse({
+        amountCents: 5000,
+        currency: 'USD',
+        deliveryDays: 3,
+        message: 'I can deliver this',
+      }).success,
+    ).toBe(true);
+    expect(
+      bidCreateSchema.safeParse({
+        amountCents: -1,
+        deliveryDays: 0,
+        message: 'invalid',
+      }).success,
+    ).toBe(false);
+
+    expect(bidUpdateSchema.safeParse({ amountCents: 6000 }).success).toBe(true);
+    expect(
+      bidCounterSchema.safeParse({
+        amountCents: 4500,
+        deliveryDays: 2,
+        message: 'Counter offer',
+      }).success,
+    ).toBe(true);
+    expect(bidRejectSchema.safeParse({ reason: 'Too expensive' }).success).toBe(true);
+
+    const parsedQuery = bidQuerySchema.parse({ sort: 'delivery_asc' });
+    expect(parsedQuery.sort).toBe('delivery');
+    expect(bidQuerySchema.parse({ sort: 'rating' }).sort).toBe('rating');
+    expect(bidQuerySchema.parse({ sort: 'amount_desc' }).sort).toBe('amount_desc');
+    expect(bidQuerySchema.safeParse({ sort: 'invalid' }).success).toBe(false);
+
+    const user = {
+      id: 'u1',
+      displayName: 'Alice',
+      avatarUrl: null,
+      bio: null,
+      location: null,
+      isBusiness: false,
+      companyName: null,
+      ratingAvg: 4.8,
+      ratingCount: 12,
+      completedCount: 10,
+      createdAt: new Date(),
+    };
+    const revision = {
+      id: 'rev1',
+      bidId: 'b1',
+      authorId: 'u1',
+      author: user,
+      amountCents: 5000,
+      deliveryDays: 3,
+      message: 'Initial bid',
+      createdAt: new Date(),
+    };
+    expect(bidRevisionSchema.safeParse(revision).success).toBe(true);
+
+    const bid = {
+      id: 'b1',
+      listingId: 'l1',
+      bidder: user,
+      amountCents: 5000,
+      currency: 'USD',
+      deliveryDays: 3,
+      message: 'Initial bid',
+      status: 'PENDING' as const,
+      rejectReason: null,
+      lastCounterById: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    expect(
+      bidDetailSchema.safeParse({
+        ...bid,
+        attachments: [],
+        revisions: [revision],
+      }).success,
+    ).toBe(true);
+
+    const listingSummary = {
+      id: 'l1',
+      owner: user,
+      categoryId: 'cat1',
+      categoryName: 'Plumbing',
+      thumbnailUrl: null,
+      kind: 'REQUEST' as const,
+      status: 'OPEN' as const,
+      title: 'Fix kitchen sink',
+      priceType: 'FIXED' as const,
+      priceMinCents: 5000,
+      priceMaxCents: null,
+      currency: 'USD',
+      location: null,
+      expiresAt: null,
+      bidCount: 1,
+      createdAt: new Date(),
+    };
+    expect(
+      bidWithListingSchema.safeParse({
+        ...bid,
+        listing: listingSummary,
+        attachments: [],
+      }).success,
+    ).toBe(true);
+
+    const agreement = {
+      id: 'ag1',
+      listingId: 'l1',
+      bidId: 'b1',
+      buyer: user,
+      provider: user,
+      status: 'ACTIVE' as const,
+      milestones: [],
+      deliverables: [],
+      events: [],
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    expect(
+      bidAcceptResponseSchema.safeParse({
+        bid,
+        agreement,
+      }).success,
+    ).toBe(true);
+  });
 });
 describe('schema refinements', () => {
   it('normalizes email and validates business name', () => {
@@ -359,5 +504,204 @@ describe('int4 overflow protection', () => {
     expect(milestoneSchema.safeParse({ title: 'Phase 1', amountCents: 2147483648 }).success).toBe(
       false,
     );
+  });
+
+  it('validates milestoneCreateSchema and milestoneUpdateSchema', () => {
+    expect(milestoneCreateSchema.safeParse({ title: 'Phase 1' }).success).toBe(true);
+    expect(
+      milestoneCreateSchema.safeParse({
+        title: 'Phase 1',
+        amountCents: 5000,
+        dueDate: new Date().toISOString(),
+      }).success,
+    ).toBe(true);
+    expect(milestoneCreateSchema.safeParse({ title: '' }).success).toBe(false);
+    expect(milestoneCreateSchema.safeParse({ title: 'A'.repeat(201) }).success).toBe(false);
+    expect(milestoneCreateSchema.safeParse({ title: 'Phase 1', amountCents: -1 }).success).toBe(
+      false,
+    );
+    const parsed = milestoneCreateSchema.parse({ title: 'Phase 1', status: 'IN_PROGRESS' });
+    expect('status' in parsed).toBe(false);
+
+    expect(milestoneUpdateSchema.safeParse({ title: 'Updated' }).success).toBe(true);
+    expect(milestoneUpdateSchema.safeParse({ status: 'DONE' }).success).toBe(true);
+    expect(milestoneUpdateSchema.safeParse({}).success).toBe(false);
+    expect(milestoneUpdateSchema.safeParse({ title: '' }).success).toBe(false);
+  });
+
+  it('validates deliverableSchema, deliverableResponseSchema and deliverableSummarySchema', () => {
+    expect(
+      deliverableSchema.safeParse({ note: 'Here is work', attachmentIds: ['u1'] }).success,
+    ).toBe(true);
+    expect(deliverableSchema.safeParse({ note: 'No attachments', attachmentIds: [] }).success).toBe(
+      false,
+    );
+    expect(
+      deliverableSchema.safeParse({ note: 'A'.repeat(5001), attachmentIds: ['u1'] }).success,
+    ).toBe(false);
+
+    const deliverableData = {
+      id: 'd1',
+      agreementId: 'a1',
+      note: 'Done',
+      submittedById: 'u1',
+      acceptedAt: null,
+      revisionNote: null,
+      createdAt: new Date().toISOString(),
+    };
+    expect(deliverableSummarySchema.safeParse(deliverableData).success).toBe(true);
+
+    const attachment = {
+      id: 'att1',
+      key: 'key1',
+      fileName: 'file.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: 1000,
+    };
+    expect(
+      deliverableResponseSchema.safeParse({
+        ...deliverableData,
+        attachments: [attachment],
+      }).success,
+    ).toBe(true);
+    expect(deliverableResponseSchema.safeParse(deliverableData).success).toBe(false);
+  });
+
+  it('validates agreementEventSchema', () => {
+    expect(
+      agreementEventSchema.safeParse({
+        id: 'e1',
+        agreementId: 'a1',
+        actorId: 'u1',
+        type: 'MILESTONE_CREATED',
+        data: { milestoneId: 'm1' },
+        createdAt: new Date().toISOString(),
+      }).success,
+    ).toBe(true);
+    expect(agreementEventSchema.safeParse({ id: 'e1' }).success).toBe(false);
+  });
+
+  it('validates reviewSchema and reviewItemSchema', () => {
+    expect(reviewSchema.safeParse({ rating: 5, comment: 'Great!' }).success).toBe(true);
+    expect(reviewSchema.safeParse({ rating: 1 }).success).toBe(true);
+    expect(reviewSchema.safeParse({ rating: 0 }).success).toBe(false);
+    expect(reviewSchema.safeParse({ rating: 6 }).success).toBe(false);
+    expect(reviewSchema.safeParse({ rating: 5, comment: 'A'.repeat(2001) }).success).toBe(false);
+
+    const user = {
+      id: 'u1',
+      displayName: 'User 1',
+      avatarUrl: null,
+      bio: null,
+      location: null,
+      isBusiness: false,
+      companyName: null,
+      ratingAvg: 5,
+      ratingCount: 1,
+      completedCount: 1,
+      createdAt: new Date().toISOString(),
+    };
+    expect(
+      reviewItemSchema.safeParse({
+        id: 'r1',
+        agreementId: 'a1',
+        author: user,
+        rating: 5,
+        comment: 'Nice',
+        createdAt: new Date().toISOString(),
+      }).success,
+    ).toBe(true);
+  });
+
+  it('validates dashboardSummarySchema', () => {
+    const valid = {
+      listings: { open: 1, inProgress: 2, completed: 3 },
+      bids: { pending: 4, accepted: 5 },
+      agreements: { active: 6, completed: 7 },
+      unreadMessages: 8,
+      unreadNotifications: 9,
+    };
+    expect(dashboardSummarySchema.safeParse(valid).success).toBe(true);
+    expect(
+      dashboardSummarySchema.safeParse({
+        ...valid,
+        agreements: { active: -1, completed: 0 },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('validates agreementDetailSchema and agreementSummarySchema', () => {
+    const user = {
+      id: 'u1',
+      displayName: 'User 1',
+      avatarUrl: null,
+      bio: null,
+      location: null,
+      isBusiness: false,
+      companyName: null,
+      ratingAvg: 5,
+      ratingCount: 1,
+      completedCount: 1,
+      createdAt: new Date().toISOString(),
+    };
+    const milestone = {
+      id: 'm1',
+      agreementId: 'a1',
+      title: 'M1',
+      amountCents: null,
+      dueDate: null,
+      status: 'PENDING' as const,
+      position: 0,
+    };
+    const deliverableSumm = {
+      id: 'd1',
+      agreementId: 'a1',
+      note: 'Note',
+      submittedById: 'u1',
+      acceptedAt: null,
+      revisionNote: null,
+      createdAt: new Date().toISOString(),
+    };
+    const attachment = {
+      id: 'att1',
+      key: 'key1',
+      fileName: 'file.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: 1000,
+    };
+    const deliverableDetail = {
+      ...deliverableSumm,
+      attachments: [attachment],
+    };
+    const event = {
+      id: 'e1',
+      agreementId: 'a1',
+      actorId: 'u1',
+      type: 'MILESTONE_CREATED',
+      data: null,
+      createdAt: new Date().toISOString(),
+    };
+
+    const summary = {
+      id: 'a1',
+      listingId: 'l1',
+      bidId: 'b1',
+      buyer: user,
+      provider: user,
+      status: 'ACTIVE' as const,
+      milestones: [milestone],
+      deliverables: [deliverableSumm],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    expect(agreementSummarySchema.safeParse(summary).success).toBe(true);
+
+    const detail = {
+      ...summary,
+      deliverables: [deliverableDetail],
+      events: [event],
+    };
+    expect(agreementDetailSchema.safeParse(detail).success).toBe(true);
+    expect(agreementSchema.safeParse(detail).success).toBe(true);
   });
 });

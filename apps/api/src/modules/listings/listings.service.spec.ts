@@ -315,6 +315,31 @@ describe('ListingsService', () => {
       );
     });
 
+    it('throws 409 when changing kind on listing with bids', async () => {
+      prisma.listing.findUnique.mockResolvedValueOnce({
+        id: 'l1',
+        ownerId: 'u1',
+        status: 'OPEN',
+        kind: 'REQUEST',
+        priceType: 'FIXED',
+        priceMinCents: 1000,
+        priceMaxCents: null,
+      });
+      // The preflight sees no bids; the transaction re-check sees the bid that won the row lock.
+      prisma.bid.count.mockResolvedValueOnce(0).mockResolvedValueOnce(1);
+
+      await expect(service.update(mockUser, 'l1', { kind: 'OFFER' })).rejects.toThrow(
+        new ConflictException('Cannot change kind on a listing that has bids'),
+      );
+      expect(prisma.$queryRaw).toHaveBeenCalledWith(
+        expect.arrayContaining([expect.stringContaining('FOR UPDATE')]),
+        'l1',
+      );
+      expect(prisma.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        prisma.bid.count.mock.invocationCallOrder[1]!,
+      );
+    });
+
     it('updates listing successfully and returns detail', async () => {
       prisma.listing.findUnique.mockResolvedValueOnce({
         id: 'l1',

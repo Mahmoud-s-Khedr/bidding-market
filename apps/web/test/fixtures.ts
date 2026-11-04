@@ -4,7 +4,28 @@ import type {
   ListingDetail,
   ListingSummary,
   PublicUser,
+  User,
 } from '@/lib/api/types';
+import type { Conversation, Message, Notification } from '@/lib/api/messaging-types';
+
+export function makeUser(overrides: Partial<User> = {}): User {
+  return {
+    id: 'user-default',
+    displayName: 'Default User',
+    email: 'user@market.test',
+    role: 'USER',
+    avatarUrl: null,
+    bio: null,
+    location: null,
+    isBusiness: false,
+    companyName: null,
+    ratingAvg: 5.0,
+    ratingCount: 0,
+    completedCount: 0,
+    createdAt: new Date('2026-01-01T00:00:00Z'),
+    ...overrides,
+  };
+}
 
 export function makePublicUser(overrides: Partial<PublicUser> = {}): PublicUser {
   return {
@@ -87,6 +108,56 @@ export function makeAttachment(overrides: Partial<Attachment> = {}): Attachment 
     mimeType: 'application/pdf',
     sizeBytes: 1024,
     url: 'https://cdn.example.com/file.pdf',
+    ...overrides,
+  };
+}
+
+export function makeMessage(overrides: Partial<Message> = {}): Message {
+  return {
+    id: 'msg-default',
+    conversationId: 'conv-default',
+    sender: makePublicUser(),
+    type: 'TEXT',
+    body: 'Hello there!',
+    voiceDurationSec: null,
+    attachments: [],
+    createdAt: new Date('2026-10-01T12:00:00Z'),
+    ...overrides,
+  };
+}
+
+export function makeConversation(overrides: Partial<Conversation> = {}): Conversation {
+  const otherUser = makePublicUser({ id: 'user-other', displayName: 'Other User' });
+  return {
+    id: 'conv-default',
+    listingId: 'listing-default',
+    bidId: null,
+    agreementId: null,
+    participants: [makePublicUser(), otherUser],
+    otherParticipant: otherUser,
+    lastMessage: makeMessage(),
+    unreadCount: 0,
+    listing: {
+      id: 'listing-default',
+      title: 'Default Listing',
+      status: 'OPEN',
+    },
+    createdAt: new Date('2026-10-01T12:00:00Z'),
+    updatedAt: new Date('2026-10-01T12:00:00Z'),
+    ...overrides,
+  };
+}
+
+export function makeNotification(overrides: Partial<Notification> = {}): Notification {
+  return {
+    id: 'notif-default',
+    type: 'MESSAGE_RECEIVED',
+    title: 'New Message',
+    body: 'You received a new message from Other User',
+    link: '/messages/conv-default',
+    data: null,
+    readAt: null,
+    createdAt: new Date('2026-10-01T12:00:00Z'),
     ...overrides,
   };
 }

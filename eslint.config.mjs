@@ -49,5 +49,30 @@ export default tseslint.config(
       '@typescript-eslint/unbound-method': 'off',
     },
   },
+  {
+    // Unit specs under src/ must not boot the app or touch the DB: CI runs them without Postgres.
+    // DB-backed tests belong in apps/api/test/*.int-spec.ts.
+    files: ['apps/*/src/**/*.spec.ts', 'apps/*/src/**/*.spec.tsx'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['**/test/helpers/*', '**/test/helpers'],
+              message:
+                'Unit specs must not use integration helpers. Move DB-backed tests to test/*.int-spec.ts.',
+            },
+          ],
+          paths: [
+            {
+              name: 'supertest',
+              message: 'HTTP-level tests are integration tests. Move them to test/*.int-spec.ts.',
+            },
+          ],
+        },
+      ],
+    },
+  },
   prettier,
 );
