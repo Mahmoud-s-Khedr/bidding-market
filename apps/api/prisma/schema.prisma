@@ -309,6 +309,8 @@ upload Upload @relation(fields:[uploadId],references:[id],onDelete:Restrict)
 }
 model Conversation {
 id String @id @default(cuid())
+participantPairKey String
+listingDedupKey String
 listingId String?
 listing Listing? @relation(fields:[listingId],references:[id],onDelete:Restrict)
 bidId String?
@@ -319,8 +321,11 @@ participants ConversationParticipant[]
 messages Message[]
 createdAt DateTime @default(now())
 updatedAt DateTime @updatedAt
+lastMessageAt DateTime
 @@index([listingId])
 @@index([bidId])
+@@unique([participantPairKey,listingDedupKey])
+@@index([lastMessageAt])
 }
 model ConversationParticipant {
 conversationId String
@@ -349,7 +354,7 @@ model MessageAttachment {
 id String @id @default(cuid())
 messageId String
 message Message @relation(fields:[messageId],references:[id],onDelete:Cascade)
-uploadId String
+uploadId String @unique
 upload Upload @relation(fields:[uploadId],references:[id],onDelete:Restrict)
 @@unique([messageId,uploadId])
 }
@@ -449,9 +454,13 @@ title String
 body String
 link String?
 data Json?
+conversationId String?
 readAt DateTime?
 createdAt DateTime @default(now())
-@@index([userId,readAt,createdAt])
+updatedAt DateTime @updatedAt
+activityAt DateTime @default(now())
+@@index([userId,readAt,activityAt])
+@@index([userId,conversationId])
 }
 model Report {
 id String @id @default(cuid())
