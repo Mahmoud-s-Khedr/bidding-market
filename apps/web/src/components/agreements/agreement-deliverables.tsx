@@ -30,6 +30,7 @@ import {
   useAcceptDeliverable,
   useRequestRevision,
 } from '@/lib/api/agreements';
+import { getAttachmentUrl } from '@/lib/api/uploads';
 import { ApiError } from '@/lib/api/client';
 import type { Attachment } from '@/lib/api/types';
 import type { AgreementDetail, DeliverableResponse } from '@market/shared';
@@ -64,6 +65,42 @@ export function AgreementDeliverables({
   const [selectedDeliverableId, setSelectedDeliverableId] = React.useState<string | null>(null);
   const [revisionNote, setRevisionNote] = React.useState('');
   const [revisionError, setRevisionError] = React.useState<string | null>(null);
+
+  // Refreshed presigned URLs for thumbnails or downloads
+  const [refreshedImageUrls, setRefreshedImageUrls] = React.useState<Record<string, string>>({});
+
+  const handleOpenAttachment = async (e: React.MouseEvent, att: Attachment) => {
+    e.preventDefault();
+    try {
+      const res = await getAttachmentUrl(att.id);
+      const safe = safeMediaUrl(res.url);
+      if (safe) {
+        window.open(safe, '_blank', 'noopener,noreferrer');
+        return;
+      }
+    } catch {
+      // Fallback to pre-rendered URL or refetch agreement
+      onRefetch?.();
+    }
+    const fallbackUrl = att.url ? safeMediaUrl(att.url) : null;
+    if (fallbackUrl) {
+      window.open(fallbackUrl, '_blank', 'noopener,noreferrer');
+    } else {
+      toast.error('Download failed', 'Could not obtain a fresh attachment URL.');
+    }
+  };
+
+  const handleImageError = async (uploadId: string) => {
+    try {
+      const res = await getAttachmentUrl(uploadId);
+      const safe = safeMediaUrl(res.url);
+      if (safe) {
+        setRefreshedImageUrls((prev) => ({ ...prev, [uploadId]: safe }));
+      }
+    } catch {
+      // ignore
+    }
+  };
 
   const deliverables: DeliverableResponse[] = agreement.deliverables ?? [];
 
@@ -242,6 +279,10 @@ export function AgreementDeliverables({
           {deliverables.map((deliv, index) => {
             const isAccepted = Boolean(deliv.acceptedAt);
             const hasRevision = Boolean(deliv.revisionNote && !deliv.acceptedAt);
+            const isUnresolved = !deliv.acceptedAt && !deliv.revisionNote;
+            const isLatest = index === deliverables.length - 1;
+            const canBuyerResolve =
+              isBuyer && agreement.status === 'DELIVERED' && isUnresolved && isLatest;
 
             return (
               <div
@@ -290,13 +331,15 @@ export function AgreementDeliverables({
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
                       {deliv.attachments.map((att) => {
                         const isImage = att.mimeType?.startsWith('image/');
-                        const fileUrl = att.url ? safeMediaUrl(att.url) : '';
+                        const fileUrl =
+                          refreshedImageUrls[att.id] || (att.url ? safeMediaUrl(att.url) : '');
 
                         if (isImage && fileUrl) {
                           return (
                             <a
                               key={att.id}
                               href={fileUrl}
+                              onClick={(e) => void handleOpenAttachment(e, att)}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="group relative rounded-md border border-border overflow-hidden bg-muted/20 hover:border-primary transition-all p-1 flex items-center gap-2"
@@ -305,6 +348,7 @@ export function AgreementDeliverables({
                               <img
                                 src={fileUrl}
                                 alt={att.fileName}
+                                onError={() => void handleImageError(att.id)}
                                 className="h-12 w-12 object-cover rounded-xs"
                               />
                               <div className="min-w-0 flex-1">
@@ -323,6 +367,7 @@ export function AgreementDeliverables({
                           <a
                             key={att.id}
                             href={fileUrl || '#'}
+                            onClick={(e) => void handleOpenAttachment(e, att)}
                             download={att.fileName}
                             target="_blank"
                             rel="noopener noreferrer"
@@ -356,7 +401,7 @@ export function AgreementDeliverables({
                 )}
 
                 {/* Buyer Actions: Accept / Request Revision */}
-                {isBuyer && !isAccepted && isActionable && (
+                {canBuyerResolve && (
                   <div className="flex items-center justify-end gap-2 pt-2 border-t border-border/40">
                     <Button
                       type="button"

@@ -124,7 +124,7 @@ describe('conversations API client and hooks', () => {
     });
     await waitFor(() => expect(detailRes.current.isSuccess).toBe(true));
 
-    const { result: unreadRes } = renderHook(() => useTotalUnreadMessages(), {
+    const { result: unreadRes } = renderHook(() => useTotalUnreadMessages({ viewerId: 'user-1' }), {
       wrapper: createWrapper(),
     });
     await waitFor(() => expect(unreadRes.current).toBe(4));

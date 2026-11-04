@@ -39,7 +39,7 @@ export function invalidateAgreementRelatedQueries(
   void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.summary(viewerId) });
   void queryClient.invalidateQueries({ queryKey: queryKeys.notifications.all });
   void queryClient.invalidateQueries({ queryKey: queryKeys.notifications.unreadCount() });
-  void queryClient.invalidateQueries({ queryKey: queryKeys.conversations.unreadTotal() });
+  void queryClient.invalidateQueries({ queryKey: queryKeys.conversations.unreadTotal(viewerId) });
   void queryClient.invalidateQueries({ queryKey: queryKeys.users.all });
 }
 
@@ -149,12 +149,17 @@ export function useInfiniteAgreements(
 
 export function useAgreement(
   id: string,
-  options?: { enabled?: boolean; viewerId?: string | null },
+  options?: {
+    enabled?: boolean;
+    viewerId?: string | null;
+    refetchInterval?: number | false;
+  },
 ) {
   return useQuery({
     queryKey: queryKeys.agreements.detail(id, options?.viewerId),
     queryFn: () => getAgreement(id),
     enabled: options?.enabled ?? Boolean(id),
+    refetchInterval: options?.refetchInterval ?? 240_000,
   });
 }
 

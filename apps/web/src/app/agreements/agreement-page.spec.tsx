@@ -5,6 +5,7 @@ import AgreementPage from './[id]/page';
 import * as authContext from '@/components/auth/auth-provider';
 import * as agreementsApi from '@/lib/api/agreements';
 import * as usersApi from '@/lib/api/users';
+import * as uploadsApi from '@/lib/api/uploads';
 import { ApiError } from '@/lib/api/client';
 import {
   makeUser,
@@ -41,6 +42,10 @@ vi.mock('@/lib/api/agreements', () => ({
 
 vi.mock('@/lib/api/users', () => ({
   useUserReviews: vi.fn(),
+}));
+
+vi.mock('@/lib/api/uploads', () => ({
+  getAttachmentUrl: vi.fn(),
 }));
 
 // Mock FileDropzone to simulate file selection directly
@@ -140,8 +145,18 @@ describe('AgreementPage Component', () => {
 
     vi.mocked(usersApi.useUserReviews).mockReturnValue({
       data: { pages: [{ items: [], nextCursor: null }], pageParams: [null] },
+      fetchNextPage: vi.fn(),
+      hasNextPage: false,
+      isFetching: false,
+      isLoading: false,
       refetch: vi.fn(),
     } as unknown as ReturnType<typeof usersApi.useUserReviews>);
+
+    vi.mocked(uploadsApi.getAttachmentUrl).mockResolvedValue({
+      url: 'https://example-bucket.s3.amazonaws.com/fresh-url.pdf',
+    });
+
+    vi.stubGlobal('open', vi.fn());
   });
 
   it('renders loading spinner when loading', () => {
@@ -244,7 +259,7 @@ describe('AgreementPage Component', () => {
 
     const agreement = makeAgreementDetail({
       myRole: 'buyer',
-      status: 'ACTIVE',
+      status: 'DELIVERED',
       deliverables: [deliverable],
     });
 
@@ -510,7 +525,7 @@ describe('AgreementPage Component', () => {
     });
   });
 
-  it('handles Accept Deliverable and Request Revision actions', async () => {
+  it('handles Accept Deliverable and Request Revision actions when agreement is DELIVERED', async () => {
     const deliverable = makeDeliverable({
       id: 'd1',
       acceptedAt: null,
@@ -519,7 +534,7 @@ describe('AgreementPage Component', () => {
 
     const agreement = makeAgreementDetail({
       myRole: 'buyer',
-      status: 'ACTIVE',
+      status: 'DELIVERED',
       deliverables: [deliverable],
     });
 
@@ -559,7 +574,144 @@ describe('AgreementPage Component', () => {
     });
   });
 
-  it('renders review form when COMPLETED and handles rating radio group', async () => {
+  it('does not show Accept/Request-revision buttons when agreement is in ACTIVE status after revision request', () => {
+    const deliverable = makeDeliverable({
+      id: 'd1',
+      acceptedAt: null,
+      revisionNote: 'Please update colors to match brand guidelines',
+    });
+
+    const agreement = makeAgreementDetail({
+      myRole: 'buyer',
+      status: 'ACTIVE',
+      deliverables: [deliverable],
+    });
+
+    vi.mocked(agreementsApi.useAgreement).mockReturnValue({
+      data: agreement,
+      isLoading: false,
+      error: null,
+      refetch: mockRefetchAgreement,
+    } as unknown as ReturnType<typeof agreementsApi.useAgreement>);
+
+    render(<AgreementPage />);
+
+    expect(screen.getByText(/Buyer Feedback \/ Revision Request:/i)).toBeInTheDocument();
+    expect(screen.getByText(/Please update colors to match brand guidelines/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /accept deliverable/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /request revision/i })).not.toBeInTheDocument();
+  });
+
+  it('does not show Accept/Request-revision buttons when deliverable is accepted', () => {
+    const deliverable = makeDeliverable({
+      id: 'd1',
+      acceptedAt: new Date('2026-11-04T00:00:00.000Z'),
+      revisionNote: null,
+    });
+
+    const agreement = makeAgreementDetail({
+      myRole: 'buyer',
+      status: 'ACTIVE',
+      deliverables: [deliverable],
+    });
+
+    vi.mocked(agreementsApi.useAgreement).mockReturnValue({
+      data: agreement,
+      isLoading: false,
+      error: null,
+      refetch: mockRefetchAgreement,
+    } as unknown as ReturnType<typeof agreementsApi.useAgreement>);
+
+    render(<AgreementPage />);
+
+    expect(screen.getByText('Accepted')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /accept deliverable/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /request revision/i })).not.toBeInTheDocument();
+  });
+
+  it('only shows Accept/Request-revision buttons on the latest deliverable when multiple exist', () => {
+    const deliverable1 = makeDeliverable({
+      id: 'd1',
+      acceptedAt: null,
+      revisionNote: 'First version rejected',
+      createdAt: new Date('2026-11-01T00:00:00.000Z'),
+    });
+    const deliverable2 = makeDeliverable({
+      id: 'd2',
+      acceptedAt: null,
+      revisionNote: null,
+      createdAt: new Date('2026-11-02T00:00:00.000Z'),
+    });
+
+    const agreement = makeAgreementDetail({
+      myRole: 'buyer',
+      status: 'DELIVERED',
+      deliverables: [deliverable1, deliverable2],
+    });
+
+    vi.mocked(agreementsApi.useAgreement).mockReturnValue({
+      data: agreement,
+      isLoading: false,
+      error: null,
+      refetch: mockRefetchAgreement,
+    } as unknown as ReturnType<typeof agreementsApi.useAgreement>);
+
+    render(<AgreementPage />);
+
+    // Submission #1 has revision note and NO accept button
+    expect(screen.getByText('Submission #1')).toBeInTheDocument();
+    expect(screen.getByText(/First version rejected/i)).toBeInTheDocument();
+
+    // Submission #2 is latest and unresolved -> shows Accept & Revision buttons
+    expect(screen.getByText('Submission #2')).toBeInTheDocument();
+    const acceptBtns = screen.getAllByRole('button', { name: /accept deliverable/i });
+    expect(acceptBtns).toHaveLength(1);
+    const revBtns = screen.getAllByRole('button', { name: /request revision/i });
+    expect(revBtns).toHaveLength(1);
+  });
+
+  it('refetches fresh presigned attachment URL via getAttachmentUrl on click', async () => {
+    const windowOpenSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+    const attachment = makeAttachment({
+      id: 'att-fresh-1',
+      fileName: 'work.pdf',
+      url: 'https://expired-s3-url.com/work.pdf',
+    });
+    const deliverable = makeDeliverable({
+      id: 'd-att',
+      attachments: [attachment],
+    });
+
+    const agreement = makeAgreementDetail({
+      myRole: 'buyer',
+      status: 'ACTIVE',
+      deliverables: [deliverable],
+    });
+
+    vi.mocked(agreementsApi.useAgreement).mockReturnValue({
+      data: agreement,
+      isLoading: false,
+      error: null,
+      refetch: mockRefetchAgreement,
+    } as unknown as ReturnType<typeof agreementsApi.useAgreement>);
+
+    render(<AgreementPage />);
+
+    const downloadLink = screen.getByRole('link', { name: /work\.pdf/i });
+    fireEvent.click(downloadLink);
+
+    await waitFor(() => {
+      expect(uploadsApi.getAttachmentUrl).toHaveBeenCalledWith('att-fresh-1');
+      expect(windowOpenSpy).toHaveBeenCalledWith(
+        'https://example-bucket.s3.amazonaws.com/fresh-url.pdf',
+        '_blank',
+        'noopener,noreferrer',
+      );
+    });
+    windowOpenSpy.mockRestore();
+  });
+
+  it('renders review form when COMPLETED and handles full keyboard roving tabindex navigation', async () => {
     const agreement = makeAgreementDetail({
       status: 'COMPLETED',
       myRole: 'buyer',
@@ -580,14 +732,52 @@ describe('AgreementPage Component', () => {
     const radioGroup = screen.getByRole('radiogroup', { name: /rating/i });
     expect(radioGroup).toBeInTheDocument();
 
-    const fourStars = screen.getByRole('radio', { name: '4 stars' });
-    fireEvent.click(fourStars);
-    expect(fourStars).toHaveAttribute('aria-checked', 'true');
+    const star1 = screen.getByRole('radio', { name: '1 star' });
+    const star2 = screen.getByRole('radio', { name: '2 stars' });
+    const star3 = screen.getByRole('radio', { name: '3 stars' });
+    const star4 = screen.getByRole('radio', { name: '4 stars' });
+    const star5 = screen.getByRole('radio', { name: '5 stars' });
 
-    // Keyboard navigation: ArrowRight moves to 5 stars
-    fireEvent.keyDown(fourStars, { key: 'ArrowRight' });
-    const fiveStars = screen.getByRole('radio', { name: '5 stars' });
-    expect(fiveStars).toHaveAttribute('aria-checked', 'true');
+    // Focus starts or moves to star 1 on click
+    fireEvent.click(star1);
+    expect(star1).toHaveAttribute('aria-checked', 'true');
+
+    // Sequential ArrowRight presses move selection and focus across stars
+    fireEvent.keyDown(star1, { key: 'ArrowRight' });
+    expect(star2).toHaveAttribute('aria-checked', 'true');
+    expect(document.activeElement).toBe(star2);
+
+    fireEvent.keyDown(star2, { key: 'ArrowRight' });
+    expect(star3).toHaveAttribute('aria-checked', 'true');
+    expect(document.activeElement).toBe(star3);
+
+    fireEvent.keyDown(star3, { key: 'ArrowRight' });
+    expect(star4).toHaveAttribute('aria-checked', 'true');
+    expect(document.activeElement).toBe(star4);
+
+    fireEvent.keyDown(star4, { key: 'ArrowRight' });
+    expect(star5).toHaveAttribute('aria-checked', 'true');
+    expect(document.activeElement).toBe(star5);
+
+    // ArrowRight on star 5 wraps around to star 1
+    fireEvent.keyDown(star5, { key: 'ArrowRight' });
+    expect(star1).toHaveAttribute('aria-checked', 'true');
+    expect(document.activeElement).toBe(star1);
+
+    // ArrowLeft on star 1 wraps around to star 5
+    fireEvent.keyDown(star1, { key: 'ArrowLeft' });
+    expect(star5).toHaveAttribute('aria-checked', 'true');
+    expect(document.activeElement).toBe(star5);
+
+    // Home moves to star 1
+    fireEvent.keyDown(star5, { key: 'Home' });
+    expect(star1).toHaveAttribute('aria-checked', 'true');
+    expect(document.activeElement).toBe(star1);
+
+    // End moves to star 5
+    fireEvent.keyDown(star1, { key: 'End' });
+    expect(star5).toHaveAttribute('aria-checked', 'true');
+    expect(document.activeElement).toBe(star5);
 
     // Fill optional comment
     const commentInput = screen.getByLabelText(/review comment/i);
@@ -602,6 +792,84 @@ describe('AgreementPage Component', () => {
         comment: 'Exceptional communication!',
       });
     });
+  });
+
+  it('pages through reviews using fetchNextPage until matching review is found', async () => {
+    const mockFetchNext = vi.fn();
+    vi.mocked(usersApi.useUserReviews).mockReturnValue({
+      data: {
+        pages: [
+          {
+            items: [
+              {
+                id: 'rev-other',
+                agreementId: 'other-agreement',
+                author: makeUser({ id: 'user-buyer' }),
+                rating: 4,
+                comment: 'Other',
+                createdAt: new Date().toISOString(),
+              },
+            ],
+            nextCursor: 'next-page-cursor',
+          },
+        ],
+        pageParams: [null],
+      },
+      fetchNextPage: mockFetchNext,
+      hasNextPage: true,
+      isFetching: false,
+      isLoading: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof usersApi.useUserReviews>);
+
+    const agreement = makeAgreementDetail({
+      id: 'agreement-123',
+      status: 'COMPLETED',
+      myRole: 'buyer',
+    });
+
+    vi.mocked(agreementsApi.useAgreement).mockReturnValue({
+      data: agreement,
+      isLoading: false,
+      error: null,
+      refetch: mockRefetchAgreement,
+    } as unknown as ReturnType<typeof agreementsApi.useAgreement>);
+
+    render(<AgreementPage />);
+
+    // Since my review for 'agreement-123' was not on page 1 and hasNextPage is true, fetchNextPage was called
+    await waitFor(() => {
+      expect(mockFetchNext).toHaveBeenCalled();
+    });
+  });
+
+  it('does not flash review form while review queries are loading', () => {
+    vi.mocked(usersApi.useUserReviews).mockReturnValue({
+      data: undefined,
+      fetchNextPage: vi.fn(),
+      hasNextPage: false,
+      isFetching: true,
+      isLoading: true,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof usersApi.useUserReviews>);
+
+    const agreement = makeAgreementDetail({
+      id: 'agreement-123',
+      status: 'COMPLETED',
+      myRole: 'buyer',
+    });
+
+    vi.mocked(agreementsApi.useAgreement).mockReturnValue({
+      data: agreement,
+      isLoading: false,
+      error: null,
+      refetch: mockRefetchAgreement,
+    } as unknown as ReturnType<typeof agreementsApi.useAgreement>);
+
+    render(<AgreementPage />);
+
+    expect(screen.getByTestId('reviews-loading')).toBeInTheDocument();
+    expect(screen.queryByRole('form', { name: /submit review form/i })).not.toBeInTheDocument();
   });
 
   it('renders agreement events timeline', () => {

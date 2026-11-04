@@ -33,7 +33,8 @@ export const queryKeys = {
     details: () => ['conversations', 'detail'] as const,
     detail: (id: string) => ['conversations', 'detail', id] as const,
     messages: (id: string) => ['conversations', 'messages', id] as const,
-    unreadTotal: () => ['conversations', 'unread-total'] as const,
+    unreadTotal: (viewerId?: string | null) =>
+      ['conversations', 'unread-total', viewerId ?? 'anonymous'] as const,
   },
   notifications: {
     all: ['notifications'] as const,

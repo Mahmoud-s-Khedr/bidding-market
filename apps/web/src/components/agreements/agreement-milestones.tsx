@@ -9,7 +9,12 @@ import { toast } from '@/components/ui/toast';
 import { formatMoney, formatDate } from '@/lib/format';
 import { useCreateMilestone, useUpdateMilestone } from '@/lib/api/agreements';
 import { ApiError } from '@/lib/api/client';
-import type { AgreementDetail, MilestoneResponse, MilestoneStatus } from '@market/shared';
+import {
+  milestoneCreateSchema,
+  type AgreementDetail,
+  type MilestoneResponse,
+  type MilestoneStatus,
+} from '@market/shared';
 
 interface AgreementMilestonesProps {
   agreement: AgreementDetail;
@@ -33,11 +38,9 @@ export function AgreementMilestones({ agreement, viewerId, onRefetch }: Agreemen
 
   const handleAddMilestone = async (e: React.FormEvent) => {
     e.preventDefault();
+    setAddError(null);
+
     const trimmedTitle = title.trim();
-    if (!trimmedTitle) {
-      setAddError('Milestone title is required');
-      return;
-    }
 
     let parsedAmountCents: number | undefined = undefined;
     if (amount.trim()) {
@@ -52,19 +55,31 @@ export function AgreementMilestones({ agreement, viewerId, onRefetch }: Agreemen
     let parsedDueDate: string | undefined = undefined;
     if (dueDate.trim()) {
       try {
-        parsedDueDate = new Date(dueDate.trim()).toISOString();
+        const parsed = new Date(dueDate.trim());
+        if (isNaN(parsed.getTime())) {
+          setAddError('Please enter a valid due date');
+          return;
+        }
+        parsedDueDate = parsed.toISOString();
       } catch {
         setAddError('Please enter a valid due date');
         return;
       }
     }
 
+    const result = milestoneCreateSchema.safeParse({
+      title: trimmedTitle,
+      amountCents: parsedAmountCents,
+      dueDate: parsedDueDate,
+    });
+
+    if (!result.success) {
+      setAddError(result.error.issues[0]?.message ?? 'Invalid milestone details');
+      return;
+    }
+
     try {
-      await createMutation.mutateAsync({
-        title: trimmedTitle,
-        amountCents: parsedAmountCents,
-        dueDate: parsedDueDate,
-      });
+      await createMutation.mutateAsync(result.data);
       toast.success('Milestone added', 'New milestone has been recorded.');
       setTitle('');
       setAmount('');

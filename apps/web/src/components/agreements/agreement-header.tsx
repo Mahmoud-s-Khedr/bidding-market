@@ -5,9 +5,10 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { formatMoney } from '@/lib/format';
+import { formatMoney, getInitials } from '@/lib/format';
 import { safeMediaUrl } from '@/lib/safe-url';
-import type { AgreementDetail, AgreementStatus } from '@market/shared';
+import { AgreementStatusBadge } from './agreement-status-badge';
+import type { AgreementDetail } from '@market/shared';
 
 interface AgreementHeaderProps {
   agreement: AgreementDetail;
@@ -21,56 +22,6 @@ export function AgreementHeader({ agreement, viewerId }: AgreementHeaderProps) {
   const agreedPriceCents = agreement.bid?.amountCents ?? 0;
   const currency = agreement.bid?.currency ?? 'USD';
 
-  const getStatusBadge = (status: AgreementStatus) => {
-    switch (status) {
-      case 'ACTIVE':
-        return (
-          <Badge variant="default" className="bg-blue-600 text-white text-xs px-2.5 py-0.5">
-            Active
-          </Badge>
-        );
-      case 'DELIVERED':
-        return (
-          <Badge
-            variant="secondary"
-            className="bg-amber-100 text-amber-900 border-amber-300 text-xs px-2.5 py-0.5"
-          >
-            Delivered
-          </Badge>
-        );
-      case 'COMPLETED':
-        return (
-          <Badge variant="default" className="bg-emerald-600 text-white text-xs px-2.5 py-0.5">
-            Completed
-          </Badge>
-        );
-      case 'CANCELLED':
-        return (
-          <Badge variant="outline" className="text-muted-foreground text-xs px-2.5 py-0.5">
-            Cancelled
-          </Badge>
-        );
-      case 'DISPUTED':
-        return (
-          <Badge variant="destructive" className="text-xs px-2.5 py-0.5">
-            Disputed
-          </Badge>
-        );
-      default:
-        return <Badge variant="outline">{status}</Badge>;
-    }
-  };
-
-  const getInitials = (name?: string) => {
-    if (!name) return 'U';
-    return name
-      .split(' ')
-      .map((p) => p[0])
-      .join('')
-      .toUpperCase()
-      .substring(0, 2);
-  };
-
   return (
     <Card className="p-6 mb-6 shadow-xs border-border/80">
       {/* Top row: Status, Price, Chat button */}
@@ -80,7 +31,7 @@ export function AgreementHeader({ agreement, viewerId }: AgreementHeaderProps) {
             <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               Agreement #{agreement.id.slice(0, 8)}
             </span>
-            {getStatusBadge(agreement.status)}
+            <AgreementStatusBadge status={agreement.status} className="text-xs px-2.5 py-0.5" />
             {agreement.myConfirmation && (
               <Badge
                 variant="outline"

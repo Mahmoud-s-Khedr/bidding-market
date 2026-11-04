@@ -24,8 +24,43 @@ export async function markAllNotificationsRead(): Promise<{ ok: boolean }> {
   return api.post<{ ok: boolean }>('/notifications/read-all');
 }
 
+/**
+ * Validates that a link is a safe, valid in-app relative path.
+ * Must start with a single '/' (not '//' or '/\'), and contain no schemes.
+ */
+export function isValidInAppPath(link: unknown): link is string {
+  if (typeof link !== 'string') return false;
+  const trimmed = link.trim();
+  if (!trimmed.startsWith('/') || trimmed.startsWith('//') || trimmed.startsWith('/\\')) {
+    return false;
+  }
+  if (trimmed.includes('\\')) {
+    return false;
+  }
+  try {
+    const parsed = new URL(trimmed, 'http://localhost');
+    return parsed.origin === 'http://localhost';
+  } catch {
+    return false;
+  }
+}
+
+function normalizeInAppPath(path: string): string {
+  if (path.startsWith('/conversations/')) {
+    return path.replace('/conversations/', '/messages/');
+  }
+  return path;
+}
+
 export function getNotificationLink(item: Notification): string {
+  // Prefer the server-provided item.link when it is a valid in-app path
+  if (item.link && isValidInAppPath(item.link)) {
+    return normalizeInAppPath(item.link);
+  }
+
   const data = (item.data ?? {}) as Record<string, unknown>;
+
+  let resolvedPath = '/dashboard';
 
   switch (item.type) {
     case 'BID_RECEIVED':
@@ -33,74 +68,69 @@ export function getNotificationLink(item: Notification): string {
     case 'BID_COUNTERED':
     case 'BID_ACCEPTED':
     case 'BID_REJECTED': {
-      const bidId =
-        (typeof data.bidId === 'string' && data.bidId) ||
-        (typeof data.id === 'string' && data.id) ||
-        null;
-      if (bidId) return `/bids/${bidId}`;
-      if (item.link && item.link.startsWith('/bids/')) return item.link;
-      if (item.link) return item.link;
-      return '/dashboard';
+      // Route /bids/:id is introduced in PR #9 (WEB-03) and depends on its merge into main.
+      // Keep /bids/:id only if data.bidId is explicitly present.
+      if (typeof data.bidId === 'string' && data.bidId) {
+        resolvedPath = `/bids/${data.bidId}`;
+      } else if (typeof data.listingId === 'string' && data.listingId) {
+        resolvedPath = `/listings/${data.listingId}`;
+      } else {
+        resolvedPath = '/dashboard';
+      }
+      break;
     }
     case 'DELIVERABLE_SUBMITTED':
     case 'DELIVERABLE_ACCEPTED':
     case 'REVISION_REQUESTED':
     case 'AGREEMENT_COMPLETED':
     case 'AGREEMENT_CANCELLED': {
-      const agreementId =
-        (typeof data.agreementId === 'string' && data.agreementId) ||
-        (typeof data.id === 'string' && data.id) ||
-        null;
-      if (agreementId) return `/agreements/${agreementId}`;
-      if (item.link && item.link.startsWith('/agreements/')) return item.link;
-      if (item.link) return item.link;
-      return '/dashboard';
+      if (typeof data.agreementId === 'string' && data.agreementId) {
+        resolvedPath = `/agreements/${data.agreementId}`;
+      } else {
+        resolvedPath = '/dashboard';
+      }
+      break;
     }
     case 'MESSAGE_RECEIVED': {
-      const convId =
-        (typeof data.conversationId === 'string' && data.conversationId) ||
-        (typeof data.id === 'string' && data.id) ||
-        null;
-      if (convId) return `/messages/${convId}`;
-      if (item.link?.startsWith('/conversations/')) {
-        return item.link.replace('/conversations/', '/messages/');
+      if (typeof data.conversationId === 'string' && data.conversationId) {
+        resolvedPath = `/messages/${data.conversationId}`;
+      } else {
+        resolvedPath = '/messages';
       }
-      if (item.link?.startsWith('/messages/')) return item.link;
-      if (item.link) return item.link;
-      return '/messages';
+      break;
     }
     case 'REVIEW_RECEIVED': {
       if (typeof data.agreementId === 'string' && data.agreementId) {
-        return `/agreements/${data.agreementId}`;
+        resolvedPath = `/agreements/${data.agreementId}`;
+      } else if (typeof data.targetId === 'string' && data.targetId) {
+        resolvedPath = `/users/${data.targetId}`;
+      } else if (typeof data.userId === 'string' && data.userId) {
+        resolvedPath = `/users/${data.userId}`;
+      } else {
+        resolvedPath = '/dashboard';
       }
-      if (typeof data.targetId === 'string' && data.targetId) {
-        return `/users/${data.targetId}`;
-      }
-      if (typeof data.userId === 'string' && data.userId) {
-        return `/users/${data.userId}`;
-      }
-      if (item.link) return item.link;
-      return '/dashboard';
+      break;
     }
     case 'REPORT_RESOLVED': {
       if (typeof data.listingId === 'string' && data.listingId) {
-        return `/listings/${data.listingId}`;
+        resolvedPath = `/listings/${data.listingId}`;
+      } else if (
+        data.targetType === 'LISTING' &&
+        typeof data.targetId === 'string' &&
+        data.targetId
+      ) {
+        resolvedPath = `/listings/${data.targetId}`;
+      } else {
+        resolvedPath = '/dashboard';
       }
-      if (data.targetType === 'LISTING' && typeof data.targetId === 'string' && data.targetId) {
-        return `/listings/${data.targetId}`;
-      }
-      if (item.link) return item.link;
-      return '/dashboard';
+      break;
     }
     default:
-      if (item.link) {
-        if (item.link.startsWith('/conversations/')) {
-          return item.link.replace('/conversations/', '/messages/');
-        }
-        return item.link;
-      }
-      return '/dashboard';
+      resolvedPath = '/dashboard';
+      break;
   }
+
+  return isValidInAppPath(resolvedPath) ? resolvedPath : '/dashboard';
 }
 
 export function useNotifications(unread?: boolean) {

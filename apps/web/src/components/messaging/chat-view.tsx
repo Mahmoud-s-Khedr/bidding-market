@@ -16,7 +16,7 @@ import { useAuth } from '@/components/auth/auth-provider';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
-import { formatDate } from '@/lib/format';
+import { formatDate, getInitials } from '@/lib/format';
 import { getAttachmentUrl } from '@/lib/api/uploads';
 import { safeMediaUrl } from '@/lib/safe-url';
 import {
@@ -44,16 +44,6 @@ export interface ChatViewProps {
   conversationId: string;
   onBack?: () => void;
   className?: string;
-}
-
-function getInitials(name?: string): string {
-  if (!name) return 'U';
-  return name
-    .split(' ')
-    .map((n) => n[0])
-    .join('')
-    .toUpperCase()
-    .substring(0, 2);
 }
 
 function formatMessageTime(dateInput: Date | string): string {

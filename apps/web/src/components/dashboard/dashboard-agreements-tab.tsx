@@ -10,6 +10,7 @@ import { ErrorState } from '@/components/ui/error-state';
 import { formatMoney, formatDate } from '@/lib/format';
 import { useInfiniteAgreements } from '@/lib/api/agreements';
 import { useAuth } from '@/components/auth/auth-provider';
+import { AgreementStatusBadge } from '@/components/agreements/agreement-status-badge';
 import type { AgreementStatus, AgreementSummary } from '@market/shared';
 
 const STATUS_FILTERS: Array<{ label: string; value: string }> = [
@@ -46,67 +47,6 @@ export function DashboardAgreementsTab() {
     if (!data?.pages) return [];
     return data.pages.flatMap((page) => page.items);
   }, [data]);
-
-  if (isLoading) {
-    return (
-      <div className="space-y-3" data-testid="agreements-skeleton">
-        {Array.from({ length: 3 }).map((_, i) => (
-          <Card key={i} className="p-4 flex items-center justify-between">
-            <div className="space-y-2 flex-1">
-              <Skeleton className="h-5 w-1/3" />
-              <Skeleton className="h-4 w-1/4" />
-            </div>
-            <Skeleton className="h-8 w-24" />
-          </Card>
-        ))}
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <ErrorState
-        title="Failed to load agreements"
-        message="Could not load your agreements. Please try again."
-        onRetry={() => {
-          void refetch();
-        }}
-      />
-    );
-  }
-
-  const getStatusBadge = (status: AgreementStatus) => {
-    switch (status) {
-      case 'ACTIVE':
-        return (
-          <Badge variant="default" className="bg-blue-600 text-white">
-            Active
-          </Badge>
-        );
-      case 'DELIVERED':
-        return (
-          <Badge variant="secondary" className="bg-amber-100 text-amber-800">
-            Delivered
-          </Badge>
-        );
-      case 'COMPLETED':
-        return (
-          <Badge variant="default" className="bg-emerald-600 text-white">
-            Completed
-          </Badge>
-        );
-      case 'CANCELLED':
-        return (
-          <Badge variant="outline" className="text-muted-foreground">
-            Cancelled
-          </Badge>
-        );
-      case 'DISPUTED':
-        return <Badge variant="destructive">Disputed</Badge>;
-      default:
-        return <Badge variant="outline">{status}</Badge>;
-    }
-  };
 
   return (
     <div className="space-y-4">
@@ -156,6 +96,7 @@ export function DashboardAgreementsTab() {
                 variant={statusFilter === f.value ? 'primary' : 'outline'}
                 size="sm"
                 className="text-xs h-7 px-2.5 rounded-full"
+                aria-pressed={statusFilter === f.value}
                 onClick={() => setStatusFilter(f.value)}
               >
                 {f.label}
@@ -165,7 +106,27 @@ export function DashboardAgreementsTab() {
         </div>
       </div>
 
-      {agreements.length === 0 ? (
+      {isLoading ? (
+        <div className="space-y-3" data-testid="agreements-skeleton">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Card key={i} className="p-4 flex items-center justify-between">
+              <div className="space-y-2 flex-1">
+                <Skeleton className="h-5 w-1/3" />
+                <Skeleton className="h-4 w-1/4" />
+              </div>
+              <Skeleton className="h-8 w-24" />
+            </Card>
+          ))}
+        </div>
+      ) : error ? (
+        <ErrorState
+          title="Failed to load agreements"
+          message="Could not load your agreements. Please try again."
+          onRetry={() => {
+            void refetch();
+          }}
+        />
+      ) : agreements.length === 0 ? (
         <EmptyState
           icon={Handshake}
           title="No agreements found"
@@ -196,7 +157,7 @@ export function DashboardAgreementsTab() {
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                    {getStatusBadge(item.status)}
+                    <AgreementStatusBadge status={item.status} />
                     <Badge variant="outline" className="text-[10px]">
                       {isBuyer ? 'You are Buyer' : 'You are Provider'}
                     </Badge>

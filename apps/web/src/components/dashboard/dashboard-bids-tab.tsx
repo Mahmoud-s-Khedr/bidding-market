@@ -39,34 +39,6 @@ export function DashboardBidsTab() {
     return data.pages.flatMap((page) => page.items);
   }, [data]);
 
-  if (isLoading) {
-    return (
-      <div className="space-y-3" data-testid="bids-skeleton">
-        {Array.from({ length: 3 }).map((_, i) => (
-          <Card key={i} className="p-4 flex items-center justify-between">
-            <div className="space-y-2 flex-1">
-              <Skeleton className="h-5 w-1/3" />
-              <Skeleton className="h-4 w-1/4" />
-            </div>
-            <Skeleton className="h-8 w-24" />
-          </Card>
-        ))}
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <ErrorState
-        title="Failed to load your bids"
-        message="Could not load your bids. Please try again."
-        onRetry={() => {
-          void refetch();
-        }}
-      />
-    );
-  }
-
   return (
     <div className="space-y-4">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -85,6 +57,7 @@ export function DashboardBidsTab() {
               variant={statusFilter === f.value ? 'primary' : 'outline'}
               size="sm"
               className="text-xs h-7 px-2.5 rounded-full"
+              aria-pressed={statusFilter === f.value}
               onClick={() => setStatusFilter(f.value)}
             >
               {f.label}
@@ -93,7 +66,27 @@ export function DashboardBidsTab() {
         </div>
       </div>
 
-      {bids.length === 0 ? (
+      {isLoading ? (
+        <div className="space-y-3" data-testid="bids-skeleton">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Card key={i} className="p-4 flex items-center justify-between">
+              <div className="space-y-2 flex-1">
+                <Skeleton className="h-5 w-1/3" />
+                <Skeleton className="h-4 w-1/4" />
+              </div>
+              <Skeleton className="h-8 w-24" />
+            </Card>
+          ))}
+        </div>
+      ) : error ? (
+        <ErrorState
+          title="Failed to load your bids"
+          message="Could not load your bids. Please try again."
+          onRetry={() => {
+            void refetch();
+          }}
+        />
+      ) : bids.length === 0 ? (
         <EmptyState
           icon={Gavel}
           title="No bids found"

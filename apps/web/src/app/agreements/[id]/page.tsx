@@ -21,14 +21,17 @@ import { ApiError } from '@/lib/api/client';
 export default function AgreementPage() {
   const params = useParams();
   const agreementId = typeof params?.id === 'string' ? params.id : '';
-  const { user } = useAuth();
+  const { user, isLoading: isAuthLoading } = useAuth();
 
   const {
     data: agreement,
     isLoading,
     error,
     refetch,
-  } = useAgreement(agreementId, { viewerId: user?.id, enabled: Boolean(agreementId) });
+  } = useAgreement(agreementId, {
+    viewerId: user?.id,
+    enabled: Boolean(agreementId) && Boolean(user) && !isAuthLoading,
+  });
 
   return (
     <React.Suspense

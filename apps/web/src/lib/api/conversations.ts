@@ -101,9 +101,9 @@ export function useCreateConversation() {
  * Until that endpoint is implemented, this query calculates the sum across fetched conversations
  * up to the query limit (50 conversations).
  */
-export function useTotalUnreadMessages(options?: { enabled?: boolean }) {
+export function useTotalUnreadMessages(options?: { enabled?: boolean; viewerId?: string | null }) {
   const { data } = useQuery({
-    queryKey: queryKeys.conversations.unreadTotal(),
+    queryKey: queryKeys.conversations.unreadTotal(options?.viewerId),
     queryFn: async () => {
       try {
         const summary = await getDashboardSummary();
@@ -113,12 +113,8 @@ export function useTotalUnreadMessages(options?: { enabled?: boolean }) {
       } catch {
         // Fallback calculation: sums unread counts across up to 50 conversations if dashboard summary fails
       }
-      try {
-        const res = await getConversations({ limit: 50 });
-        return res?.items?.reduce((acc, c) => acc + (c.unreadCount ?? 0), 0) ?? 0;
-      } catch {
-        return 0;
-      }
+      const res = await getConversations({ limit: 50 });
+      return res?.items?.reduce((acc, c) => acc + (c.unreadCount ?? 0), 0) ?? 0;
     },
     enabled: options?.enabled ?? true,
     staleTime: 1000 * 30,

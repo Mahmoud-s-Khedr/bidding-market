@@ -118,7 +118,7 @@ describe('notifications API client and hooks', () => {
   });
 
   describe('getNotificationLink', () => {
-    it('resolves bid notifications to /bids/:id', () => {
+    it('resolves bid notifications to /bids/:id when data.bidId is present', () => {
       expect(
         getNotificationLink(
           makeNotification({
@@ -129,18 +129,84 @@ describe('notifications API client and hooks', () => {
         ),
       ).toBe('/bids/bid-1');
 
+      // Falls back to listing when bidId is not present
+      expect(
+        getNotificationLink(
+          makeNotification({
+            type: 'BID_RECEIVED',
+            link: null,
+            data: { listingId: 'list-42' },
+          }),
+        ),
+      ).toBe('/listings/list-42');
+
+      // Falls back to /dashboard when neither is present
+      expect(
+        getNotificationLink(
+          makeNotification({
+            type: 'BID_RECEIVED',
+            link: null,
+            data: {},
+          }),
+        ),
+      ).toBe('/dashboard');
+    });
+
+    it('prefers server-provided item.link when valid in-app path', () => {
       expect(
         getNotificationLink(
           makeNotification({
             type: 'BID_ACCEPTED',
             link: '/bids/bid-2',
-            data: {},
+            data: { bidId: 'bid-other' },
           }),
         ),
       ).toBe('/bids/bid-2');
+
+      expect(
+        getNotificationLink(
+          makeNotification({
+            type: 'MESSAGE_RECEIVED',
+            link: '/conversations/conv-2',
+            data: null,
+          }),
+        ),
+      ).toBe('/messages/conv-2');
     });
 
-    it('resolves agreement notifications to /agreements/:id', () => {
+    it('rejects unsafe external or scheme-based links and falls back', () => {
+      expect(
+        getNotificationLink(
+          makeNotification({
+            type: 'BID_RECEIVED',
+            link: '//evil.com/phish',
+            data: { bidId: 'bid-safe' },
+          }),
+        ),
+      ).toBe('/bids/bid-safe');
+
+      expect(
+        getNotificationLink(
+          makeNotification({
+            type: 'BID_RECEIVED',
+            link: 'https://evil.com/phish',
+            data: {},
+          }),
+        ),
+      ).toBe('/dashboard');
+
+      expect(
+        getNotificationLink(
+          makeNotification({
+            type: 'MESSAGE_RECEIVED',
+            link: 'javascript:alert(1)',
+            data: {},
+          }),
+        ),
+      ).toBe('/messages');
+    });
+
+    it('resolves agreement notifications to /agreements/:id and drops generic data.id fallback', () => {
       expect(
         getNotificationLink(
           makeNotification({
@@ -151,12 +217,23 @@ describe('notifications API client and hooks', () => {
         ),
       ).toBe('/agreements/ag-1');
 
+      // Dropped guessed generic data.id fallback -> falls back to /dashboard
       expect(
         getNotificationLink(
           makeNotification({
             type: 'AGREEMENT_COMPLETED',
             link: null,
             data: { id: 'ag-2' },
+          }),
+        ),
+      ).toBe('/dashboard');
+
+      expect(
+        getNotificationLink(
+          makeNotification({
+            type: 'AGREEMENT_COMPLETED',
+            link: null,
+            data: { agreementId: 'ag-2' },
           }),
         ),
       ).toBe('/agreements/ag-2');
@@ -173,15 +250,16 @@ describe('notifications API client and hooks', () => {
         ),
       ).toBe('/messages/conv-1');
 
+      // Generic data.id does not resolve to /messages/:id
       expect(
         getNotificationLink(
           makeNotification({
             type: 'MESSAGE_RECEIVED',
-            link: '/conversations/conv-2',
-            data: null,
+            link: null,
+            data: { id: 'conv-1' },
           }),
         ),
-      ).toBe('/messages/conv-2');
+      ).toBe('/messages');
     });
 
     it('resolves review and report notifications to sensible targets', () => {

@@ -168,7 +168,7 @@ describe('Agreements API & Mutation Hooks', () => {
         queryKey: queryKeys.notifications.unreadCount(),
       });
       expect(invalidateSpy).toHaveBeenCalledWith({
-        queryKey: queryKeys.conversations.unreadTotal(),
+        queryKey: queryKeys.conversations.unreadTotal('user-1'),
       });
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.users.all });
     });
@@ -204,6 +204,31 @@ describe('Agreements API & Mutation Hooks', () => {
       );
       await waitFor(() => expect(infRes.current.isSuccess).toBe(true));
       expect(infRes.current.data?.pages[0]?.items).toHaveLength(1);
+    });
+
+    it('useAgreement refetches periodically according to refetchInterval (fake timers)', async () => {
+      vi.useFakeTimers();
+      try {
+        const mockDetail = makeAgreementDetail({ id: 'ag-refresh' });
+        vi.mocked(api.get).mockResolvedValue(mockDetail);
+
+        const { Wrapper } = createWrapper();
+        renderHook(() => useAgreement('ag-refresh', { viewerId: 'user-1' }), {
+          wrapper: Wrapper,
+        });
+
+        // Initial fetch on mount
+        expect(api.get).toHaveBeenCalledWith('/agreements/ag-refresh');
+        const initialCount = vi.mocked(api.get).mock.calls.length;
+
+        // Fast-forward 240 seconds (refetchInterval)
+        await vi.advanceTimersByTimeAsync(240_000);
+
+        // Refetched fresh agreement data with fresh presigned URLs
+        expect(vi.mocked(api.get).mock.calls.length).toBeGreaterThan(initialCount);
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('mutation hooks execute and trigger invalidation', async () => {

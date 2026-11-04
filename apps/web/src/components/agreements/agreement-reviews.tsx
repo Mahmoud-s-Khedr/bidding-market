@@ -5,9 +5,10 @@ import { Card } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from '@/components/ui/toast';
 import { RatingStars } from '@/components/shared/rating-stars';
-import { formatDate } from '@/lib/format';
+import { formatDate, getInitials } from '@/lib/format';
 import { safeMediaUrl } from '@/lib/safe-url';
 import { useSubmitReview } from '@/lib/api/agreements';
 import { useUserReviews } from '@/lib/api/users';
@@ -30,21 +31,36 @@ export function AgreementReviews({ agreement, viewerId, onRefetch }: AgreementRe
   const submitMutation = useSubmitReview(agreement.id, { viewerId });
 
   // Reviews targeting otherParty
-  const { data: targetReviewsData, refetch: refetchTargetReviews } = useUserReviews(otherParty.id, {
+  const {
+    data: targetReviewsData,
+    fetchNextPage: fetchNextTargetReviews,
+    hasNextPage: hasNextTargetReviews,
+    isFetching: isFetchingTargetReviews,
+    isLoading: isLoadingTargetReviews,
+    refetch: refetchTargetReviews,
+  } = useUserReviews(otherParty.id, {
     enabled: isCompleted,
   });
 
   // Reviews targeting viewer
-  const { data: viewerReviewsData, refetch: refetchViewerReviews } = useUserReviews(
-    viewerId ?? '',
-    { enabled: isCompleted && Boolean(viewerId) },
-  );
+  const {
+    data: viewerReviewsData,
+    fetchNextPage: fetchNextViewerReviews,
+    hasNextPage: hasNextViewerReviews,
+    isFetching: isFetchingViewerReviews,
+    refetch: refetchViewerReviews,
+  } = useUserReviews(viewerId ?? '', {
+    enabled: isCompleted && Boolean(viewerId),
+  });
 
   const [rating, setRating] = React.useState<number>(5);
   const [hoverRating, setHoverRating] = React.useState<number | null>(null);
   const [comment, setComment] = React.useState('');
   const [errorMsg, setErrorMsg] = React.useState<string | null>(null);
   const [localSubmittedReview, setLocalSubmittedReview] = React.useState<ReviewItem | null>(null);
+
+  // References for roving tabindex radio buttons
+  const starRefs = React.useRef<Array<HTMLButtonElement | null>>([]);
 
   // Find all reviews related to this agreement
   const allTargetReviews: ReviewItem[] = React.useMemo(() => {
@@ -61,25 +77,39 @@ export function AgreementReviews({ agreement, viewerId, onRefetch }: AgreementRe
   const existingMyReview = React.useMemo(() => {
     if (localSubmittedReview) return localSubmittedReview;
     return allTargetReviews.find(
-      (r) =>
-        (r as unknown as { agreementId: string }).agreementId === agreement.id &&
-        (r.author?.id === viewerId || (r as unknown as { authorId: string }).authorId === viewerId),
+      (r) => r.agreementId === agreement.id && r.author?.id === viewerId,
     );
   }, [allTargetReviews, agreement.id, viewerId, localSubmittedReview]);
 
   // Review written by otherParty about viewer
   const counterpartReview = React.useMemo(() => {
     return allViewerReviews.find(
-      (r) =>
-        (r as unknown as { agreementId: string }).agreementId === agreement.id &&
-        (r.author?.id === otherParty.id ||
-          (r as unknown as { authorId: string }).authorId === otherParty.id),
+      (r) => r.agreementId === agreement.id && r.author?.id === otherParty.id,
     );
   }, [allViewerReviews, agreement.id, otherParty.id]);
+
+  // Page through reviews until my review is found or pages exhausted
+  React.useEffect(() => {
+    if (!existingMyReview && hasNextTargetReviews && !isFetchingTargetReviews) {
+      void fetchNextTargetReviews();
+    }
+  }, [existingMyReview, hasNextTargetReviews, isFetchingTargetReviews, fetchNextTargetReviews]);
+
+  // Page through reviews until counterpart review is found or pages exhausted
+  React.useEffect(() => {
+    if (!counterpartReview && hasNextViewerReviews && !isFetchingViewerReviews) {
+      void fetchNextViewerReviews();
+    }
+  }, [counterpartReview, hasNextViewerReviews, isFetchingViewerReviews, fetchNextViewerReviews]);
 
   if (!isCompleted) {
     return null;
   }
+
+  // Prevent flash of review form while checking if already reviewed
+  const isSearchingMyReview =
+    !existingMyReview &&
+    (isLoadingTargetReviews || (hasNextTargetReviews && isFetchingTargetReviews));
 
   const handleSubmitReview = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -110,6 +140,8 @@ export function AgreementReviews({ agreement, viewerId, onRefetch }: AgreementRe
       if (err instanceof ApiError) {
         if (err.status === 409) {
           setErrorMsg('You have already submitted a review for this agreement.');
+          void refetchTargetReviews();
+          void refetchViewerReviews();
         } else {
           setErrorMsg(err.message);
         }
@@ -120,26 +152,26 @@ export function AgreementReviews({ agreement, viewerId, onRefetch }: AgreementRe
   };
 
   const handleKeyDown = (e: React.KeyboardEvent, starValue: number) => {
-    if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
-      e.preventDefault();
-      setRating(Math.min(5, starValue + 1));
-    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
-      e.preventDefault();
-      setRating(Math.max(1, starValue - 1));
+    let nextValue: number | null = null;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+      nextValue = starValue === 5 ? 1 : starValue + 1;
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+      nextValue = starValue === 1 ? 5 : starValue - 1;
+    } else if (e.key === 'Home') {
+      nextValue = 1;
+    } else if (e.key === 'End') {
+      nextValue = 5;
     } else if (e.key === ' ' || e.key === 'Enter') {
       e.preventDefault();
       setRating(starValue);
+      return;
     }
-  };
 
-  const getInitials = (name?: string) => {
-    if (!name) return 'U';
-    return name
-      .split(' ')
-      .map((p) => p[0])
-      .join('')
-      .toUpperCase()
-      .substring(0, 2);
+    if (nextValue !== null) {
+      e.preventDefault();
+      setRating(nextValue);
+      starRefs.current[nextValue - 1]?.focus();
+    }
   };
 
   return (
@@ -151,8 +183,17 @@ export function AgreementReviews({ agreement, viewerId, onRefetch }: AgreementRe
         </p>
       </div>
 
-      {/* Review Form - only shown if not yet reviewed by me */}
-      {!existingMyReview ? (
+      {/* Review Form or Loading or Read-only card */}
+      {isSearchingMyReview ? (
+        <div
+          className="p-4 rounded-lg bg-muted/30 border border-border space-y-3 mb-4"
+          data-testid="reviews-loading"
+        >
+          <Skeleton className="h-4 w-1/3" />
+          <Skeleton className="h-8 w-1/2" />
+          <Skeleton className="h-16 w-full" />
+        </div>
+      ) : !existingMyReview ? (
         <form
           onSubmit={(e) => {
             void handleSubmitReview(e);
@@ -169,7 +210,7 @@ export function AgreementReviews({ agreement, viewerId, onRefetch }: AgreementRe
             </p>
           </div>
 
-          {/* Accessible star rating radio group */}
+          {/* Accessible star rating radio group with roving tabindex */}
           <div className="space-y-1.5">
             <Label id="rating-group-label" className="text-xs">
               Rating (1 to 5 stars) *
@@ -186,6 +227,9 @@ export function AgreementReviews({ agreement, viewerId, onRefetch }: AgreementRe
                 return (
                   <button
                     key={starValue}
+                    ref={(el) => {
+                      starRefs.current[starValue - 1] = el;
+                    }}
                     type="button"
                     role="radio"
                     aria-checked={rating === starValue}
