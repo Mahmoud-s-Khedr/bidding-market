@@ -11,7 +11,7 @@ export interface RequireAdminProps {
   fallback?: React.ReactNode;
 }
 
-export function RequireAdmin({ children, fallback }: RequireAdminProps) {
+function RequireAdminInner({ children, fallback }: RequireAdminProps) {
   const { isAuthenticated, isAdmin, isLoading } = useRequireAuthRedirect();
   const router = useRouter();
 
@@ -49,4 +49,20 @@ export function RequireAdmin({ children, fallback }: RequireAdminProps) {
   }
 
   return <>{children}</>;
+}
+
+export function RequireAdmin(props: RequireAdminProps) {
+  return (
+    <React.Suspense
+      fallback={
+        props.fallback || (
+          <div className="flex min-h-[50vh] items-center justify-center p-8">
+            <Spinner size="lg" label="Checking authorization..." />
+          </div>
+        )
+      }
+    >
+      <RequireAdminInner {...props} />
+    </React.Suspense>
+  );
 }

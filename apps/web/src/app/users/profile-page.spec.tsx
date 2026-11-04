@@ -12,6 +12,20 @@ vi.mock('next/navigation', () => ({
   useParams: () => ({ id: 'user-profile-1' }),
 }));
 
+vi.mock('@/components/auth/auth-provider', () => ({
+  useAuth: () => ({
+    user: null,
+    isAuthenticated: false,
+    isAdmin: false,
+    token: null,
+    isLoading: false,
+    login: vi.fn(),
+    register: vi.fn(),
+    logout: vi.fn(),
+    refresh: vi.fn(),
+  }),
+}));
+
 describe('User Profile Page', () => {
   beforeEach(() => {
     vi.restoreAllMocks();

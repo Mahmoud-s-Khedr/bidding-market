@@ -174,6 +174,74 @@ describe('Header & Footer layout components', () => {
     expect(toggleButton).toHaveAttribute('aria-expanded', 'false');
   });
 
+  it('renders Admin link in navigation only when user is an admin', () => {
+    // Unauthenticated user
+    const authSpy = vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({
+      user: null,
+      token: null,
+      isLoading: false,
+      isAuthenticated: false,
+      isAdmin: false,
+      login: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+      refresh: vi.fn(),
+    });
+
+    const { unmount } = renderWithClient(<Header />);
+    expect(screen.queryByRole('link', { name: /^Admin$/i })).not.toBeInTheDocument();
+    unmount();
+
+    // Authenticated regular user (not admin)
+    authSpy.mockReturnValue({
+      user: {
+        id: 'u-user',
+        email: 'user@market.test',
+        displayName: 'Regular User',
+        role: 'USER',
+        isBusiness: false,
+        createdAt: '',
+      },
+      token: 'jwt-user',
+      isLoading: false,
+      isAuthenticated: true,
+      isAdmin: false,
+      login: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+      refresh: vi.fn(),
+    });
+
+    const { unmount: unmountUser } = renderWithClient(<Header />);
+    expect(screen.queryByRole('link', { name: /^Admin$/i })).not.toBeInTheDocument();
+    unmountUser();
+
+    // Authenticated admin user
+    authSpy.mockReturnValue({
+      user: {
+        id: 'u-admin',
+        email: 'admin@market.test',
+        displayName: 'Admin User',
+        role: 'ADMIN',
+        isBusiness: false,
+        createdAt: '',
+      },
+      token: 'jwt-admin',
+      isLoading: false,
+      isAuthenticated: true,
+      isAdmin: true,
+      login: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+      refresh: vi.fn(),
+    });
+
+    renderWithClient(<Header />);
+    const adminLink = screen.getByRole('link', { name: /^Admin$/i });
+    expect(adminLink).toBeInTheDocument();
+    expect(adminLink).toHaveAttribute('href', '/admin');
+  });
+
   it('renders Footer with brand and navigation links', () => {
     render(<Footer />);
     expect(screen.getByText(/the modern marketplace connecting/i)).toBeInTheDocument();

@@ -33,6 +33,7 @@ import { Composer } from './composer';
 import { ImageAttachmentThumbnail, Lightbox } from './lightbox';
 import { AudioPlayer } from './audio-player';
 import { LinkifiedText } from './linkified-text';
+import { ReportButton } from '@/components/shared/report-button';
 import {
   computeChatScrollAction,
   detectMessageListChange,
@@ -704,6 +705,19 @@ export function ChatView({ conversationId, onBack, className = '' }: ChatViewPro
                     }`}
                   >
                     <span>{formatMessageTime(msgDate)}</span>
+                    {!isOwn && msg.id && (
+                      <ReportButton
+                        targetType="MESSAGE"
+                        targetId={msg.id}
+                        targetTitle={`Message from ${msg.sender.displayName}`}
+                        ownerId={msg.sender.id}
+                        label="Report message"
+                        hideLabel
+                        variant="ghost"
+                        size="sm"
+                        className="h-4 w-4 p-0 ml-1 text-muted-foreground hover:text-destructive"
+                      />
+                    )}
                     {msg._status === 'pending' && (
                       <span title="Sending...">
                         <Loader2 className="h-3 w-3 animate-spin opacity-75" />
