@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { conversationKeys, NO_LISTING_DEDUP_KEY } from './conversations.keys.js';
+import { describe, expect, it, vi } from 'vitest';
+import { conversationKeys, lockConversation, NO_LISTING_DEDUP_KEY } from './conversations.keys.js';
 
 describe('conversationKeys', () => {
   it('builds a sorted participant pair key regardless of parameter order', () => {
@@ -20,5 +20,14 @@ describe('conversationKeys', () => {
     expect(conversationKeys('user-a', 'user-b', undefined).listingDedupKey).toBe(
       NO_LISTING_DEDUP_KEY,
     );
+  });
+
+  it('uses one advisory lock key for a participant pair and listing', async () => {
+    const $executeRaw = vi.fn().mockResolvedValue(1);
+    await lockConversation(
+      { $executeRaw } as never,
+      conversationKeys('user-a', 'user-b', 'listing-123'),
+    );
+    expect($executeRaw).toHaveBeenCalledTimes(1);
   });
 });

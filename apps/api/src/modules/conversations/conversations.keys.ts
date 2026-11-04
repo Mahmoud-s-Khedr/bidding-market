@@ -15,3 +15,12 @@ export function conversationKeys(
     listingDedupKey: listingId ?? NO_LISTING_DEDUP_KEY,
   };
 }
+import type { Prisma } from '../../generated/prisma/client.js';
+
+/** Serializes all get-or-create operations for one participant pair and listing. */
+export function lockConversation(
+  tx: Pick<Prisma.TransactionClient, '$executeRaw'>,
+  keys: ConversationDedupKeys,
+): Promise<number> {
+  return tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`${keys.participantPairKey}:${keys.listingDedupKey}`}))`;
+}

@@ -12,6 +12,7 @@ import { StorageService } from '../../storage/storage.service.js';
 import { UserPresenter, publicUserSelect } from '../users/user.presenter.js';
 import {
   conversationKeys,
+  lockConversation,
   NO_LISTING_DEDUP_KEY,
   type ConversationDedupKeys,
 } from './conversations.keys.js';
@@ -94,16 +95,23 @@ export class ConversationsService {
     }
 
     const keys = conversationKeys(userId, input.recipientId, listingId);
-    for (let attempt = 0; attempt < 3; attempt += 1) {
+    for (let attempt = 0; ; attempt += 1) {
       try {
-        const conversation = await this.prisma.conversation.create({
-          data: {
-            ...keys,
-            listingId: listingId ?? null,
-            bidId: input.bidId ?? null,
-            lastMessageAt: new Date(),
-            participants: { create: [{ userId }, { userId: input.recipientId }] },
-          },
+        const conversation = await this.prisma.$transaction(async (tx) => {
+          await lockConversation(tx, keys);
+          const existing = await tx.conversation.findUnique({
+            where: { participantPairKey_listingDedupKey: keys },
+          });
+          if (existing) return existing;
+          return tx.conversation.create({
+            data: {
+              ...keys,
+              listingId: listingId ?? null,
+              bidId: input.bidId ?? null,
+              lastMessageAt: new Date(),
+              participants: { create: [{ userId }, { userId: input.recipientId }] },
+            },
+          });
         });
         return this.get(userId, conversation.id);
       } catch (error) {
@@ -112,11 +120,10 @@ export class ConversationsService {
           where: { participantPairKey_listingDedupKey: keys },
         });
         if (existing) return this.get(userId, existing.id);
-        if (error.code !== 'P2034' || attempt === 2) throw error;
+        if (error.code !== 'P2034' || attempt >= 2) throw error;
         await new Promise<void>((resolve) => setTimeout(resolve, 25 * (attempt + 1)));
       }
     }
-    throw new Error('Conversation creation retry exhausted');
   }
 
   async list(userId: string, query: { cursor?: string; limit: number }) {
