@@ -24,7 +24,7 @@ interface ToastContextValue {
   info: (title: React.ReactNode, description?: React.ReactNode) => string;
 }
 
-const ToastContext = React.createContext<ToastContextValue | undefined>(undefined);
+export const ToastContext = React.createContext<ToastContextValue | undefined>(undefined);
 
 let externalToast: ToastContextValue['toast'] | null = null;
 let externalSuccess: ToastContextValue['success'] | null = null;
@@ -111,6 +111,10 @@ export function useToast(): ToastContextValue {
     throw new Error('useToast must be used within a ToastProvider');
   }
   return context;
+}
+
+export function useOptionalToast(): ToastContextValue | undefined {
+  return React.useContext(ToastContext);
 }
 
 function ToastItem({ data, onDismiss }: { data: ToastData; onDismiss: () => void }) {

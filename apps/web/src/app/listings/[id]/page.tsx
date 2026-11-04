@@ -117,12 +117,39 @@ export default function ListingDetailPage() {
   };
 
   const handleDownloadAttachment = async (attachment: Attachment) => {
+    let targetWindow: Window | null = null;
+    try {
+      targetWindow = window.open('about:blank', '_blank');
+      if (targetWindow) {
+        try {
+          targetWindow.opener = null;
+        } catch {
+          // Ignore
+        }
+      }
+    } catch {
+      targetWindow = null;
+    }
+
     try {
       const res = await getAttachmentUrl(attachment.id);
       const safeUrl = safeMediaUrl(res.url);
       if (safeUrl) {
-        window.open(safeUrl, '_blank', 'noopener,noreferrer');
+        if (targetWindow) {
+          try {
+            targetWindow.location.href = safeUrl;
+          } catch {
+            // Ignore
+          }
+        }
       } else {
+        if (targetWindow) {
+          try {
+            targetWindow.close();
+          } catch {
+            // Ignore
+          }
+        }
         toast({
           title: 'Download failed',
           description: 'Invalid download URL',
@@ -130,6 +157,13 @@ export default function ListingDetailPage() {
         });
       }
     } catch (err: unknown) {
+      if (targetWindow) {
+        try {
+          targetWindow.close();
+        } catch {
+          // Ignore
+        }
+      }
       const msg = err instanceof Error ? err.message : 'Failed to retrieve download URL';
       toast({
         title: 'Download failed',
