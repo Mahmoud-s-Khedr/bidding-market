@@ -1,10 +1,14 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma } from '../../generated/prisma/client.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
+import { ConversationsService } from '../conversations/conversations.service.js';
 
 @Injectable()
 export class DashboardService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly conversations: ConversationsService,
+  ) {}
+
   async summary(userId: string) {
     const [listingGroups, bidGroups, agreementGroups, unreadNotifications, unreadMessages] =
       await Promise.all([
@@ -30,13 +34,7 @@ export class DashboardService {
           _count: { _all: true },
         }),
         this.prisma.notification.count({ where: { userId, readAt: null } }),
-        this.prisma.$queryRaw<Array<{ count: bigint }>>(Prisma.sql`
-        SELECT COUNT(*) AS count FROM "ConversationParticipant" cp
-        JOIN "Message" m ON m."conversationId" = cp."conversationId"
-        LEFT JOIN "Message" lr ON lr.id = cp."lastReadMessageId"
-        WHERE cp."userId" = ${userId} AND m."senderId" <> ${userId}
-          AND (lr."createdAt" IS NULL OR m."createdAt" > lr."createdAt")
-      `),
+        this.conversations.countUnreadForUser(userId),
       ]);
     const counts = <T extends string>(rows: Array<{ status: T; _count: { _all: number } }>) =>
       new Map(rows.map((row) => [row.status, row._count._all]));
@@ -60,7 +58,7 @@ export class DashboardService {
         active: (agreements.get('ACTIVE') ?? 0) + (agreements.get('DELIVERED') ?? 0),
         completed: agreements.get('COMPLETED') ?? 0,
       },
-      unreadMessages: Number(unreadMessages[0]?.count ?? 0n),
+      unreadMessages,
       unreadNotifications,
     };
   }
