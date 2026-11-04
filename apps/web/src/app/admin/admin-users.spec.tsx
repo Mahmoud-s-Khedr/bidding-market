@@ -168,8 +168,8 @@ describe('AdminUsersPage', () => {
     await user.click(confirmBtn);
 
     await waitFor(() => {
+      // Role was unchanged (USER), so ONLY status and reason are sent
       expect(updateSpy).toHaveBeenCalledWith('user-bob', {
-        role: 'USER',
         status: 'SUSPENDED',
         reason: 'Violated marketplace rules',
       });
@@ -209,6 +209,12 @@ describe('AdminUsersPage', () => {
       await screen.findByRole('heading', { name: /modify user account/i }),
     ).toBeInTheDocument();
 
+    // Select USER to demote admin
+    const roleSelect = screen.getByLabelText(/role assignment/i);
+    await user.click(roleSelect);
+    const userOption = await screen.findByRole('option', { name: /standard user/i });
+    await user.click(userOption);
+
     const confirmBtn = screen.getByRole('button', { name: /confirm changes/i });
     await user.click(confirmBtn);
 
@@ -217,6 +223,68 @@ describe('AdminUsersPage', () => {
         /cannot demote the last remaining administrator/i,
       );
     });
+  });
+
+  it('sends only role when only role is changed (e.g. promoting user to admin)', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(AdminApiModule.adminApi, 'fetchUsers').mockResolvedValue({
+      items: [mockUsers[1]!], // Bob Builder (USER, ACTIVE)
+      nextCursor: null,
+    });
+    const updateSpy = vi.spyOn(AdminApiModule.adminApi, 'updateUser').mockResolvedValueOnce({
+      ...mockUsers[1]!,
+      role: 'ADMIN',
+    });
+
+    renderWithClient(<AdminUsersPage />);
+
+    expect(await screen.findByText('Bob Builder')).toBeInTheDocument();
+
+    const bobRow = screen.getByTestId('user-row-user-bob');
+    const bobModifyBtn = bobRow.querySelector('button')!;
+    await user.click(bobModifyBtn);
+
+    expect(
+      await screen.findByRole('heading', { name: /modify user account/i }),
+    ).toBeInTheDocument();
+
+    const roleSelect = screen.getByLabelText(/role assignment/i);
+    await user.click(roleSelect);
+    const adminOption = await screen.findByRole('option', { name: /^administrator$/i });
+    await user.click(adminOption);
+
+    const confirmBtn = screen.getByRole('button', { name: /confirm changes/i });
+    await user.click(confirmBtn);
+
+    await waitFor(() => {
+      expect(updateSpy).toHaveBeenCalledWith('user-bob', {
+        role: 'ADMIN',
+      });
+    });
+  });
+
+  it('does not send API request when no fields are modified', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(AdminApiModule.adminApi, 'fetchUsers').mockResolvedValue({
+      items: [mockUsers[1]!], // Bob Builder
+      nextCursor: null,
+    });
+    const updateSpy = vi.spyOn(AdminApiModule.adminApi, 'updateUser');
+
+    renderWithClient(<AdminUsersPage />);
+
+    expect(await screen.findByText('Bob Builder')).toBeInTheDocument();
+
+    const bobRow = screen.getByTestId('user-row-user-bob');
+    const bobModifyBtn = bobRow.querySelector('button')!;
+    await user.click(bobModifyBtn);
+
+    const confirmBtn = screen.getByRole('button', { name: /confirm changes/i });
+    await user.click(confirmBtn);
+
+    // Dialog closes without firing API update
+    expect(updateSpy).not.toHaveBeenCalled();
+    expect(screen.queryByRole('heading', { name: /modify user account/i })).not.toBeInTheDocument();
   });
 
   it('paginates through user lists with cursor navigation', async () => {

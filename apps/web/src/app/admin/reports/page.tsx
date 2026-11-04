@@ -44,7 +44,22 @@ import type {
   ReportReason,
   ReportResolution,
   ReportStatus,
+  ReportTargetType,
 } from '@/lib/api/admin-types';
+
+export function getDisabledResolutionReason(
+  targetType: ReportTargetType,
+  action: ReportResolution,
+): string | null {
+  if (action === 'REMOVE_CONTENT') {
+    if (targetType === 'USER') return 'Content removal is not applicable to user accounts';
+    if (targetType === 'AGREEMENT') return 'Content removal is not applicable to agreements';
+  }
+  if (action === 'SUSPEND_USER') {
+    if (targetType === 'AGREEMENT') return 'User suspension is not applicable to agreements';
+  }
+  return null;
+}
 
 const RESOLUTION_DESCRIPTIONS: Record<ReportResolution, string> = {
   DISMISS: 'Dismiss report without modifying content or penalizing user (e.g. false alarm).',
@@ -99,6 +114,15 @@ export default function AdminReportsPage() {
       return;
     }
 
+    const actionDisabledReason = getDisabledResolutionReason(
+      resolvingReport.targetType,
+      selectedAction,
+    );
+    if (actionDisabledReason) {
+      setDialogError(actionDisabledReason);
+      return;
+    }
+
     setDialogError(null);
 
     try {
@@ -118,8 +142,18 @@ export default function AdminReportsPage() {
     } catch (err: unknown) {
       if (err instanceof ApiError) {
         if (err.status === 409) {
-          setDialogError('This report has already been resolved by another moderator.');
-          toast.error('Already resolved', 'This report has already been resolved.');
+          toast.error(
+            'Conflict',
+            err.message || 'This report or target has already been modified.',
+          );
+          handleCloseDialog();
+          void refetch();
+          return;
+        }
+        if (err.status === 404) {
+          toast.error('Not found', err.message || 'Report or target not found.');
+          handleCloseDialog();
+          void refetch();
           return;
         }
         if (err.status === 400) {
@@ -272,31 +306,29 @@ export default function AdminReportsPage() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div
             className="flex items-center gap-2"
-            role="tablist"
+            role="group"
             aria-label="Filter reports by status"
           >
             {(['OPEN', 'RESOLVED', 'DISMISSED'] as const).map((status) => {
               const active = statusFilter === status;
               return (
-                <button
+                <Button
                   key={status}
-                  role="tab"
-                  aria-selected={active}
+                  type="button"
+                  variant={active ? 'primary' : 'outline'}
+                  size="sm"
+                  aria-pressed={active}
                   onClick={() => {
                     setStatusFilter(status);
                     setCursor(undefined);
                     setCursorHistory([]);
                   }}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                    active
-                      ? 'bg-primary text-primary-foreground font-semibold shadow-xs'
-                      : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                  }`}
+                  className="text-xs"
                 >
                   {status === 'OPEN' && 'Open Queue'}
                   {status === 'RESOLVED' && 'Resolved'}
                   {status === 'DISMISSED' && 'Dismissed'}
-                </button>
+                </Button>
               );
             })}
           </div>
@@ -538,17 +570,45 @@ export default function AdminReportsPage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="DISMISS">DISMISS — Dismiss without action</SelectItem>
-                    <SelectItem value="REMOVE_CONTENT">
+                    <SelectItem
+                      value="REMOVE_CONTENT"
+                      disabled={Boolean(
+                        getDisabledResolutionReason(resolvingReport.targetType, 'REMOVE_CONTENT'),
+                      )}
+                    >
                       REMOVE_CONTENT — Takedown content
+                      {getDisabledResolutionReason(resolvingReport.targetType, 'REMOVE_CONTENT')
+                        ? ` (${getDisabledResolutionReason(resolvingReport.targetType, 'REMOVE_CONTENT')})`
+                        : ''}
                     </SelectItem>
-                    <SelectItem value="SUSPEND_USER">
+                    <SelectItem
+                      value="SUSPEND_USER"
+                      disabled={Boolean(
+                        getDisabledResolutionReason(resolvingReport.targetType, 'SUSPEND_USER'),
+                      )}
+                    >
                       SUSPEND_USER — Suspend responsible user
+                      {getDisabledResolutionReason(resolvingReport.targetType, 'SUSPEND_USER')
+                        ? ` (${getDisabledResolutionReason(resolvingReport.targetType, 'SUSPEND_USER')})`
+                        : ''}
                     </SelectItem>
                   </SelectContent>
                 </Select>
                 <p className="text-[11px] text-muted-foreground">
                   {RESOLUTION_DESCRIPTIONS[selectedAction]}
                 </p>
+                {(getDisabledResolutionReason(resolvingReport.targetType, 'REMOVE_CONTENT') ||
+                  getDisabledResolutionReason(resolvingReport.targetType, 'SUSPEND_USER')) && (
+                  <p className="text-[11px] text-amber-600 dark:text-amber-400">
+                    {[
+                      getDisabledResolutionReason(resolvingReport.targetType, 'REMOVE_CONTENT'),
+                      getDisabledResolutionReason(resolvingReport.targetType, 'SUSPEND_USER'),
+                    ]
+                      .filter(Boolean)
+                      .map((r) => `Note: ${r}.`)
+                      .join(' ')}
+                  </p>
+                )}
               </div>
 
               {/* Required Note */}

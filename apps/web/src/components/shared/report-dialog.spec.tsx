@@ -118,7 +118,39 @@ describe('ReportDialog & ReportButton', () => {
         />,
       );
 
-      expect(screen.getByRole('button', { name: /report listing/i })).toBeInTheDocument();
+      const button = screen.getByRole('button', { name: 'Report Listing' });
+      expect(button).toBeInTheDocument();
+      // Ensure target type is not duplicated in aria-label
+      expect(button).toHaveAttribute('aria-label', 'Report Listing');
+    });
+
+    it('formats ReportButton aria-label cleanly when default label is used', () => {
+      vi.spyOn(AuthContextModule, 'useAuth').mockReturnValue({
+        user: {
+          id: 'user-1',
+          email: 'alice@market.test',
+          displayName: 'Alice',
+          role: 'USER',
+          isBusiness: false,
+          createdAt: '',
+        },
+        token: 'token',
+        isLoading: false,
+        isAuthenticated: true,
+        isAdmin: false,
+        login: vi.fn(),
+        register: vi.fn(),
+        logout: vi.fn(),
+        refresh: vi.fn(),
+      });
+
+      renderWithClient(
+        <ReportButton targetType="LISTING" targetId="listing-100" ownerId="user-2" />,
+      );
+
+      const button = screen.getByRole('button', { name: 'Report listing' });
+      expect(button).toBeInTheDocument();
+      expect(button).toHaveAttribute('aria-label', 'Report listing');
     });
   });
 

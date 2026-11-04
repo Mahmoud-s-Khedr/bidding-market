@@ -308,9 +308,10 @@ export default function AdminOverviewPage() {
             <div className="flex items-center gap-2">
               <Button
                 type="button"
-                variant="outline"
+                variant={showTableAlternative ? 'primary' : 'outline'}
                 size="sm"
                 onClick={() => setShowTableAlternative(!showTableAlternative)}
+                aria-pressed={showTableAlternative}
                 aria-label={
                   showTableAlternative
                     ? 'Switch to interactive chart view'
@@ -507,10 +508,6 @@ export default function AdminOverviewPage() {
                           className="cursor-pointer transition-all hover:scale-125"
                           onMouseEnter={() => setHoveredPoint({ day: pt.day, value: pt.value })}
                           onMouseLeave={() => setHoveredPoint(null)}
-                          tabIndex={0}
-                          aria-label={`${pt.day}: ${pt.value} ${currentMetricConfig.label}`}
-                          onFocus={() => setHoveredPoint({ day: pt.day, value: pt.value })}
-                          onBlur={() => setHoveredPoint(null)}
                         />
                       </g>
                     );

@@ -39,6 +39,14 @@ export function ReportButton({
     return null;
   }
 
+  const computedAriaLabel =
+    props['aria-label'] ||
+    (label
+      ? label.toLowerCase().includes(targetType.toLowerCase())
+        ? label
+        : `${label} ${targetType.toLowerCase()}`
+      : `Report ${targetType.toLowerCase()}`);
+
   return (
     <>
       <Button
@@ -47,9 +55,7 @@ export function ReportButton({
         size={size}
         className={className}
         onClick={() => setOpen(true)}
-        aria-label={
-          label ? `${label} ${targetType.toLowerCase()}` : `Report ${targetType.toLowerCase()}`
-        }
+        aria-label={computedAriaLabel}
         {...props}
       >
         <Flag className="h-4 w-4 shrink-0 text-muted-foreground hover:text-destructive transition-colors" />

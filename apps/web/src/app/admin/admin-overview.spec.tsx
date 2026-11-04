@@ -109,8 +109,16 @@ describe('AdminOverviewPage', () => {
     const chart = await screen.findByRole('img', { name: /30-day trend chart/i });
     expect(chart).toBeInTheDocument();
 
-    // Toggle to accessible data table
+    // Verify SVG data point circles are non-focusable inside role="img"
+    const circles = chart.querySelectorAll('circle');
+    expect(circles.length).toBeGreaterThan(0);
+    circles.forEach((circle) => {
+      expect(circle).not.toHaveAttribute('tabindex');
+    });
+
+    // Toggle to accessible data table with aria-pressed
     const tableToggleBtn = screen.getByRole('button', { name: /switch to accessible data table/i });
+    expect(tableToggleBtn).toHaveAttribute('aria-pressed', 'false');
     await user.click(tableToggleBtn);
 
     // Accessible table is rendered
@@ -123,6 +131,7 @@ describe('AdminOverviewPage', () => {
     const chartToggleBtn = screen.getByRole('button', {
       name: /switch to interactive chart view/i,
     });
+    expect(chartToggleBtn).toHaveAttribute('aria-pressed', 'true');
     await user.click(chartToggleBtn);
     expect(screen.getByRole('img', { name: /30-day trend chart/i })).toBeInTheDocument();
   });

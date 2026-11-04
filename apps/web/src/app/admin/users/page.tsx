@@ -40,7 +40,7 @@ import { useAuth } from '@/components/auth/auth-provider';
 import { useAdminUsers, useUpdateAdminUser } from '@/lib/api/admin';
 import { formatDate } from '@/lib/format';
 import { ApiError } from '@/lib/api/client';
-import type { AdminUserItem, Role, UserStatus } from '@/lib/api/admin-types';
+import type { AdminUserItem, AdminUserUpdateInput, Role, UserStatus } from '@/lib/api/admin-types';
 
 export default function AdminUsersPage() {
   const { user: currentAdmin } = useAuth();
@@ -108,21 +108,38 @@ export default function AdminUsersPage() {
       return;
     }
 
+    const roleChanged = newRole !== selectedUser.role;
+    const statusChanged = newStatus !== selectedUser.status;
+
+    if (!roleChanged && !statusChanged) {
+      handleCloseDialog();
+      return;
+    }
+
+    const payload: AdminUserUpdateInput = {
+      ...(roleChanged ? { role: newRole } : {}),
+      ...(statusChanged ? { status: newStatus } : {}),
+      ...(reason.trim() ? { reason: reason.trim() } : {}),
+    };
+
     setDialogError(null);
 
     try {
       await updateUserMutation.mutateAsync({
         id: selectedUser.id,
-        input: {
-          role: newRole,
-          status: newStatus,
-          reason: reason.trim() ? reason.trim() : undefined,
-        },
+        input: payload,
       });
+
+      const changeDesc =
+        roleChanged && statusChanged
+          ? `role to ${newRole} and status to ${newStatus}`
+          : roleChanged
+            ? `role to ${newRole}`
+            : `status to ${newStatus}`;
 
       toast.success(
         'User updated',
-        `Successfully updated ${selectedUser.displayName}'s role to ${newRole} and status to ${newStatus}.`,
+        `Successfully updated ${selectedUser.displayName}'s ${changeDesc}.`,
       );
       handleCloseDialog();
     } catch (err: unknown) {
