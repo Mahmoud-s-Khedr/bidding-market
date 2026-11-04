@@ -8,7 +8,7 @@ describe('openFreshAttachment helper', () => {
     vi.restoreAllMocks();
   });
 
-  it('synchronously opens blank window with noopener and noreferrer, then navigates to fresh URL', async () => {
+  it('synchronously opens a blank window (no features string, so a null return means blocked), nulls opener, then navigates to fresh URL', async () => {
     const mockWindow = {
       opener: {} as unknown,
       location: { href: '' },
@@ -22,7 +22,7 @@ describe('openFreshAttachment helper', () => {
 
     const result = await openFreshAttachment('att-123');
 
-    expect(openSpy).toHaveBeenCalledWith('about:blank', '_blank', 'noopener,noreferrer');
+    expect(openSpy).toHaveBeenCalledWith('about:blank', '_blank');
     expect(mockWindow.opener).toBeNull();
     expect(fetchSpy).toHaveBeenCalledWith('att-123');
     expect(mockWindow.location.href).toBe('https://cdn.example.com/files/spec.pdf');

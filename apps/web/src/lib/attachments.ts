@@ -33,7 +33,8 @@ export async function openFreshAttachment(
 
   let targetWindow: Window | null = null;
   try {
-    targetWindow = window.open('about:blank', '_blank', 'noopener,noreferrer');
+    // No features string: 'noopener' would make window.open always return null. Null the opener manually.
+    targetWindow = window.open('about:blank', '_blank');
     if (targetWindow) {
       try {
         targetWindow.opener = null;
