@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event';
 import ListingDetailPage from './[id]/page';
 import * as listingsApi from '@/lib/api/listings';
 import * as bidsApi from '@/lib/api/bids';
+import * as uploadsApi from '@/lib/api/uploads';
 import * as authContext from '@/components/auth/auth-provider';
 import { ApiError } from '@/lib/api/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -657,5 +658,57 @@ describe('Listing Detail Page', () => {
     expect(screen.getByText(/Previous bid \(rejected\):/i)).toBeInTheDocument();
     const threadLink = screen.getByRole('link', { name: /view thread/i });
     expect(threadLink).toHaveAttribute('href', '/bids/bid-rejected-1');
+  });
+
+  it('toasts "Allow pop-ups to download" when downloading listing attachment and popup is blocked', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window, 'open').mockReturnValue(null);
+
+    vi.spyOn(authContext, 'useAuth').mockReturnValue({
+      user: null,
+      token: null,
+      isLoading: false,
+      isAuthenticated: false,
+      isAdmin: false,
+      login: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+      refresh: vi.fn(),
+    });
+
+    const listingWithAttachments: ListingDetail = {
+      ...mockListing,
+      attachments: [
+        {
+          id: 'att-listing-1',
+          key: 'uploads/brief.pdf',
+          fileName: 'project-brief.pdf',
+          sizeBytes: 1024 * 50,
+          mimeType: 'application/pdf',
+        },
+      ],
+    };
+
+    vi.spyOn(listingsApi, 'useListing').mockReturnValue({
+      data: listingWithAttachments,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof listingsApi.useListing>);
+
+    vi.spyOn(uploadsApi, 'getAttachmentUrl').mockResolvedValue({
+      url: 'https://cdn.example.com/files/brief.pdf',
+      expiresAt: '2026-11-04T12:00:00Z',
+    });
+
+    renderWithToast(<ListingDetailPage />);
+
+    const downloadBtn = screen.getByRole('button', { name: /download/i });
+    await user.click(downloadBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText('Allow pop-ups to download')).toBeInTheDocument();
+    });
   });
 });

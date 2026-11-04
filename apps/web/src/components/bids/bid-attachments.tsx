@@ -6,7 +6,8 @@ import { cn } from '@/lib/utils';
 import { getAttachmentUrl } from '@/lib/api/uploads';
 import { safeMediaUrl } from '@/lib/safe-url';
 import { formatFileSize } from '@/lib/format';
-import { toast, useOptionalToast } from '@/components/ui/toast';
+import { openFreshAttachment } from '@/lib/attachments';
+import { useOptionalToast } from '@/components/ui/toast';
 import type { Attachment } from '@/lib/api/types';
 
 export interface BidAttachmentsProps {
@@ -84,11 +85,11 @@ function BidAttachmentItem({
       return;
     }
 
+    let isCancelled = false;
     const timer = setTimeout(() => {
-      let isCancelled = false;
       void getAttachmentUrl(attachment.id)
         .then((res) => {
-          if (!isCancelled && res.url) {
+          if (!isCancelled && res.url && isMountedRef.current) {
             setResolvedUrl(res.url);
             fetchedAtRef.current = Date.now();
             hasRetriedErrorRef.current = false;
@@ -97,13 +98,10 @@ function BidAttachmentItem({
         .catch(() => {
           // Handled on onError or on click
         });
-
-      return () => {
-        isCancelled = true;
-      };
     }, ATTACHMENT_TTL_MS);
 
     return () => {
+      isCancelled = true;
       clearTimeout(timer);
     };
   }, [attachment.id, isImage, resolvedUrl]);
@@ -143,57 +141,16 @@ function BidAttachmentItem({
     setIsLoading(true);
     setErrorMessage(null);
 
-    let targetWindow: Window | null = null;
     try {
-      targetWindow = window.open('about:blank', '_blank');
-      if (targetWindow) {
-        try {
-          targetWindow.opener = null;
-        } catch {
-          // Ignore
-        }
-      }
-    } catch {
-      targetWindow = null;
-    }
-
-    try {
-      const res = await getAttachmentUrl(attachment.id);
-      const freshSafeUrl = safeMediaUrl(res.url);
-      if (!freshSafeUrl) {
-        throw new Error('Invalid download URL');
-      }
-
+      const freshUrl = await openFreshAttachment(attachment.id, {
+        toast: toastContext?.toast,
+      });
       if (isMountedRef.current) {
-        setResolvedUrl(res.url);
+        setResolvedUrl(freshUrl);
         fetchedAtRef.current = Date.now();
       }
-
-      if (targetWindow) {
-        try {
-          targetWindow.location.href = freshSafeUrl;
-        } catch {
-          // Ignore
-        }
-      }
     } catch (err: unknown) {
-      if (targetWindow) {
-        try {
-          targetWindow.close();
-        } catch {
-          // Ignore
-        }
-      }
       const msg = err instanceof Error ? err.message : 'Failed to download attachment';
-      if (toastContext) {
-        toastContext.toast({
-          title: 'Download failed',
-          description: msg,
-          variant: 'error',
-        });
-      } else {
-        toast.error('Download failed', msg);
-      }
       if (isMountedRef.current) {
         setErrorMessage(msg);
       }

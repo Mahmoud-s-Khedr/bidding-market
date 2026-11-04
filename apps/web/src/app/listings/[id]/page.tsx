@@ -41,7 +41,7 @@ import { useToast } from '@/components/ui/toast';
 import { useCloseListing, useDeleteListing, useListing } from '@/lib/api/listings';
 import { useBid, useCreateBid, useUpdateBid, useWithdrawBid } from '@/lib/api/bids';
 import { useCreateConversation } from '@/lib/api/conversations';
-import { getAttachmentUrl } from '@/lib/api/uploads';
+import { openFreshAttachment } from '@/lib/attachments';
 import { formatDate, formatMoney } from '@/lib/format';
 import { ApiError } from '@/lib/api/client';
 import type { Attachment, BidCreateInput } from '@/lib/api/types';
@@ -117,59 +117,10 @@ export default function ListingDetailPage() {
   };
 
   const handleDownloadAttachment = async (attachment: Attachment) => {
-    let targetWindow: Window | null = null;
     try {
-      targetWindow = window.open('about:blank', '_blank');
-      if (targetWindow) {
-        try {
-          targetWindow.opener = null;
-        } catch {
-          // Ignore
-        }
-      }
+      await openFreshAttachment(attachment.id, { toast });
     } catch {
-      targetWindow = null;
-    }
-
-    try {
-      const res = await getAttachmentUrl(attachment.id);
-      const safeUrl = safeMediaUrl(res.url);
-      if (safeUrl) {
-        if (targetWindow) {
-          try {
-            targetWindow.location.href = safeUrl;
-          } catch {
-            // Ignore
-          }
-        }
-      } else {
-        if (targetWindow) {
-          try {
-            targetWindow.close();
-          } catch {
-            // Ignore
-          }
-        }
-        toast({
-          title: 'Download failed',
-          description: 'Invalid download URL',
-          variant: 'error',
-        });
-      }
-    } catch (err: unknown) {
-      if (targetWindow) {
-        try {
-          targetWindow.close();
-        } catch {
-          // Ignore
-        }
-      }
-      const msg = err instanceof Error ? err.message : 'Failed to retrieve download URL';
-      toast({
-        title: 'Download failed',
-        description: msg,
-        variant: 'error',
-      });
+      // Error notifications are handled by openFreshAttachment
     }
   };
 

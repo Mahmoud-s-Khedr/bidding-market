@@ -162,7 +162,7 @@ describe('BidAttachments component', () => {
       fireEvent.click(link);
     });
 
-    expect(openSpy).toHaveBeenCalledWith('about:blank', '_blank');
+    expect(openSpy).toHaveBeenCalledWith('about:blank', '_blank', 'noopener,noreferrer');
     expect(mockWindow.opener).toBeNull();
     expect(fetchSpy).toHaveBeenCalledWith('att-doc-1');
 
@@ -198,7 +198,7 @@ describe('BidAttachments component', () => {
       fireEvent.click(link);
     });
 
-    expect(openSpy).toHaveBeenCalledWith('about:blank', '_blank');
+    expect(openSpy).toHaveBeenCalledWith('about:blank', '_blank', 'noopener,noreferrer');
 
     await waitFor(() => {
       expect(mockWindow.close).toHaveBeenCalled();
@@ -360,6 +360,7 @@ describe('BidAttachments component', () => {
     expect(fetchSpy).toHaveBeenCalledWith('att-doc-1');
     await waitFor(() => {
       expect(link).toHaveAttribute('href', 'http://localhost:4000/files/fresh-doc.pdf');
+      expect(screen.getByText('Allow pop-ups to download')).toBeInTheDocument();
     });
   });
 });

@@ -4,6 +4,7 @@ import * as React from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import {
+  AlertCircle,
   ArrowLeft,
   ArrowUpDown,
   Check,
@@ -114,6 +115,9 @@ function BidDetailPageContent() {
     return null;
   }, [user, bid, listing]);
 
+  const isBidder = actorRole === 'bidder';
+  const isOwner = actorRole === 'owner';
+
   const handleConflictError = async (err: unknown) => {
     if (err instanceof ApiError && err.status === 409) {
       setEditDialogOpen(false);
@@ -128,8 +132,8 @@ function BidDetailPageContent() {
         variant: 'error',
       });
       await refetchBid();
-      if (shouldFetchListing) {
-        await refetchListing();
+      if (shouldFetchListing && !isBidder) {
+        await refetchListing().catch(() => {});
       }
     } else {
       const msg = err instanceof Error ? err.message : 'Action failed';
@@ -276,7 +280,7 @@ function BidDetailPageContent() {
     );
   }
 
-  if (shouldFetchListing && isListingError && !listing) {
+  if (shouldFetchListing && isListingError && !listing && !isBidder) {
     return (
       <RequireAuth>
         <div className="container mx-auto px-4 py-16 sm:px-6 max-w-2xl text-center">
@@ -293,9 +297,6 @@ function BidDetailPageContent() {
       </RequireAuth>
     );
   }
-
-  const isBidder = actorRole === 'bidder';
-  const isOwner = actorRole === 'owner';
 
   // Permission check
   if (!isBidder && !isOwner) {
@@ -352,6 +353,17 @@ function BidDetailPageContent() {
             Proposal for {listing?.title || 'Listing'}
           </span>
         </div>
+
+        {/* Listing unavailable banner */}
+        {!listing && (
+          <div
+            role="status"
+            className="flex items-center gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-800 dark:text-amber-200"
+          >
+            <AlertCircle className="h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
+            <span className="font-medium">The listing is no longer available</span>
+          </div>
+        )}
 
         {/* Overview Header Card */}
         <div className="rounded-lg border border-border bg-card p-6 shadow-xs space-y-6">
@@ -477,6 +489,7 @@ function BidDetailPageContent() {
                   <Button
                     size="sm"
                     className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                    disabled={!listing}
                     onClick={() => setAcceptCounterDialogOpen(true)}
                   >
                     <Check className="h-3.5 w-3.5 mr-1.5" />
@@ -484,7 +497,12 @@ function BidDetailPageContent() {
                   </Button>
                 )}
 
-                <Button variant="outline" size="sm" onClick={() => setMessagePlaceholderOpen(true)}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!listing}
+                  onClick={() => setMessagePlaceholderOpen(true)}
+                >
                   <MessageSquare className="h-3.5 w-3.5 mr-1.5" />
                   Message Owner
                 </Button>
@@ -497,7 +515,7 @@ function BidDetailPageContent() {
                 <Button
                   variant="outline"
                   size="sm"
-                  disabled={!canShortlist || shortlistMutation.isPending}
+                  disabled={!canShortlist || shortlistMutation.isPending || !listing}
                   onClick={() => {
                     void handleShortlist();
                   }}
@@ -509,7 +527,7 @@ function BidDetailPageContent() {
                 <Button
                   variant="outline"
                   size="sm"
-                  disabled={!canCounter}
+                  disabled={!canCounter || !listing}
                   onClick={() => setCounterDialogOpen(true)}
                 >
                   <ArrowUpDown className="h-3.5 w-3.5 mr-1.5" />
@@ -519,7 +537,7 @@ function BidDetailPageContent() {
                 <Button
                   variant="destructive"
                   size="sm"
-                  disabled={!canReject}
+                  disabled={!canReject || !listing}
                   onClick={() => setRejectDialogOpen(true)}
                 >
                   <X className="h-3.5 w-3.5 mr-1.5" />
@@ -528,7 +546,7 @@ function BidDetailPageContent() {
 
                 <Button
                   size="sm"
-                  disabled={!canAccept}
+                  disabled={!canAccept || !listing}
                   onClick={() => setAcceptBidDialogOpen(true)}
                   className="bg-emerald-600 hover:bg-emerald-700 text-white"
                 >
@@ -536,7 +554,12 @@ function BidDetailPageContent() {
                   Accept Proposal
                 </Button>
 
-                <Button variant="outline" size="sm" onClick={() => setMessagePlaceholderOpen(true)}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!listing}
+                  onClick={() => setMessagePlaceholderOpen(true)}
+                >
                   <MessageSquare className="h-3.5 w-3.5 mr-1.5" />
                   Message Bidder
                 </Button>

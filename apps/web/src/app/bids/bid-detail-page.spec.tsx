@@ -750,4 +750,102 @@ describe('BidDetailPage (Negotiation Thread)', () => {
     expect(screen.getByText('deliverable-plan.pdf')).toBeInTheDocument();
     expect(screen.getByText('(1.5 MB)')).toBeInTheDocument();
   });
+
+  it('renders thread, amounts, revisions, attachments and non-blocking banner when listing returns 404 for bidder', () => {
+    vi.spyOn(authContext, 'useAuth').mockReturnValue({
+      user: {
+        id: 'user-bidder',
+        email: 'bob@bidder.test',
+        displayName: 'Bob Bidder',
+        role: 'USER',
+        isBusiness: false,
+        createdAt: '2026-01-01T00:00:00Z',
+      },
+      token: 'jwt-bidder',
+      isLoading: false,
+      isAuthenticated: true,
+      isAdmin: false,
+      login: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+      refresh: vi.fn(),
+    });
+
+    const bidWithoutListing = makeBidDetail({
+      id: 'bid-thread-1',
+      listingId: 'listing-404',
+      listing: undefined,
+      status: 'PENDING',
+      amountCents: 25000,
+      deliveryDays: 5,
+      message: 'Initial proposal message',
+      bidder: makePublicUser({
+        id: 'user-bidder',
+        displayName: 'Bob Bidder',
+      }),
+      attachments: [
+        {
+          id: 'att-1',
+          key: 'uploads/mock.pdf',
+          fileName: 'mock.pdf',
+          mimeType: 'application/pdf',
+          sizeBytes: 1024,
+          url: 'http://localhost:4000/files/mock.pdf',
+        },
+      ],
+      revisions: [
+        makeBidRevision({
+          id: 'rev-1',
+          authorId: 'user-bidder',
+          amountCents: 25000,
+          deliveryDays: 5,
+          message: 'Initial proposal message',
+          author: makePublicUser({ id: 'user-bidder', displayName: 'Bob Bidder' }),
+        }),
+      ],
+    });
+
+    vi.spyOn(bidsApi, 'useBid').mockReturnValue({
+      data: bidWithoutListing,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof bidsApi.useBid>);
+
+    vi.spyOn(listingsApi, 'useListing').mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: true,
+      error: new ApiError(404, 'Listing not found', 'NOT_FOUND'),
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof listingsApi.useListing>);
+
+    renderWithToast(<BidDetailPage />);
+
+    // Thread header, amounts, revisions, attachments are visible
+    expect(screen.getByText('Negotiation Thread')).toBeInTheDocument();
+    expect(screen.getAllByText('$250').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText(/5 days/i).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText('Initial proposal message')).toBeInTheDocument();
+    expect(screen.getByText('mock.pdf')).toBeInTheDocument();
+
+    // Non-blocking banner is visible
+    expect(screen.getByText('The listing is no longer available')).toBeInTheDocument();
+
+    // Listing-dependent action is disabled
+    const editButton = screen.getByRole('button', { name: /edit proposal/i });
+    expect(editButton).toBeDisabled();
+
+    // Safe action allowed by API remains enabled
+    const withdrawButton = screen.getByRole('button', { name: /withdraw proposal/i });
+    expect(withdrawButton).toBeEnabled();
+
+    // Message owner action is disabled
+    const messageButton = screen.getByRole('button', { name: /message owner/i });
+    expect(messageButton).toBeDisabled();
+
+    // Navigation breadcrumb links to My Bids
+    expect(screen.getByRole('link', { name: /my bids/i })).toHaveAttribute('href', '/bids');
+  });
 });
