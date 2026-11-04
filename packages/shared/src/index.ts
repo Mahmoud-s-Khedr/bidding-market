@@ -223,9 +223,9 @@ export const bidCreateSchema = z.object({
 export const messageCreateSchema = z
   .object({
     type: MessageType,
-    body: z.string().trim().max(10000).optional(),
+    body: z.string().trim().max(5000).optional(),
     attachmentIds: z.array(z.string()).optional(),
-    voiceDurationSec: z.number().positive().optional(),
+    voiceDurationSec: z.number().int().min(1).max(600).optional(),
   })
   .refine((v) => v.type !== 'TEXT' || !!v.body, {
     message: 'Text messages require body',
@@ -356,11 +356,11 @@ export const adminResolveReportSchema = z.object({
   note: z.string().min(1).max(2000),
 });
 export const conversationCreateSchema = z.object({
-  recipientId: z.string(),
+  recipientId: z.string().min(1),
   listingId: z.string().optional(),
   bidId: z.string().optional(),
 });
-export const messagesQuerySchema = paginationSchema.extend({ before: z.string().optional() });
+export const messagesQuerySchema = paginationSchema;
 export const readSchema = z.object({ lastMessageId: z.string() });
 export const agreementCancelSchema = z.object({ reason: z.string().min(1).max(2000) });
 export const bidRejectSchema = z.object({ reason: z.string().max(2000).optional() });
@@ -587,7 +587,9 @@ export const conversationSchema = z.object({
   bidId: z.string().nullable(),
   agreementId: z.string().nullable(),
   participants: z.array(publicUserSchema),
+  otherParticipant: publicUserSchema.optional(),
   lastMessage: messageSchema.nullable(),
+  unreadCount: z.number().int().nonnegative().optional(),
   createdAt: date,
   updatedAt: date,
 });
@@ -677,6 +679,7 @@ export const wsServerPayloadSchemas = {
     userId: z.string(),
     lastMessageId: z.string(),
   }),
+  'notification:new': notificationSchema,
 };
 export type WsServerPayloads = {
   [K in keyof typeof wsServerPayloadSchemas]: z.infer<(typeof wsServerPayloadSchemas)[K]>;
@@ -778,6 +781,9 @@ export type ListingQueryInput = z.infer<typeof listingQuerySchema>;
 export type UploadPresignInput = z.infer<typeof uploadPresignSchema>;
 export type BidCreateInput = z.infer<typeof bidCreateSchema>;
 export type MessageCreateInput = z.infer<typeof messageCreateSchema>;
+export type ConversationCreateInput = z.infer<typeof conversationCreateSchema>;
+export type NotificationQueryInput = z.infer<typeof notificationQuerySchema>;
+export type MessagesQueryInput = z.infer<typeof messagesQuerySchema>;
 export type PaginationInput = z.infer<typeof paginationSchema>;
 export type ListingCreateFormInput = z.input<typeof listingCreateSchema>;
 export type ApiError = z.infer<typeof errorSchema>;

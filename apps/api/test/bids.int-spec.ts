@@ -1071,6 +1071,39 @@ describe('Bids endpoints', () => {
   });
 
   describe('Negotiation thread & Acceptance flow', () => {
+    it('links a pre-existing conversation when acceptance and create requests overlap', async () => {
+      const bid = await request(server)
+        .post(`/api/v1/listings/${openListingId}/bids`)
+        .set('Authorization', `Bearer ${bidderToken}`)
+        .send({ amountCents: 45000, currency: 'USD', deliveryDays: 12, message: 'Race bid' })
+        .expect(201);
+
+      const existing = await request(server)
+        .post('/api/v1/conversations')
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ recipientId: bidderId, listingId: openListingId, bidId: bid.body.id })
+        .expect(201);
+
+      const [accepted, duplicate] = await Promise.all([
+        request(server)
+          .post(`/api/v1/bids/${bid.body.id}/accept`)
+          .set('Authorization', `Bearer ${ownerToken}`),
+        request(server)
+          .post('/api/v1/conversations')
+          .set('Authorization', `Bearer ${ownerToken}`)
+          .send({ recipientId: bidderId, listingId: openListingId, bidId: bid.body.id }),
+      ]);
+
+      expect(accepted.status).toBe(200);
+      expect(duplicate.status).toBe(201);
+      expect(duplicate.body.id).toBe(existing.body.id);
+      const linked = await prisma.conversation.findFirstOrThrow({
+        where: { listingId: openListingId, bidId: bid.body.id },
+      });
+      expect(linked.agreementId).toBe(accepted.body.agreement.id);
+      expect(await prisma.conversation.count({ where: { listingId: openListingId } })).toBe(1);
+    });
+
     it('full negotiation thread: bid -> counter -> edit -> counter -> accept-counter on REQUEST listing', async () => {
       // 1. Bidder creates initial bid: 45000 USD, 12 days
       const b = await request(server)

@@ -17,6 +17,8 @@ export class JwtAuthGuard implements CanActivate {
     private readonly prisma: PrismaService,
   ) {}
   async canActivate(context: ExecutionContext): Promise<boolean> {
+    // Socket authentication is performed by RealtimeGateway's namespace middleware.
+    if ('getType' in context && context.getType() === 'ws') return true;
     if (
       this.reflector.getAllAndOverride<boolean>(IS_PUBLIC, [
         context.getHandler(),
