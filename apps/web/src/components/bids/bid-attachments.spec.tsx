@@ -162,7 +162,7 @@ describe('BidAttachments component', () => {
       fireEvent.click(link);
     });
 
-    expect(openSpy).toHaveBeenCalledWith('about:blank', '_blank', 'noopener,noreferrer');
+    expect(openSpy).toHaveBeenCalledWith('about:blank', '_blank');
     expect(mockWindow.opener).toBeNull();
     expect(fetchSpy).toHaveBeenCalledWith('att-doc-1');
 
@@ -198,7 +198,7 @@ describe('BidAttachments component', () => {
       fireEvent.click(link);
     });
 
-    expect(openSpy).toHaveBeenCalledWith('about:blank', '_blank', 'noopener,noreferrer');
+    expect(openSpy).toHaveBeenCalledWith('about:blank', '_blank');
 
     await waitFor(() => {
       expect(mockWindow.close).toHaveBeenCalled();
