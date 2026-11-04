@@ -1,4 +1,5 @@
 import { prisma } from './db.js';
+import { conversationKeys } from '../../src/modules/conversations/conversations.keys.js';
 
 export const userInput = (overrides: Partial<{ email: string; displayName: string }> = {}) => ({
   email: `user-${crypto.randomUUID()}@test.local`,
@@ -118,13 +119,40 @@ export async function createAgreement({
       },
     },
   });
-  await prisma.conversation.create({
-    data: {
-      listingId: createdListing.id,
-      bidId: bid.id,
-      agreementId: agreement.id,
-      participants: { create: [{ userId: buyer.id }, { userId: provider.id }] },
-    },
+  await createConversation({
+    userAId: buyer.id,
+    userBId: provider.id,
+    listingId: createdListing.id,
+    bidId: bid.id,
+    agreementId: agreement.id,
   });
   return { agreement, listing: createdListing, bid };
+}
+
+export async function createConversation({
+  userAId,
+  userBId,
+  listingId,
+  bidId,
+  agreementId,
+  lastMessageAt,
+}: {
+  userAId: string;
+  userBId: string;
+  listingId?: string | null;
+  bidId?: string | null;
+  agreementId?: string | null;
+  lastMessageAt?: Date;
+}) {
+  const keys = conversationKeys(userAId, userBId, listingId);
+  return prisma.conversation.create({
+    data: {
+      ...keys,
+      listingId: listingId ?? null,
+      bidId: bidId ?? null,
+      agreementId: agreementId ?? null,
+      lastMessageAt: lastMessageAt ?? new Date(),
+      participants: { create: [{ userId: userAId }, { userId: userBId }] },
+    },
+  });
 }

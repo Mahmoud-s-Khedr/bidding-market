@@ -29,6 +29,7 @@ import { StorageService } from '../../storage/storage.service.js';
 import { CategoriesService } from '../categories/categories.service.js';
 import { UserPresenter, publicUserSelect } from '../users/user.presenter.js';
 import { ListingPresenter } from '../listings/listing.presenter.js';
+import { conversationKeys, lockConversation } from '../conversations/conversations.keys.js';
 import { decodeBidCursor, encodeBidCursor } from './bid.cursor.js';
 import {
   BID_EVENTS,
@@ -1155,33 +1156,21 @@ export class BidsService {
       });
 
       // 6. Reuse or create Conversation linked to listing/bid/agreement
-      const existingConv = await tx.conversation.findFirst({
-        where: {
-          listingId: currentListing.id,
-          participants: {
-            some: { userId: currentListing.ownerId },
-          },
-          AND: [
-            {
-              participants: {
-                some: { userId: currentBid.bidderId },
-              },
-            },
-          ],
-        },
+      const keys = conversationKeys(currentListing.ownerId, currentBid.bidderId, currentListing.id);
+      await lockConversation(tx, keys);
+      const existingConversation = await tx.conversation.findUnique({
+        where: { participantPairKey_listingDedupKey: keys },
       });
-
-      if (existingConv) {
+      if (existingConversation) {
         await tx.conversation.update({
-          where: { id: existingConv.id },
-          data: {
-            agreementId: agreement.id,
-            bidId: currentBid.id,
-          },
+          where: { id: existingConversation.id },
+          data: { agreementId: agreement.id, bidId: currentBid.id },
         });
       } else {
         await tx.conversation.create({
           data: {
+            ...keys,
+            lastMessageAt: new Date(),
             listingId: currentListing.id,
             bidId: currentBid.id,
             agreementId: agreement.id,
