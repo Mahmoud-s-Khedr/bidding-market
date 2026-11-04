@@ -14,6 +14,7 @@ import { HealthModule } from './modules/health/health.module.js';
 import { ListingsModule } from './modules/listings/listings.module.js';
 import { NotificationsModule } from './modules/notifications/notifications.module.js';
 import { RealtimeModule } from './modules/realtime/realtime.module.js';
+import { ReportsModule } from './modules/reports/reports.module.js';
 import { UploadsModule } from './modules/uploads/uploads.module.js';
 import { UsersModule } from './modules/users/users.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
@@ -41,6 +42,7 @@ class HttpThrottlerGuard extends ThrottlerGuard {
     CategoriesModule,
     UploadsModule,
     ListingsModule,
+    ReportsModule,
     BidsModule,
     AgreementsModule,
     DashboardModule,

@@ -56,6 +56,7 @@ export const NotificationType = z.enum([
 export const ReportTargetType = z.enum(['LISTING', 'USER', 'MESSAGE', 'BID', 'AGREEMENT']);
 export const ReportReason = z.enum(['SPAM', 'FRAUD', 'INAPPROPRIATE', 'HARASSMENT', 'OTHER']);
 export const ReportStatus = z.enum(['OPEN', 'RESOLVED', 'DISMISSED']);
+export const ReportResolution = z.enum(['DISMISS', 'REMOVE_CONTENT', 'SUSPEND_USER']);
 
 const email = z.email().transform((value) => value.toLowerCase());
 export const passwordSchema = z
@@ -345,11 +346,16 @@ export const adminUsersQuerySchema = paginationSchema.extend({
   role: Role.optional(),
   status: UserStatus.optional(),
 });
-export const adminUserUpdateSchema = z.object({
-  role: Role.optional(),
-  status: UserStatus.optional(),
-  reason: z.string().max(2000).optional(),
-});
+export const adminUserUpdateSchema = z
+  .object({
+    role: Role.optional(),
+    status: UserStatus.optional(),
+    reason: z.string().max(2000).optional(),
+  })
+  .refine(
+    (value) => value.role !== undefined || value.status !== undefined || value.reason !== undefined,
+    { message: 'At least one field is required' },
+  );
 export const adminResolveReportSchema = z.object({
   action: z.enum(['DISMISS', 'REMOVE_CONTENT', 'SUSPEND_USER']),
   note: z.string().min(1).max(2000),
@@ -374,6 +380,11 @@ export const adminListingActionSchema = z.object({ reason: z.string().min(1).max
 export const adminListingsQuerySchema = paginationSchema.extend({
   q: z.string().optional(),
   status: ListingStatus.optional(),
+});
+export const adminAuditQuerySchema = paginationSchema.extend({
+  actorId: z.string().optional(),
+  action: z.string().optional(),
+  targetType: z.string().optional(),
 });
 export const paginated = <T extends z.ZodType>(item: T) =>
   z.object({ items: z.array(item), nextCursor: z.string().nullable() });
@@ -578,6 +589,7 @@ export const messageSchema = z.object({
   voiceDurationSec: z.number().nullable(),
   attachments: z.array(attachmentSchema),
   createdAt: date,
+  deleted: z.boolean().default(false),
 });
 export const conversationSchema = z.object({
   id: z.string(),
@@ -730,6 +742,20 @@ export const reportSchema = z.object({
   reason: ReportReason,
   details: z.string().trim().max(2000).optional(),
 });
+export const reportResponseSchema = z.object({
+  id: z.string(),
+  reporterId: z.string(),
+  targetType: ReportTargetType,
+  targetId: z.string(),
+  reason: ReportReason,
+  details: z.string().nullable(),
+  status: ReportStatus,
+  resolution: ReportResolution.nullable(),
+  resolutionNote: z.string().nullable(),
+  resolvedById: z.string().nullable(),
+  createdAt: date,
+  resolvedAt: date.nullable(),
+});
 export const wsEventNames = {
   conversationJoin: 'conversation:join',
   conversationLeave: 'conversation:leave',
@@ -787,6 +813,14 @@ export type NotificationType = z.infer<typeof NotificationType>;
 export type ReportTargetType = z.infer<typeof ReportTargetType>;
 export type ReportReason = z.infer<typeof ReportReason>;
 export type ReportStatus = z.infer<typeof ReportStatus>;
+export type ReportResolution = z.infer<typeof ReportResolution>;
+export type ReportInput = z.infer<typeof reportSchema>;
+export type AdminUserUpdateInput = z.infer<typeof adminUserUpdateSchema>;
+export type AdminResolveReportInput = z.infer<typeof adminResolveReportSchema>;
+export type AdminUsersQueryInput = z.infer<typeof adminUsersQuerySchema>;
+export type AdminListingsQueryInput = z.infer<typeof adminListingsQuerySchema>;
+export type AdminReportsQueryInput = z.infer<typeof adminReportsQuerySchema>;
+export type AdminAuditQueryInput = z.infer<typeof adminAuditQuerySchema>;
 export type AuthResponse = z.infer<typeof authResponseSchema>;
 export type ListingFilters = z.input<typeof listingQuerySchema>;
 export type ListingSort = NonNullable<z.input<typeof listingQuerySchema>['sort']>;

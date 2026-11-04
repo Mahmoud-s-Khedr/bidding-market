@@ -148,6 +148,7 @@ listings Listing[]
 bids Bid[]
 bidRevisions BidRevision[] @relation("BidRevisionAuthor")
 sentMessages Message[]
+deletedMessages Message[] @relation("MessageDeleter")
 submittedDeliverables Deliverable[] @relation("DeliverableSubmitter")
 participants ConversationParticipant[]
 buyerAgreements Agreement[] @relation("Buyer")
@@ -343,12 +344,16 @@ conversationId String
 conversation Conversation @relation(fields:[conversationId],references:[id],onDelete:Cascade)
 senderId String
 sender User @relation(fields:[senderId],references:[id],onDelete:Restrict)
+deletedAt DateTime?
+deletedById String?
+deletedBy User? @relation("MessageDeleter",fields:[deletedById],references:[id],onDelete:SetNull)
 type MessageType
 body String?
 voiceDurationSec Int?
 attachments MessageAttachment[]
 createdAt DateTime @default(now())
 @@index([conversationId,createdAt])
+@@index([deletedAt])
 }
 model MessageAttachment {
 id String @id @default(cuid())
